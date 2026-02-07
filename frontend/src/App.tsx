@@ -12,6 +12,7 @@ import StaffPage from "./components/staff/StaffPage";
 import PlatformDashboard from "./components/platform/PlatformDashboard";
 import ClientsPage from "./components/clients/ClientsPage";
 import MembershipTypesPage from "./components/memberships/MembershipTypesPage";
+import MembershipTypeDetail from "./components/memberships/MembershipTypeDetail";
 import SignupPage from "./components/signup/SignupPage";
 import PaymentsPage from "./components/payments/PaymentsPage";
 import ReportsPage from "./components/reports/ReportsPage";
@@ -39,6 +40,7 @@ function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/memberships" element={<MembershipTypesPage />} />
+          <Route path="/memberships/:mtId" element={<MembershipTypeDetail />} />
           <Route path="/bonuses" element={<BonusesPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />

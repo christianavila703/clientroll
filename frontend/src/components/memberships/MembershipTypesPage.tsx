@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 
 interface MembershipType {
@@ -24,6 +24,7 @@ interface TermOption {
 
 export default function MembershipTypesPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [types, setTypes] = useState<MembershipType[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(searchParams.get("new") === "1");
@@ -129,7 +130,7 @@ export default function MembershipTypesPage() {
             </thead>
             <tbody>
               {filtered.map((mt) => (
-                <tr key={mt.id} className="cursor-pointer">
+                <tr key={mt.id} className="cursor-pointer" onClick={() => navigate(`/memberships/${mt.id}`)}>
                   <td>
                     <p className="font-medium text-gray-900">{mt.title}</p>
                     <p className="text-[11px] text-gray-400 font-mono mt-0.5">/{mt.slug}</p>
