@@ -131,7 +131,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	termsHandler := handlers.NewTermsHandler(termsRepo)
 	clientHandler := handlers.NewClientHandler(clientRepo)
 	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo)
-	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, cfg.AppURL)
+	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
+	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
 	passwordResetHandler := handlers.NewPasswordResetHandler(userRepo, db, emailSvc, cfg.AppURL)
 	paymentHandler := handlers.NewPaymentHandler(paymentRepo)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
@@ -162,6 +163,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Use(rateLimiter.Limit)
 			registrationHandler.RegisterPublicRoutes(r)
 			passwordResetHandler.RegisterRoutes(r)
+			emailVerifier.RegisterRoutes(r)
 		})
 
 		// Authenticated routes

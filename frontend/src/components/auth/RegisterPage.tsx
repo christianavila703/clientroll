@@ -1,10 +1,9 @@
 import { useState, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ApiError } from "../../api/client";
 
 export default function RegisterPage() {
-  const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | "verify">(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -44,11 +43,10 @@ export default function RegisterPage() {
       const data = await res.json();
       if (!res.ok) throw new ApiError(data.error || "Registration failed", res.status);
 
-      // Auto-login
+      // Store tokens but show verify screen
       localStorage.setItem("access_token", data.tokens.access_token);
       localStorage.setItem("refresh_token", data.tokens.refresh_token);
-      navigate("/dashboard");
-      window.location.reload();
+      setStep("verify");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Registration failed");
     } finally {
@@ -74,6 +72,21 @@ export default function RegisterPage() {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          {step === "verify" ? (
+            <div className="text-center py-4">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50">
+                <svg className="h-6 w-6 text-indigo-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-1">Check your email</h2>
+              <p className="text-[13px] text-gray-500 mb-1">We've sent a verification link to</p>
+              <p className="text-[13px] font-medium text-gray-900 mb-4">{admin.email}</p>
+              <p className="text-[12px] text-gray-400">Click the link in the email to verify your account and get started.</p>
+              <div className="mt-6">
+                <Link to="/login" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-medium">Go to sign in</Link>
+              </div>
+            </div>
+          ) : (
+          <>
           {error && (
             <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>
           )}
@@ -175,11 +188,15 @@ export default function RegisterPage() {
               </div>
             )}
           </form>
+          </>
+          )}
         </div>
 
+        {step !== "verify" && (
         <p className="mt-4 text-center text-[13px] text-gray-500">
           Already have an account? <Link to="/login" className="text-indigo-600 hover:text-indigo-700 font-medium">Sign in</Link>
         </p>
+        )}
       </div>
     </div>
   );

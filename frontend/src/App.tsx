@@ -5,6 +5,7 @@ import LoginPage from "./components/auth/LoginPage";
 import RegisterPage from "./components/auth/RegisterPage";
 import ForgotPasswordPage from "./components/auth/ForgotPasswordPage";
 import ResetPasswordPage from "./components/auth/ResetPasswordPage";
+import VerifyEmailPage from "./components/auth/VerifyEmailPage";
 import DashboardPage from "./components/dashboard/DashboardPage";
 import SettingsPage from "./components/settings/SettingsPage";
 import StaffPage from "./components/staff/StaffPage";
@@ -25,6 +26,7 @@ function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
 
         {/* Public membership signup */}
         <Route path="/join/:tenantSlug" element={<SignupPage />} />

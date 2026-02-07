@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"regexp"
@@ -21,8 +20,9 @@ type TenantRegistrationHandler struct {
 	userRepo   *repository.UserRepo
 	jwtManager *auth.JWTManager
 	sessionMgr *auth.SessionManager
-	emailSvc   email.Provider
-	appURL     string
+	emailSvc      email.Provider
+	emailVerifier *EmailVerifyHandler
+	appURL        string
 }
 
 // NewTenantRegistrationHandler creates a new handler.
@@ -32,15 +32,17 @@ func NewTenantRegistrationHandler(
 	jm *auth.JWTManager,
 	sm *auth.SessionManager,
 	es email.Provider,
+	ev *EmailVerifyHandler,
 	appURL string,
 ) *TenantRegistrationHandler {
 	return &TenantRegistrationHandler{
-		tenantRepo: tr,
-		userRepo:   ur,
-		jwtManager: jm,
-		sessionMgr: sm,
-		emailSvc:   es,
-		appURL:     appURL,
+		tenantRepo:    tr,
+		userRepo:      ur,
+		jwtManager:    jm,
+		sessionMgr:    sm,
+		emailSvc:      es,
+		emailVerifier: ev,
+		appURL:        appURL,
 	}
 }
 
@@ -150,12 +152,10 @@ func (h *TenantRegistrationHandler) Register(w http.ResponseWriter, r *http.Requ
 	h.sessionMgr.CreateSession(r.Context(), tenant.ID, user.ID, user.Role, tokenID)
 	h.userRepo.RecordLoginSuccess(r.Context(), user.ID)
 
-	// Send welcome email (async, don't block response)
+	// Send verification email (async, don't block response)
 	go func() {
-		emailInput := email.WelcomeEmail(input.FirstName, input.CompanyName, h.appURL+"/dashboard")
-		emailInput.To = input.Email
-		if _, err := h.emailSvc.Send(context.Background(), emailInput); err != nil {
-			log.Printf("Error sending welcome email to %s: %v", input.Email, err)
+		if err := h.emailVerifier.SendVerification(tenant.ID, user.ID, input.Email, input.FirstName); err != nil {
+			log.Printf("Error sending verification email to %s: %v", input.Email, err)
 		}
 	}()
 
