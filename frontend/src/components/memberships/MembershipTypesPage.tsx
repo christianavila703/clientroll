@@ -106,7 +106,7 @@ export default function MembershipTypesPage() {
 
 function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState({
-    title: "", description: "", inclusions: "", total_value: 0, sort_order: 0,
+    title: "", description: "", inclusions: "", total_value: 0, sort_order: 0, top_image_url: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -124,33 +124,65 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   };
 
   return (
-    <div className="card mb-5 max-w-2xl px-5 py-4">
+    <div className="card mb-5 max-w-3xl px-5 py-4">
       <h3 className="text-base font-semibold text-gray-900 mb-4">New Membership Type</h3>
       {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Title *</label>
           <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="input-field" required />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="input-field" rows={3} />
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
+          <p className="text-[11px] text-gray-400 mb-1.5">Marketing copy that appears on the public signup page</p>
+          <textarea
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-shadow resize-y"
+            rows={5}
+            placeholder="Describe the benefits and value of this membership..."
+          />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Inclusions</label>
-          <textarea value={form.inclusions} onChange={(e) => setForm({ ...form, inclusions: e.target.value })} className="input-field" rows={3} placeholder="What's included in this membership..." />
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Inclusions</label>
+          <p className="text-[11px] text-gray-400 mb-1.5">List what's included — shown to clients during signup</p>
+          <textarea
+            value={form.inclusions}
+            onChange={(e) => setForm({ ...form, inclusions: e.target.value })}
+            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-shadow resize-y"
+            rows={5}
+            placeholder={"• Unlimited access to all classes\n• Personal training session monthly\n• Nutrition consultation\n• Access to member app"}
+          />
+        </div>
+        <div>
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Hero Image</label>
+          <p className="text-[11px] text-gray-400 mb-1.5">Banner image displayed at the top of the signup page</p>
+          <div className="flex items-center gap-3">
+            <input
+              type="url"
+              value={form.top_image_url}
+              onChange={(e) => setForm({ ...form, top_image_url: e.target.value })}
+              className="input-field flex-1"
+              placeholder="https://example.com/image.jpg"
+            />
+            {form.top_image_url && (
+              <img src={form.top_image_url} alt="Preview" className="h-10 w-16 rounded object-cover border border-gray-200" />
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Total Value ($)</label>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Total Value ($)</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Displayed as the membership's total worth</p>
             <input type="number" value={form.total_value} onChange={(e) => setForm({ ...form, total_value: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sort Order</label>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Lower numbers appear first</p>
             <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="input-field" min="0" />
           </div>
         </div>
-        <div className="flex gap-3 justify-end">
+        <div className="flex gap-3 justify-end pt-2 border-t border-gray-100">
           <button type="button" onClick={onCreated} className="btn-secondary">Cancel</button>
           <button type="submit" disabled={saving} className="btn-primary">{saving ? "Creating..." : "Create"}</button>
         </div>
