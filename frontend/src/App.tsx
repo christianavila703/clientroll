@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./store/AuthContext";
 import AppShell from "./components/layout/AppShell";
 import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
 import DashboardPage from "./components/dashboard/DashboardPage";
 import SettingsPage from "./components/settings/SettingsPage";
 import StaffPage from "./components/staff/StaffPage";
@@ -19,6 +20,7 @@ function App() {
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
         {/* Public membership signup */}
         <Route path="/join/:tenantSlug" element={<SignupPage />} />

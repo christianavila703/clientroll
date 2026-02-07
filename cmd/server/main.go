@@ -127,6 +127,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	termsHandler := handlers.NewTermsHandler(termsRepo)
 	clientHandler := handlers.NewClientHandler(clientRepo)
 	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo)
+	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr)
 	paymentHandler := handlers.NewPaymentHandler(paymentRepo)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
@@ -150,6 +151,12 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 		// Public signup flow (no auth required)
 		signupHandler.RegisterPublicRoutes(r)
+
+		// Public tenant registration (no auth required, rate limited)
+		r.Group(func(r chi.Router) {
+			r.Use(rateLimiter.Limit)
+			registrationHandler.RegisterPublicRoutes(r)
+		})
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext";
 import { ApiError } from "../../api/client";
 
@@ -64,7 +64,11 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="mt-4 text-center">
+        <p className="mt-4 text-center text-[13px] text-gray-500">
+          Don't have an account? <Link to="/register" className="text-indigo-600 hover:text-indigo-700 font-medium">Create one</Link>
+        </p>
+
+        <div className="mt-2 text-center">
           <button onClick={() => setIsPlatform(!isPlatform)} className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">
             {isPlatform ? "← Tenant login" : "Platform admin →"}
           </button>
