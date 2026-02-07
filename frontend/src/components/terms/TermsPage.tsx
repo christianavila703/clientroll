@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../api/client";
+import RichTextEditor from "../common/RichTextEditor";
 
 interface Terms {
   id: string;
@@ -167,13 +168,10 @@ function TermsForm({ initial, onSaved, onCancel }: {
         <div>
           <label className="block text-[13px] font-medium text-gray-700 mb-1">Content *</label>
           <p className="text-[11px] text-gray-400 mb-1.5">Full terms and conditions text. Clients will be shown this during signup.</p>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y font-mono"
-            rows={12}
+          <RichTextEditor
+            content={content}
+            onChange={setContent}
             placeholder="Enter your terms and conditions here..."
-            required
           />
         </div>
         {initial && (
