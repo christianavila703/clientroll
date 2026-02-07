@@ -22,7 +22,7 @@ export default function ClientProfilePage() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [payments, setPayments] = useState<{ amount: number; status: string; due_date: string; paid_date?: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"summary" | "memberships" | "payments" | "details">("summary");
+  const [tab, setTab] = useState<"summary" | "memberships" | "billing" | "payments" | "details">("summary");
 
   useEffect(() => {
     if (!clientId) return;
@@ -59,6 +59,7 @@ export default function ClientProfilePage() {
   const tabs = [
     { key: "summary" as const, label: "Summary" },
     { key: "memberships" as const, label: "Memberships" },
+    { key: "billing" as const, label: "Billing Schedule" },
     { key: "payments" as const, label: "Payments" },
     { key: "details" as const, label: "Details" },
   ];
@@ -213,6 +214,10 @@ export default function ClientProfilePage() {
             </div>
           )}
 
+          {tab === "billing" && (
+            <BillingScheduleTab memberships={activeMemberships} fmtDate={fmtDate} />
+          )}
+
           {tab === "payments" && (
             <div className="card overflow-hidden">
               <div className="card-header"><h3>All Payments</h3></div>
@@ -328,6 +333,122 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-4">
       <span className="text-[13px] text-gray-500 flex-shrink-0">{label}</span>
       <span className="text-[13px] text-gray-900 text-right">{value}</span>
+    </div>
+  );
+}
+
+function BillingScheduleTab({ memberships, fmtDate }: { memberships: Membership[]; fmtDate: (d: string) => string }) {
+  // Generate upcoming payment dates for active memberships
+  const upcoming: { date: Date; dateStr: string; membership: Membership }[] = [];
+
+  memberships.forEach(m => {
+    if (!m.payment_amount || !m.payment_frequency) return;
+    const end = new Date(m.min_term_end_date);
+    const now = new Date();
+    let next = new Date(now);
+
+    // Find next payment date
+    if (m.payment_frequency === "weekly") {
+      next.setDate(next.getDate() + (7 - next.getDay()) % 7 || 7);
+    } else if (m.payment_frequency === "fortnightly") {
+      next.setDate(next.getDate() + 14 - (next.getDate() % 14));
+    } else {
+      next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+
+    // Generate next 6 payments
+    for (let i = 0; i < 6 && next <= end; i++) {
+      upcoming.push({ date: new Date(next), dateStr: next.toISOString(), membership: m });
+      if (m.payment_frequency === "weekly") next.setDate(next.getDate() + 7);
+      else if (m.payment_frequency === "fortnightly") next.setDate(next.getDate() + 14);
+      else next.setMonth(next.getMonth() + 1);
+    }
+  });
+
+  upcoming.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Group by month
+  const grouped: Record<string, typeof upcoming> = {};
+  upcoming.forEach(u => {
+    const key = u.date.toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(u);
+  });
+
+  if (memberships.length === 0) {
+    return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">No active memberships to schedule</div>;
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <div className="lg:col-span-2 space-y-5">
+        {/* Upcoming payments */}
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900 mb-3">Billed automatically</h2>
+          {Object.entries(grouped).map(([month, items]) => (
+            <div key={month} className="card overflow-hidden mb-4">
+              <div className="bg-gray-50 px-5 py-2.5 border-b border-gray-200">
+                <p className="text-[13px] font-medium text-gray-700">{month}</p>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {items.map((item, i) => (
+                  <div key={i} className="px-5 py-3">
+                    <p className="text-[12px] text-gray-400 mb-1">
+                      MEM-{item.membership.id.slice(0, 4).toUpperCase()}
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-gray-900">Membership Payment</p>
+                        <p className="text-[12px] text-gray-500 capitalize">{item.membership.payment_frequency}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[15px] font-semibold text-gray-900 tabular-nums">${item.membership.payment_amount?.toFixed(2)}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50 text-[12px] text-gray-400">
+                      <span>Due {item.date.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}</span>
+                      <span>Total ${item.membership.payment_amount?.toFixed(2)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {upcoming.length === 0 && (
+            <div className="card px-5 py-8 text-center text-[13px] text-gray-400">No upcoming payments scheduled</div>
+          )}
+        </div>
+      </div>
+
+      {/* Sidebar info */}
+      <div className="space-y-5">
+        <div className="card">
+          <div className="px-5 py-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Billing schedule</h3>
+            <p className="text-[12px] text-gray-500 leading-relaxed">
+              View upcoming scheduled payments for this client. Payments are automatically debited on the agreed frequency.
+            </p>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Payment method</h3>
+          </div>
+          <div className="px-5 py-3">
+            <p className="text-[13px] text-gray-500 mb-2">Client pays with</p>
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-10 items-center justify-center rounded bg-gray-100">
+                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+              </div>
+              <div>
+                <p className="text-[13px] text-gray-700">Direct Debit</p>
+                <p className="text-[11px] text-gray-400">Bank account on file</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
