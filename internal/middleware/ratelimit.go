@@ -54,8 +54,18 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	})
 }
 
-// LimitAuth creates a stricter rate limiter for auth endpoints.
-// 10 attempts per 15 minutes per IP.
+// NewAuthRateLimiter creates a general rate limiter for public auth endpoints.
+// 120 requests per 15 minutes per IP — generous for signup/reset flows.
 func NewAuthRateLimiter(redis *database.Redis) *RateLimiter {
-	return NewRateLimiter(redis, 10, 15*time.Minute)
+	return NewRateLimiter(redis, 120, 15*time.Minute)
+}
+
+// NewLoginRateLimiter creates a stricter rate limiter specifically for login.
+// 10 attempts per 15 minutes per IP — brute force protection.
+func NewLoginRateLimiter(redis *database.Redis) *RateLimiter {
+	return &RateLimiter{
+		redis:       redis,
+		maxAttempts: 10,
+		window:      15 * time.Minute,
+	}
 }

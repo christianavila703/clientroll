@@ -102,6 +102,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	authMW := middleware.NewAuthMiddleware(jwtMgr, sessionMgr)
 	tenantMW := middleware.NewTenantMiddleware(db)
 	rateLimiter := middleware.NewAuthRateLimiter(rdb)
+	loginLimiter := middleware.NewLoginRateLimiter(rdb)
 	auditMW := middleware.NewAuditMiddleware()
 
 	// Repositories
@@ -149,9 +150,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 	// Public routes
 	r.Route("/api", func(r chi.Router) {
-		// Auth (rate limited)
+		// Login (strict rate limit — 10/15min for brute force protection)
 		r.Group(func(r chi.Router) {
-			r.Use(rateLimiter.Limit)
+			r.Use(loginLimiter.Limit)
 			authHandler.RegisterRoutes(r)
 		})
 
@@ -161,7 +162,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		// Public slug check (no rate limit — read-only)
 		r.Get("/register/check-slug/{slug}", registrationHandler.CheckSlug)
 
-		// Public registration + password reset + email verify (rate limited)
+		// Registration + password reset + email verify (generous limit — 120/15min)
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimiter.Limit)
 			r.Post("/register", registrationHandler.Register)
