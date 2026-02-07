@@ -153,6 +153,8 @@ export const api = {
     request(`/tenant/membership-types/${id}/duplicate`, { method: "POST" }),
   createTermOption: (mtId: string, data: unknown) =>
     request(`/tenant/membership-types/${mtId}/term-options`, { method: "POST", body: data }),
+  updateTermOption: (mtId: string, toId: string, data: unknown) =>
+    request(`/tenant/membership-types/${mtId}/term-options/${toId}`, { method: "PUT", body: data }),
   deleteTermOption: (id: string) =>
     request(`/tenant/term-options/${id}`, { method: "DELETE" }),
 

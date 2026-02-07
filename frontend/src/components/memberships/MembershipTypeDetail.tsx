@@ -158,26 +158,114 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
       {(!mt.term_options || mt.term_options.length === 0) ? (
         <div className="card px-5 py-8 text-center text-[13px] text-gray-400">No term options yet</div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="data-table">
-            <thead><tr><th>Duration</th><th>Total</th><th>Weekly</th><th>Fortnightly</th><th>Monthly</th><th>Upfront</th><th>Bonuses</th><th className="w-10"></th></tr></thead>
-            <tbody>
-              {mt.term_options.map((to) => (
-                <tr key={to.id}>
-                  <td className="font-medium text-gray-900">{to.duration_months} months</td>
-                  <td className="tabular-nums">${to.fee_total.toLocaleString()}</td>
-                  <td className="text-gray-500 tabular-nums">{to.fee_weekly ? `$${to.fee_weekly}` : "—"}</td>
-                  <td className="text-gray-500 tabular-nums">{to.fee_fortnightly ? `$${to.fee_fortnightly}` : "—"}</td>
-                  <td className="text-gray-500 tabular-nums">{to.fee_monthly ? `$${to.fee_monthly}` : "—"}</td>
-                  <td>{to.allow_upfront ? <span className="badge badge-green">Yes</span> : <span className="badge badge-gray">No</span>}</td>
-                  <td className="text-gray-500">{to.bonuses?.length || 0}</td>
-                  <td><button onClick={() => handleDelete(to.id)} className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50"><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {mt.term_options.map((to) => (
+            <TermOptionCard key={to.id} termOption={to} mtId={mt.id} onReload={onReload} onDelete={() => handleDelete(to.id)} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// === Editable Term Option Card ===
+function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
+  termOption: TermOption; mtId: string; onReload: () => void; onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    duration_months: to.duration_months,
+    fee_total: to.fee_total,
+    fee_weekly: to.fee_weekly ?? "",
+    fee_fortnightly: to.fee_fortnightly ?? "",
+    fee_monthly: to.fee_monthly ?? "",
+    allow_upfront: to.allow_upfront,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.updateTermOption(mtId, to.id, {
+        ...form,
+        fee_weekly: form.fee_weekly !== "" ? Number(form.fee_weekly) : null,
+        fee_fortnightly: form.fee_fortnightly !== "" ? Number(form.fee_fortnightly) : null,
+        fee_monthly: form.fee_monthly !== "" ? Number(form.fee_monthly) : null,
+      });
+      setEditing(false);
+      onReload();
+    } catch { /* handle */ }
+    finally { setSaving(false); }
+  };
+
+  if (!editing) {
+    return (
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-3">
+            <span className="text-[14px] font-semibold text-gray-900">{to.duration_months} months</span>
+            <span className="text-[13px] font-semibold text-gray-900 tabular-nums">${to.fee_total.toLocaleString()}</span>
+            {to.allow_upfront && <span className="badge badge-green">Upfront OK</span>}
+            <span className="text-[12px] text-gray-400">{to.bonuses?.length || 0} bonuses</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setEditing(true)} className="btn-ghost text-[12px]">Edit</button>
+            <button onClick={onDelete} className="rounded p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+            </button>
+          </div>
+        </div>
+        <div className="px-5 py-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[13px]">
+            <div><span className="text-gray-400 block mb-0.5">Weekly</span><span className="tabular-nums text-gray-900">{to.fee_weekly ? `$${to.fee_weekly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Fortnightly</span><span className="tabular-nums text-gray-900">{to.fee_fortnightly ? `$${to.fee_fortnightly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `$${to.fee_monthly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Upfront</span><span>{to.allow_upfront ? "Yes" : "No"}</span></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card overflow-hidden border-indigo-200">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-indigo-100 bg-indigo-50/50">
+        <span className="text-[13px] font-semibold text-indigo-700">Editing — {to.duration_months} months</span>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setEditing(false)} className="btn-secondary text-[12px]">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="btn-primary text-[12px]">{saving ? "Saving..." : "Save"}</button>
+        </div>
+      </div>
+      <div className="px-5 py-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Duration (months)</label>
+            <input type="number" value={form.duration_months} onChange={(e) => setForm({ ...form, duration_months: Number(e.target.value) })} className="input-field" min="1" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ($)</label>
+            <input type="number" value={form.fee_total} onChange={(e) => setForm({ ...form, fee_total: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ($)</label>
+            <input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Fortnightly ($)</label>
+            <input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ($)</label>
+            <input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
+          </div>
+          <div className="flex items-end pb-1">
+            <label className="flex items-center gap-2 text-[12px] text-gray-700">
+              <input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
+              Allow upfront
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

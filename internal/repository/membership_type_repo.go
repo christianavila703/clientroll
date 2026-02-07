@@ -129,6 +129,26 @@ func (r *MembershipTypeRepo) CreateTermOption(ctx context.Context, tenantID, mem
 	return &to, nil
 }
 
+// UpdateTermOption updates a term option.
+func (r *MembershipTypeRepo) UpdateTermOption(ctx context.Context, id, tenantID uuid.UUID, durationMonths int, feeTotal float64, feeWeekly, feeFortnightly, feeMonthly *float64, allowUpfront bool) (*models.TermOption, error) {
+	query := `
+		UPDATE membership_term_options SET duration_months=$3, fee_total=$4,
+		    fee_weekly=$5, fee_fortnightly=$6, fee_monthly=$7, allow_upfront=$8, updated_at=NOW()
+		WHERE id=$1 AND tenant_id=$2
+		RETURNING id, tenant_id, membership_type_id, duration_months,
+		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, allow_upfront`
+
+	var to models.TermOption
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, durationMonths,
+		feeTotal, feeWeekly, feeFortnightly, feeMonthly, allowUpfront).Scan(
+		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.AllowUpfront)
+	if err != nil {
+		return nil, fmt.Errorf("updating term option: %w", err)
+	}
+	return &to, nil
+}
+
 // DeleteTermOption removes a term option.
 func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID uuid.UUID) error {
 	_, err := r.db.Pool.Exec(ctx,

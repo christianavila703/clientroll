@@ -29,6 +29,7 @@ func (h *MembershipTypeHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/membership-types/{mtID}", h.Get)
 	r.Post("/membership-types/{mtID}/duplicate", h.Duplicate)
 	r.Post("/membership-types/{mtID}/term-options", h.CreateTermOption)
+	r.Put("/membership-types/{mtID}/term-options/{toID}", h.UpdateTermOption)
 	r.Delete("/term-options/{toID}", h.DeleteTermOption)
 	r.Post("/membership-types/{mtID}/terms/{termsID}", h.AttachTerms)
 	r.Delete("/membership-types/{mtID}/terms/{termsID}", h.DetachTerms)
@@ -138,6 +139,36 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusCreated, to)
+}
+
+// UpdateTermOption updates a term option.
+func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	var input struct {
+		DurationMonths int      `json:"duration_months"`
+		FeeTotal       float64  `json:"fee_total"`
+		FeeWeekly      *float64 `json:"fee_weekly"`
+		FeeFortnightly *float64 `json:"fee_fortnightly"`
+		FeeMonthly     *float64 `json:"fee_monthly"`
+		AllowUpfront   bool     `json:"allow_upfront"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
+		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.AllowUpfront)
+	if err != nil {
+		log.Printf("Error updating term option: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update term option")
+		return
+	}
+	writeJSON(w, http.StatusOK, to)
 }
 
 // DeleteTermOption removes a term option.
