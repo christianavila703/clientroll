@@ -22,7 +22,7 @@ export default function ClientProfilePage() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [payments, setPayments] = useState<{ amount: number; status: string; due_date: string; paid_date?: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"summary" | "payments" | "details">("summary");
+  const [tab, setTab] = useState<"summary" | "memberships" | "payments" | "details">("summary");
 
   useEffect(() => {
     if (!clientId) return;
@@ -58,6 +58,7 @@ export default function ClientProfilePage() {
 
   const tabs = [
     { key: "summary" as const, label: "Summary" },
+    { key: "memberships" as const, label: "Memberships" },
     { key: "payments" as const, label: "Payments" },
     { key: "details" as const, label: "Details" },
   ];
@@ -151,6 +152,64 @@ export default function ClientProfilePage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {tab === "memberships" && (
+            <div className="space-y-4">
+              {memberships.length === 0 ? (
+                <div className="card px-5 py-12 text-center text-[13px] text-gray-400">No memberships yet</div>
+              ) : (
+                memberships.map(m => {
+                  const daysLeft = Math.ceil((new Date(m.min_term_end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  return (
+                    <div key={m.id} className="card overflow-hidden">
+                      {/* Top stripe */}
+                      <div className={`h-1 ${m.status === "active" ? "bg-emerald-500" : m.status === "expired" ? "bg-gray-300" : "bg-red-400"}`} />
+
+                      <div className="px-5 py-4">
+                        {/* Header: ID + dates */}
+                        <p className="text-[12px] text-gray-400 mb-2">
+                          MEM-{m.id.slice(0, 4).toUpperCase()} · Started {fmtShort(m.start_date)}
+                        </p>
+
+                        {/* Main row: name + price */}
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="text-[15px] font-semibold text-gray-900">Membership</p>
+                            <p className="text-[13px] text-gray-500 mt-0.5">
+                              {m.status === "active" && daysLeft > 0
+                                ? `${daysLeft} days remaining`
+                                : m.status === "expired"
+                                ? "Expired"
+                                : `Ends ${fmtShort(m.min_term_end_date)}`
+                              }
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[18px] font-semibold text-gray-900 tabular-nums">
+                              ${m.payment_amount?.toFixed(2) || "0.00"}
+                            </p>
+                            <p className="text-[13px] text-gray-400 capitalize">
+                              {m.payment_frequency || "—"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Meta row */}
+                        <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100">
+                          <span className={`badge ${m.status === "active" ? "badge-green" : m.status === "expired" ? "badge-gray" : "badge-red"}`}>
+                            {m.status.charAt(0).toUpperCase() + m.status.slice(1)}
+                          </span>
+                          <span className="text-[12px] text-gray-400">
+                            {fmtShort(m.start_date)} — {fmtShort(m.min_term_end_date)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
 
