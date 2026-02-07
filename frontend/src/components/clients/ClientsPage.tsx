@@ -240,6 +240,9 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
     postcode: editing?.postcode || "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
+    business_structure: "", gst_registered: "", tax_number: "", company_number: "",
+    company_phone: "", company_website: "",
+    company_address: "", company_suburb: "", company_state: "", company_postcode: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -326,8 +329,27 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         )}
 
         {tab === "company" && (
-          <div className="text-center py-8 text-[13px] text-gray-400">
-            Company details available when editing an existing client.
+          <div className="space-y-5">
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Business structure" value={form.business_structure || ""} onChange={(v) => setForm({ ...form, business_structure: v })} placeholder="e.g. Sole Trader" />
+                <F label="GST registered" value={form.gst_registered || ""} onChange={(v) => setForm({ ...form, gst_registered: v })} placeholder="Yes / No" />
+                <F label="Tax number" value={form.tax_number || ""} onChange={(v) => setForm({ ...form, tax_number: v })} placeholder="e.g. 123 456 789" />
+                <F label="Company number" value={form.company_number || ""} onChange={(v) => setForm({ ...form, company_number: v })} />
+                <F label="Phone" value={form.company_phone || ""} onChange={(v) => setForm({ ...form, company_phone: v })} type="tel" />
+                <F label="Website" value={form.company_website || ""} onChange={(v) => setForm({ ...form, company_website: v })} placeholder="https://" colSpan />
+              </div>
+            </div>
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company address</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Street address" value={form.company_address || ""} onChange={(v) => setForm({ ...form, company_address: v })} colSpan />
+                <F label="Suburb" value={form.company_suburb || ""} onChange={(v) => setForm({ ...form, company_suburb: v })} />
+                <F label="State" value={form.company_state || ""} onChange={(v) => setForm({ ...form, company_state: v })} />
+                <F label="Postcode" value={form.company_postcode || ""} onChange={(v) => setForm({ ...form, company_postcode: v })} />
+              </div>
+            </div>
           </div>
         )}
       </form>
