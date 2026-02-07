@@ -117,8 +117,8 @@ export default function ClientsPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {clients.map((c) => (
-                  <tr key={c.id} className="hover:bg-gray-50/50 transition-colors cursor-pointer">
-                    <td className="px-4 py-3"><input type="checkbox" className="rounded border-gray-300" /></td>
+                  <tr key={c.id} className="hover:bg-gray-50/50 transition-colors cursor-pointer" onClick={() => { setEditingClient(c); setShowForm(true); }}>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}><input type="checkbox" className="rounded border-gray-300" /></td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-900">{c.name}</p>
                     </td>
@@ -132,7 +132,7 @@ export default function ClientsPage() {
                     <td className="px-4 py-3 text-gray-400 text-xs">
                       {new Date(c.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <ClientRowMenu clientId={c.id} clientName={c.name} onEdit={() => { setEditingClient(c); setShowForm(true); }} />
                     </td>
                   </tr>
