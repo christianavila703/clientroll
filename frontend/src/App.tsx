@@ -11,6 +11,7 @@ import SettingsPage from "./components/settings/SettingsPage";
 import StaffPage from "./components/staff/StaffPage";
 import PlatformDashboard from "./components/platform/PlatformDashboard";
 import ClientsPage from "./components/clients/ClientsPage";
+import ClientProfilePage from "./components/clients/ClientProfilePage";
 import MembershipTypesPage from "./components/memberships/MembershipTypesPage";
 import MembershipTypeDetail from "./components/memberships/MembershipTypeDetail";
 import ActiveMembershipsPage from "./components/memberships/ActiveMembershipsPage";
@@ -41,6 +42,7 @@ function App() {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/clients/:clientId" element={<ClientProfilePage />} />
           <Route path="/active-memberships" element={<ActiveMembershipsPage />} />
           <Route path="/memberships" element={<MembershipTypesPage />} />
           <Route path="/memberships/:mtId" element={<MembershipTypeDetail />} />
