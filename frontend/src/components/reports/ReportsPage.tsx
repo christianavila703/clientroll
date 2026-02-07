@@ -65,35 +65,44 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-        <p className="mt-1 text-sm text-gray-500">Financial analytics and insights</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Reports</h1>
+          <p className="page-subtitle">Financial analytics and insights</p>
+        </div>
       </div>
 
       {/* Revenue chart */}
-      <div className="card mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Revenue</h3>
-        {monthly.length > 0 ? (
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
-              <Tooltip formatter={(value: number) => [`$${value.toFixed(2)}`, "Revenue"]} />
-              <Bar dataKey="revenue" fill="#6366f1" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-64 items-center justify-center text-gray-400">
-            No revenue data yet
-          </div>
-        )}
+      <div className="card mb-5">
+        <div className="card-header">
+          <h3>Monthly Revenue</h3>
+        </div>
+        <div className="card-body">
+          {monthly.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={monthly} barSize={24}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}`} width={50} />
+                <Tooltip formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "Revenue"]} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgb(0 0 0 / 0.06)" }} />
+                <Bar dataKey="revenue" fill="#6366f1" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
+              No revenue data yet
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Membership breakdown */}
         <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Revenue by Membership Type</h3>
+          <div className="card-header">
+            <h3>Revenue by Membership Type</h3>
+          </div>
+          <div className="card-body">
           {breakdown.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={250}>
@@ -132,15 +141,19 @@ export default function ReportsPage() {
               </div>
             </>
           ) : (
-            <div className="flex h-64 items-center justify-center text-gray-400">
+            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
               No membership data yet
             </div>
           )}
+          </div>
         </div>
 
         {/* Payment status breakdown */}
         <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment Status</h3>
+          <div className="card-header">
+            <h3>Payment Status</h3>
+          </div>
+          <div className="card-body">
           {statusPieData.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={250}>
@@ -168,10 +181,11 @@ export default function ReportsPage() {
               </ResponsiveContainer>
             </>
           ) : (
-            <div className="flex h-64 items-center justify-center text-gray-400">
+            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
               No payment data yet
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
