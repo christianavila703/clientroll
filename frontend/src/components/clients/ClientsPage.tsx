@@ -23,18 +23,18 @@ export default function ClientsPage() {
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [statusTab, setStatusTab] = useState("All");
 
-  const loadClients = async (q = "") => {
+  const loadClients = async (q = "", status = statusTab) => {
     setLoading(true);
     try {
-      const data = (await api.listClients(q)) as { clients: Client[] };
+      const data = (await api.listClients(q, status)) as { clients: Client[] };
       setClients(data.clients || []);
     } catch { /* handle */ }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadClients(); }, []);
+  useEffect(() => { loadClients(search, statusTab); }, [statusTab]);
 
-  const handleSearch = () => { loadClients(search); };
+  const handleSearch = () => { loadClients(search, statusTab); };
 
   const statusTabs = ["All", "Active", "Inactive"];
 

@@ -25,14 +25,23 @@ const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
 	emergency_contact_phone, created_at, updated_at`
 
-// List returns all clients for a tenant with optional search.
-func (r *ClientRepo) List(ctx context.Context, tenantID uuid.UUID, search string) ([]models.Client, error) {
+// List returns all clients for a tenant with optional search and status filter.
+// status: "active" = has active membership, "inactive" = no active membership, "" = all
+func (r *ClientRepo) List(ctx context.Context, tenantID uuid.UUID, search, status string) ([]models.Client, error) {
 	query := `SELECT ` + clientFields + ` FROM clients WHERE tenant_id = $1`
 	args := []interface{}{tenantID}
+	argN := 2
 
 	if search != "" {
-		query += ` AND (name ILIKE $2 OR email ILIKE $2 OR phone ILIKE $2)`
+		query += fmt.Sprintf(` AND (name ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)`, argN, argN, argN)
 		args = append(args, "%"+search+"%")
+		argN++
+	}
+
+	if status == "active" {
+		query += ` AND EXISTS (SELECT 1 FROM memberships m WHERE m.client_id = clients.id AND m.tenant_id = clients.tenant_id AND m.status = 'active')`
+	} else if status == "inactive" {
+		query += ` AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.client_id = clients.id AND m.tenant_id = clients.tenant_id AND m.status = 'active')`
 	}
 
 	query += ` ORDER BY name`

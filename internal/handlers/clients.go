@@ -31,12 +31,13 @@ func (h *ClientHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/clients/{clientID}/memberships", h.GetMemberships)
 }
 
-// List returns all clients with optional search.
+// List returns all clients with optional search and status filter.
 func (h *ClientHandler) List(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	search := r.URL.Query().Get("search")
+	status := r.URL.Query().Get("status")
 
-	clients, err := h.clientRepo.List(r.Context(), tenantID, search)
+	clients, err := h.clientRepo.List(r.Context(), tenantID, search, status)
 	if err != nil {
 		log.Printf("Error listing clients: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to list clients")

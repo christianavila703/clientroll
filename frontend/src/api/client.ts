@@ -129,8 +129,13 @@ export const api = {
   getStaff: (id: string) => request(`/tenant/staff/${id}`),
 
   // Clients
-  listClients: (search?: string) =>
-    request(`/tenant/clients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  listClients: (search?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (status && status !== "All") params.set("status", status.toLowerCase());
+    const qs = params.toString();
+    return request(`/tenant/clients${qs ? `?${qs}` : ""}`);
+  },
   createClient: (data: unknown) =>
     request("/tenant/clients", { method: "POST", body: data }),
   getClient: (id: string) => request(`/tenant/clients/${id}`),
