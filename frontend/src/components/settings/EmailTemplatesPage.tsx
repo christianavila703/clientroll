@@ -163,6 +163,7 @@ export default function EmailTemplatesPage() {
 }
 
 function TemplateEditor({ template, onBack }: { template: Template; onBack: () => void }) {
+  const [name, setName] = useState(template.name);
   const [subject, setSubject] = useState(template.subject);
   const [body, setBody] = useState(template.body);
   const [saving, setSaving] = useState(false);
@@ -170,7 +171,6 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
 
   const handleSave = () => {
     setSaving(true);
-    // In future: POST to API to save custom template overrides per tenant
     setTimeout(() => {
       setSaving(false);
       setMessage("Template saved");
@@ -178,63 +178,117 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
     }, 500);
   };
 
+  const insertVariable = (v: string) => {
+    const tag = `{{${v}}}`;
+    navigator.clipboard.writeText(tag);
+    setMessage(`Copied ${tag}`);
+    setTimeout(() => setMessage(""), 1500);
+  };
+
   return (
     <div>
-      {/* Breadcrumb header */}
+      {/* Header — Ignition style: breadcrumb + actions */}
       <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2">
-          <button onClick={onBack} className="text-[13px] text-indigo-600 hover:text-indigo-700 font-medium">Email Templates</button>
-          <svg className="h-4 w-4 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-          <span className="text-[13px] font-medium text-gray-900">Editing "{template.name}"</span>
+        <div className="flex items-center gap-1.5 text-[15px]">
+          <button onClick={onBack} className="text-indigo-600 hover:text-indigo-700 font-semibold">Emails</button>
+          <span className="text-gray-400">›</span>
+          <span className="font-semibold text-gray-900">Editing "{template.name}"</span>
         </div>
         <div className="flex items-center gap-2">
-          {message && <span className="text-[12px] text-emerald-600">{message}</span>}
+          {message && <span className="text-[12px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{message}</span>}
           <button onClick={handleSave} disabled={saving} className="btn-primary">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
             {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
 
-      <div className="card max-w-4xl">
-        <div className="card-header">
-          <h3>Template details</h3>
+      {/* Main card — Ignition "Template details" style */}
+      <div className="card max-w-4xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-base font-semibold text-gray-900">Template details</h2>
         </div>
-        <div className="card-body space-y-4">
+
+        <div className="px-6 py-5 space-y-5">
+          {/* Template name */}
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Template name</label>
-            <input value={template.name} className="input-field bg-gray-50" readOnly />
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">
+              Template name <span className="text-red-500">*</span>
+            </label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="input-field max-w-md" />
           </div>
 
+          {/* Email subject */}
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Subject line</label>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} className="input-field" />
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">
+              Email subject <span className="text-red-500">*</span>
+            </label>
+            <div className="relative max-w-lg">
+              <input value={subject} onChange={(e) => setSubject(e.target.value)} className="input-field pr-28" />
+              {/* Inline placeholders dropdown for subject */}
+              <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                <PlaceholderDropdown variables={template.variables} onInsert={(v) => setSubject(subject + ` {{${v}}}`)} />
+              </div>
+            </div>
           </div>
 
+          {/* Rich text editor with Placeholders dropdown in toolbar */}
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Email body</label>
-            <RichTextEditor content={body} onChange={setBody} placeholder="Write your email content..." />
+            <div className="rounded-md border border-gray-300 overflow-hidden focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-shadow">
+              <RichTextEditor content={body} onChange={setBody} placeholder="Write your email content..." />
+            </div>
           </div>
 
-          {/* Variables */}
-          <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-2">Available variables</label>
+          {/* Variables reference */}
+          <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3">
+            <p className="text-[12px] font-medium text-gray-600 mb-2">Available placeholders</p>
             <div className="flex flex-wrap gap-1.5">
               {template.variables.map((v) => (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => navigator.clipboard.writeText(`{{${v}}}`)}
-                  className="rounded-md bg-indigo-50 border border-indigo-100 px-2 py-1 text-[11px] font-mono text-indigo-700 hover:bg-indigo-100 transition-colors"
+                  onClick={() => insertVariable(v)}
+                  className="rounded bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-mono text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors shadow-sm"
                   title={`Click to copy {{${v}}}`}
                 >
-                  {`{{${v}}}`}
+                  {v}
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-gray-400 mt-1.5">Click a variable to copy it, then paste into the subject or body.</p>
+            <p className="text-[11px] text-gray-400 mt-2">Click to copy a placeholder, then paste it into the subject or body.</p>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PlaceholderDropdown({ variables, onInsert }: { variables: string[]; onInsert: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-500 hover:bg-gray-50 transition-colors"
+      >
+        Placeholders
+        <svg className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50 max-h-48 overflow-y-auto">
+          {variables.map((v) => (
+            <button
+              key={v}
+              onClick={() => { onInsert(v); setOpen(false); }}
+              className="flex w-full px-3 py-1.5 text-left text-[12px] font-mono text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+            >
+              {`{{${v}}}`}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
