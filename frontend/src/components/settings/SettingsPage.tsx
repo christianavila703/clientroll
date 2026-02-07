@@ -127,14 +127,104 @@ function AgreementSettings() {
 }
 
 function TenantSettings() {
+  const [data, setData] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    api.getTenantSettings().then((res) => {
+      const t = res as Record<string, string>;
+      setData({
+        timezone: t.timezone || "Australia/Brisbane",
+        primary_colour: t.primary_colour || "#6366f1",
+        default_thankyou_heading: t.default_thankyou_heading || "",
+        default_thankyou_body: t.default_thankyou_body || "",
+        default_thankyou_image_url: t.default_thankyou_image_url || "",
+        default_thankyou_redirect_url: t.default_thankyou_redirect_url || "",
+      });
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true); setMessage("");
+    try {
+      await api.updateTenantSettings(data);
+      setMessage("Settings saved successfully");
+    } catch { setMessage("Failed to save"); }
+    finally { setSaving(false); }
+  };
+
+  const timezones = [
+    "Australia/Brisbane", "Australia/Sydney", "Australia/Melbourne", "Australia/Perth",
+    "Australia/Adelaide", "Australia/Darwin", "Australia/Hobart",
+    "Pacific/Auckland", "America/New_York", "America/Chicago", "America/Los_Angeles",
+    "Europe/London", "Europe/Berlin", "Asia/Singapore", "Asia/Tokyo",
+  ];
+
   return (
-    <div className="card max-w-2xl px-5 py-4">
-      <h2 className="text-base font-semibold text-gray-900 mb-4">
-        Organisation Settings
-      </h2>
-      <p className="text-sm text-gray-500">
-        Timezone, branding, and thank you page defaults. Coming soon.
-      </p>
+    <div className="max-w-2xl space-y-5">
+      {message && (
+        <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("success") ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-600"}`}>{message}</div>
+      )}
+
+      {/* General */}
+      <div className="card">
+        <div className="card-header"><h3>General</h3></div>
+        <div className="card-body space-y-4">
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Timezone</label>
+            <select value={data.timezone || ""} onChange={(e) => setData({ ...data, timezone: e.target.value })} className="input-field max-w-xs">
+              {timezones.map((tz) => <option key={tz} value={tz}>{tz.replace("_", " ")}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Brand colour</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Used on public signup pages and emails</p>
+            <div className="flex items-center gap-3">
+              <input type="color" value={data.primary_colour || "#6366f1"} onChange={(e) => setData({ ...data, primary_colour: e.target.value })} className="h-9 w-9 rounded border border-gray-300 cursor-pointer p-0.5" />
+              <input type="text" value={data.primary_colour || ""} onChange={(e) => setData({ ...data, primary_colour: e.target.value })} className="input-field max-w-[120px] font-mono text-[13px]" placeholder="#6366f1" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Thank you page defaults */}
+      <div className="card">
+        <div className="card-header"><h3>Default Thank You Page</h3></div>
+        <div className="card-body space-y-4">
+          <p className="text-[11px] text-gray-400 -mt-1">Shown after a client completes a membership signup. Can be overridden per membership type.</p>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Heading</label>
+            <input value={data.default_thankyou_heading || ""} onChange={(e) => setData({ ...data, default_thankyou_heading: e.target.value })} className="input-field" placeholder="Thank You!" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Body text</label>
+            <textarea
+              value={data.default_thankyou_body || ""}
+              onChange={(e) => setData({ ...data, default_thankyou_body: e.target.value })}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              rows={3}
+              placeholder="Your membership has been successfully created."
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Image URL</label>
+            <div className="flex items-center gap-3">
+              <input value={data.default_thankyou_image_url || ""} onChange={(e) => setData({ ...data, default_thankyou_image_url: e.target.value })} className="input-field flex-1" placeholder="https://example.com/thankyou.jpg" />
+              {data.default_thankyou_image_url && <img src={data.default_thankyou_image_url} alt="" className="h-10 w-16 rounded object-cover border border-gray-200" />}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Redirect URL</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Optional — auto-redirect after 5 seconds</p>
+            <input value={data.default_thankyou_redirect_url || ""} onChange={(e) => setData({ ...data, default_thankyou_redirect_url: e.target.value })} className="input-field" placeholder="https://yourwebsite.com" />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Saving..." : "Save Settings"}</button>
+      </div>
     </div>
   );
 }
