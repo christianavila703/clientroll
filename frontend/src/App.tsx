@@ -15,6 +15,7 @@ import MembershipTypesPage from "./components/memberships/MembershipTypesPage";
 import SignupPage from "./components/signup/SignupPage";
 import PaymentsPage from "./components/payments/PaymentsPage";
 import ReportsPage from "./components/reports/ReportsPage";
+import TermsPage from "./components/terms/TermsPage";
 import PlaceholderPage from "./components/common/PlaceholderPage";
 
 function App() {
@@ -47,6 +48,7 @@ function App() {
               />
             }
           />
+          <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/staff" element={<StaffPage />} />
