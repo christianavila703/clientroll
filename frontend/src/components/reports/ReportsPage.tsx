@@ -1,193 +1,266 @@
 import { useState, useEffect } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
-} from "recharts";
+  AreaChart, BarChart, DonutChart, BarList,
+  Card, Title, Text, Flex, Bold, Grid, Metric,
+  TabGroup, TabList, Tab, TabPanels, TabPanel,
+  List, ListItem, BadgeDelta,
+} from "@tremor/react";
 
-interface MonthlyData {
-  month: string;
-  revenue: number;
-}
-
-interface BreakdownData {
-  type_title: string;
-  revenue: number;
-  count: number;
-}
-
-const COLOURS = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899"];
+interface MonthlyData { month: string; revenue: number; }
+interface BreakdownData { type_title: string; revenue: number; count: number; }
+interface StatusData { [key: string]: number; }
+interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; }
 
 export default function ReportsPage() {
   const [monthly, setMonthly] = useState<MonthlyData[]>([]);
   const [breakdown, setBreakdown] = useState<BreakdownData[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, number>>({});
+  const [statuses, setStatuses] = useState<StatusData>({});
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadAll();
+    const token = localStorage.getItem("access_token");
+    const h = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch("/api/tenant/reports/revenue/monthly", { headers: h }).then(r => r.json()),
+      fetch("/api/tenant/reports/memberships/breakdown", { headers: h }).then(r => r.json()),
+      fetch("/api/tenant/reports/payments/status", { headers: h }).then(r => r.json()),
+      fetch("/api/tenant/reports/dashboard", { headers: h }).then(r => r.json()),
+    ]).then(([m, b, s, d]) => {
+      setMonthly(m.months || []);
+      setBreakdown(b.breakdown || []);
+      setStatuses(s.statuses || {});
+      setSummary(d);
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  const loadAll = async () => {
-    const token = localStorage.getItem("access_token");
-    const headers = { Authorization: `Bearer ${token}` };
+  const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
+  const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
+  const successRate = totalPayments > 0 ? Math.round(((statuses.succeeded || 0) / totalPayments) * 100) : 0;
 
-    try {
-      const [monthlyRes, breakdownRes, statusRes] = await Promise.all([
-        fetch("/api/tenant/reports/revenue/monthly", { headers }),
-        fetch("/api/tenant/reports/memberships/breakdown", { headers }),
-        fetch("/api/tenant/reports/payments/status", { headers }),
-      ]);
-
-      const monthlyData = await monthlyRes.json();
-      const breakdownData = await breakdownRes.json();
-      const statusData = await statusRes.json();
-
-      setMonthly(monthlyData.months || []);
-      setBreakdown(breakdownData.breakdown || []);
-      setStatuses(statusData.statuses || {});
-    } catch {
-      // Handle errors
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const statusPieData = Object.entries(statuses).map(([name, value]) => ({ name, value }));
-
-  if (loading) {
-    return (
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Reports</h1>
-        <div className="card text-center text-gray-500">Loading reports...</div>
-      </div>
-    );
-  }
+  if (loading) return <Card><div className="flex h-64 items-center justify-center text-sm text-gray-400">Loading reports...</div></Card>;
 
   return (
     <div>
-      <div className="page-header">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="page-title">Reports</h1>
-          <p className="page-subtitle">Financial analytics and insights</p>
+          <h1 className="text-lg font-semibold text-gray-900">Reports</h1>
+          <p className="text-[13px] text-gray-500">Financial analytics and performance insights</p>
         </div>
       </div>
 
-      {/* Revenue chart */}
-      <div className="card mb-5">
-        <div className="card-header">
-          <h3>Monthly Revenue</h3>
-        </div>
-        <div className="card-body">
-          {monthly.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={monthly} barSize={24}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}`} width={50} />
-                <Tooltip formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "Revenue"]} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgb(0 0 0 / 0.06)" }} />
-                <Bar dataKey="revenue" fill="#6366f1" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
-              No revenue data yet
-            </div>
-          )}
-        </div>
-      </div>
+      {/* KPI Summary */}
+      <Grid numItemsMd={2} numItemsLg={4} className="gap-4 mb-6">
+        <Card>
+          <Text>Total Revenue</Text>
+          <Metric>${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Metric>
+          <Text className="mt-1">{monthly.length} months tracked</Text>
+        </Card>
+        <Card>
+          <Text>Active Members</Text>
+          <Metric>{summary?.active_members || 0}</Metric>
+          <Flex className="mt-1">
+            <Text>{summary?.new_signups || 0} new this month</Text>
+            {(summary?.new_signups || 0) > 0 && <BadgeDelta deltaType="increase" size="xs">{summary?.new_signups}</BadgeDelta>}
+          </Flex>
+        </Card>
+        <Card>
+          <Text>Payment Success Rate</Text>
+          <Metric>{successRate}%</Metric>
+          <Text className="mt-1">{totalPayments} total payments</Text>
+        </Card>
+        <Card>
+          <Text>Avg Revenue / Month</Text>
+          <Metric>${monthly.length > 0 ? (totalRevenue / monthly.length).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "0.00"}</Metric>
+        </Card>
+      </Grid>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Membership breakdown */}
-        <div className="card">
-          <div className="card-header">
-            <h3>Revenue by Membership Type</h3>
-          </div>
-          <div className="card-body">
-          {breakdown.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={breakdown}
-                    dataKey="revenue"
-                    nameKey="type_title"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    label={({ type_title, percent }) =>
-                      `${type_title} (${(percent * 100).toFixed(0)}%)`
-                    }
-                  >
-                    {breakdown.map((_, i) => (
-                      <Cell key={i} fill={COLOURS[i % COLOURS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="mt-4 space-y-2">
-                {breakdown.map((b, i) => (
-                  <div key={b.type_title} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOURS[i % COLOURS.length] }} />
-                      <span className="text-gray-700">{b.type_title}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-medium text-gray-900">${b.revenue.toLocaleString()}</span>
-                      <span className="text-gray-400 ml-2">({b.count} members)</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
-              No membership data yet
-            </div>
-          )}
-          </div>
-        </div>
+      <TabGroup>
+        <TabList>
+          <Tab>Revenue</Tab>
+          <Tab>Memberships</Tab>
+          <Tab>Payments</Tab>
+        </TabList>
+        <TabPanels>
+          {/* Revenue Tab */}
+          <TabPanel>
+            <div className="mt-5 space-y-5">
+              <Card>
+                <Title>Monthly Revenue</Title>
+                <Text>Revenue collected over the past 12 months</Text>
+                {monthly.length > 0 ? (
+                  <AreaChart
+                    className="mt-4 h-80"
+                    data={monthly}
+                    index="month"
+                    categories={["revenue"]}
+                    colors={["indigo"]}
+                    valueFormatter={(v) => `$${v.toLocaleString()}`}
+                    showAnimation
+                    showGradient
+                    curveType="monotone"
+                  />
+                ) : (
+                  <div className="flex h-80 items-center justify-center text-sm text-gray-400">No revenue data yet</div>
+                )}
+              </Card>
 
-        {/* Payment status breakdown */}
-        <div className="card">
-          <div className="card-header">
-            <h3>Payment Status</h3>
-          </div>
-          <div className="card-body">
-          {statusPieData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={statusPieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                  >
-                    {statusPieData.map((entry, i) => {
-                      const colours: Record<string, string> = {
-                        succeeded: "#22c55e", failed: "#ef4444",
-                        pending: "#f59e0b", disputed: "#f97316",
-                        refunded: "#6b7280",
-                      };
-                      return <Cell key={i} fill={colours[entry.name] || COLOURS[i % COLOURS.length]} />;
-                    })}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">
-              No payment data yet
+              <Grid numItemsMd={2} className="gap-5">
+                <Card>
+                  <Title>Revenue by Month</Title>
+                  {monthly.length > 0 ? (
+                    <BarChart
+                      className="mt-4 h-64"
+                      data={monthly}
+                      index="month"
+                      categories={["revenue"]}
+                      colors={["indigo"]}
+                      valueFormatter={(v) => `$${v.toLocaleString()}`}
+                      showAnimation
+                    />
+                  ) : (
+                    <div className="flex h-64 items-center justify-center text-sm text-gray-400">No data</div>
+                  )}
+                </Card>
+                <Card>
+                  <Title>Revenue by Membership Type</Title>
+                  {breakdown.length > 0 ? (
+                    <BarList
+                      data={breakdown.map(b => ({ name: b.type_title, value: b.revenue }))}
+                      className="mt-4"
+                      valueFormatter={(v) => `$${v.toLocaleString()}`}
+                      color="indigo"
+                    />
+                  ) : (
+                    <div className="flex h-64 items-center justify-center text-sm text-gray-400">No data</div>
+                  )}
+                </Card>
+              </Grid>
             </div>
-          )}
-          </div>
-        </div>
-      </div>
+          </TabPanel>
+
+          {/* Memberships Tab */}
+          <TabPanel>
+            <div className="mt-5 space-y-5">
+              <Grid numItemsMd={2} className="gap-5">
+                <Card>
+                  <Title>Membership Distribution</Title>
+                  {breakdown.length > 0 ? (
+                    <>
+                      <DonutChart
+                        className="mt-6"
+                        data={breakdown.map(b => ({ name: b.type_title, value: b.count }))}
+                        category="value"
+                        index="name"
+                        colors={["indigo", "cyan", "amber", "emerald", "rose"]}
+                        showAnimation
+                        variant="pie"
+                      />
+                      <List className="mt-6">
+                        {breakdown.map(b => (
+                          <ListItem key={b.type_title}>
+                            <span>{b.type_title}</span>
+                            <Flex justifyContent="end" className="gap-2">
+                              <Bold>{b.count}</Bold>
+                              <Text>members</Text>
+                            </Flex>
+                          </ListItem>
+                        ))}
+                      </List>
+                    </>
+                  ) : (
+                    <div className="flex h-64 items-center justify-center text-sm text-gray-400">No data</div>
+                  )}
+                </Card>
+                <Card>
+                  <Title>Revenue per Membership</Title>
+                  {breakdown.length > 0 ? (
+                    <>
+                      <DonutChart
+                        className="mt-6"
+                        data={breakdown.map(b => ({ name: b.type_title, value: b.revenue }))}
+                        category="value"
+                        index="name"
+                        colors={["indigo", "cyan", "amber", "emerald", "rose"]}
+                        valueFormatter={(v) => `$${v.toLocaleString()}`}
+                        showAnimation
+                      />
+                      <List className="mt-6">
+                        {breakdown.map(b => (
+                          <ListItem key={b.type_title}>
+                            <span>{b.type_title}</span>
+                            <Bold>${b.revenue.toLocaleString()}</Bold>
+                          </ListItem>
+                        ))}
+                      </List>
+                    </>
+                  ) : (
+                    <div className="flex h-64 items-center justify-center text-sm text-gray-400">No data</div>
+                  )}
+                </Card>
+              </Grid>
+            </div>
+          </TabPanel>
+
+          {/* Payments Tab */}
+          <TabPanel>
+            <div className="mt-5 space-y-5">
+              <Grid numItemsMd={2} className="gap-5">
+                <Card>
+                  <Title>Payment Status Breakdown</Title>
+                  {totalPayments > 0 ? (
+                    <>
+                      <DonutChart
+                        className="mt-6"
+                        data={Object.entries(statuses).map(([name, value]) => ({ name, value }))}
+                        category="value"
+                        index="name"
+                        colors={["emerald", "red", "yellow", "orange", "gray"]}
+                        showAnimation
+                      />
+                      <List className="mt-6">
+                        {Object.entries(statuses).map(([name, value]) => (
+                          <ListItem key={name}>
+                            <span className="capitalize">{name}</span>
+                            <Bold>{value}</Bold>
+                          </ListItem>
+                        ))}
+                      </List>
+                    </>
+                  ) : (
+                    <div className="flex h-64 items-center justify-center text-sm text-gray-400">No payments yet</div>
+                  )}
+                </Card>
+                <Card>
+                  <Title>Payment Metrics</Title>
+                  <List className="mt-4">
+                    <ListItem>
+                      <span>Total Payments</span>
+                      <Bold>{totalPayments}</Bold>
+                    </ListItem>
+                    <ListItem>
+                      <span>Succeeded</span>
+                      <span className="text-emerald-600 font-semibold">{statuses.succeeded || 0}</span>
+                    </ListItem>
+                    <ListItem>
+                      <span>Failed</span>
+                      <span className="text-red-600 font-semibold">{statuses.failed || 0}</span>
+                    </ListItem>
+                    <ListItem>
+                      <span>Disputed</span>
+                      <span className="text-amber-600 font-semibold">{statuses.disputed || 0}</span>
+                    </ListItem>
+                    <ListItem>
+                      <span>Success Rate</span>
+                      <Bold>{successRate}%</Bold>
+                    </ListItem>
+                  </List>
+                </Card>
+              </Grid>
+            </div>
+          </TabPanel>
+        </TabPanels>
+      </TabGroup>
     </div>
   );
 }

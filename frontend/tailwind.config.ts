@@ -1,7 +1,11 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: ["./src/**/*.{ts,tsx}", "./src/index.html"],
+  content: [
+    "./src/**/*.{ts,tsx}",
+    "./src/index.html",
+    "./node_modules/@tremor/**/*.{js,ts,jsx,tsx}",
+  ],
   theme: {
     extend: {
       colors: {
