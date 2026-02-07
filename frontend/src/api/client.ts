@@ -47,16 +47,19 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${endpoint}`, config);
 
   if (response.status === 401) {
-    // Try token refresh
-    const refreshed = await tryRefreshToken();
-    if (refreshed) {
-      return request<T>(endpoint, options);
+    // Don't auto-redirect for auth endpoints — let the UI show the error
+    const isAuthEndpoint = endpoint.startsWith("/auth/") || endpoint === "/register";
+    if (!isAuthEndpoint) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        return request<T>(endpoint, options);
+      }
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      window.location.href = "/login";
     }
-    // Refresh failed — clear auth and redirect
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    window.location.href = "/login";
-    throw new ApiError("Unauthorised", 401);
+    const err = await response.json().catch(() => ({ error: "Invalid credentials" }));
+    throw new ApiError(err.error || "Unauthorised", 401);
   }
 
   if (!response.ok) {
