@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../../api/client";
 
 interface Client {
@@ -14,10 +15,11 @@ interface Client {
 }
 
 export default function ClientsPage() {
+  const [searchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(searchParams.get("new") === "1");
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [tab, setTab] = useState("All");
 
