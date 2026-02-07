@@ -10,10 +10,13 @@ export default defineConfig({
     main: "./src/main.tsx",
   },
   output: {
-    path: path.resolve(__dirname, "../web/assets"),
-    filename: "[name].js",
-    publicPath: "/assets/",
-    clean: true,
+    path: path.resolve(__dirname, "../web"),
+    filename: "assets/[name].[contenthash:8].js",
+    cssFilename: "assets/[name].[contenthash:8].css",
+    publicPath: "/",
+    clean: {
+      keep: /^index\.html$/,
+    },
   },
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
@@ -62,18 +65,26 @@ export default defineConfig({
       {
         test: /\.(png|jpe?g|gif|svg|webp)$/i,
         type: "asset/resource",
+        generator: {
+          filename: "assets/images/[name].[contenthash:8][ext]",
+        },
       },
       {
         test: /\.(woff|woff2|eot|ttf|otf)$/i,
         type: "asset/resource",
+        generator: {
+          filename: "assets/fonts/[name].[contenthash:8][ext]",
+        },
       },
     ],
   },
   plugins: [
     isDev && new RefreshPlugin(),
     new rspack.HtmlRspackPlugin({
-      template: "../web/index.html",
+      template: "./src/index.html",
+      filename: "index.html",
       inject: true,
+      minify: !isDev,
     }),
   ].filter(Boolean),
   experiments: {
