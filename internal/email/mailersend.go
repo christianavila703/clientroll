@@ -6,33 +6,46 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
 
 // MailerSendProvider implements the email Provider using the MailerSend API.
 type MailerSendProvider struct {
-	apiKey string
-	client *http.Client
+	apiKey    string
+	fromEmail string
+	fromName  string
+	client    *http.Client
 }
 
 // NewMailerSendProvider creates a new MailerSend provider.
-func NewMailerSendProvider(apiKey string) *MailerSendProvider {
+func NewMailerSendProvider(apiKey, fromEmail, fromName string) *MailerSendProvider {
 	return &MailerSendProvider{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 15 * time.Second},
+		apiKey:    apiKey,
+		fromEmail: fromEmail,
+		fromName:  fromName,
+		client:    &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 func (m *MailerSendProvider) Send(ctx context.Context, input SendInput) (string, error) {
 	if m.apiKey == "" {
-		return "", fmt.Errorf("MailerSend API key not configured")
+		log.Printf("MailerSend: skipping send (no API key) to=%s subject=%s", input.To, input.Subject)
+		return "skipped_no_key", nil
 	}
 
 	body := map[string]interface{}{
-		"to":      []map[string]string{{"email": input.To}},
+		"from": map[string]string{
+			"email": m.fromEmail,
+			"name":  m.fromName,
+		},
+		"to": []map[string]string{
+			{"email": input.To},
+		},
 		"subject": input.Subject,
-		"text":    buildPlainText(input),
+		"html":    input.HTML,
+		"text":    input.Text,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -60,15 +73,7 @@ func (m *MailerSendProvider) Send(ctx context.Context, input SendInput) (string,
 		return "", fmt.Errorf("MailerSend error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Extract message ID from header
 	messageID := resp.Header.Get("X-Message-Id")
+	log.Printf("MailerSend: sent to=%s subject=%s messageId=%s", input.To, input.Subject, messageID)
 	return messageID, nil
-}
-
-func buildPlainText(input SendInput) string {
-	text := input.Subject + "\n\n"
-	for k, v := range input.Variables {
-		text += k + ": " + v + "\n"
-	}
-	return text
 }

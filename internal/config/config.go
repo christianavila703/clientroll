@@ -19,6 +19,9 @@ type Config struct {
 	Environment         string // "development", "staging", "production"
 	JWTAccessDuration   int    // minutes
 	JWTRefreshDuration  int    // days
+	MailerSendAPIKey    string
+	MailerSendFromEmail string
+	AppURL              string // e.g. https://clientroll.com
 }
 
 // Load reads configuration from environment variables.
@@ -30,8 +33,11 @@ func Load() (*Config, error) {
 		MasterEncryptionKey: getEnvRequired("MASTER_ENCRYPTION_KEY"),
 		CORSAllowedOrigins: getEnvSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		Environment:        getEnv("ENVIRONMENT", "development"),
-		JWTAccessDuration:  getEnvInt("JWT_ACCESS_DURATION_MINUTES", 15),
-		JWTRefreshDuration: getEnvInt("JWT_REFRESH_DURATION_DAYS", 7),
+		JWTAccessDuration:   getEnvInt("JWT_ACCESS_DURATION_MINUTES", 15),
+		JWTRefreshDuration:  getEnvInt("JWT_REFRESH_DURATION_DAYS", 7),
+		MailerSendAPIKey:    getEnv("MAILERSEND_API_KEY", ""),
+		MailerSendFromEmail: getEnv("MAILERSEND_FROM_EMAIL", "clientroll@app.businessnet.com"),
+		AppURL:              getEnv("APP_URL", "https://clientroll.com"),
 	}
 
 	if err := cfg.validate(); err != nil {

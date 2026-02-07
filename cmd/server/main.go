@@ -13,6 +13,7 @@ import (
 	"clientroll/internal/auth"
 	"clientroll/internal/config"
 	"clientroll/internal/database"
+	"clientroll/internal/email"
 	"clientroll/internal/handlers"
 	"clientroll/internal/middleware"
 	"clientroll/internal/repository"
@@ -117,6 +118,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsRepo := repository.NewReportsRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 
+	// Email service
+	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
+
 	// Handlers
 	authHandler := handlers.NewAuthHandler(userRepo, adminRepo, tenantRepo, jwtMgr, sessionMgr)
 	platformHandler := handlers.NewPlatformHandler(tenantRepo, userRepo)
@@ -127,7 +131,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	termsHandler := handlers.NewTermsHandler(termsRepo)
 	clientHandler := handlers.NewClientHandler(clientRepo)
 	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo)
-	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr)
+	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, cfg.AppURL)
+	passwordResetHandler := handlers.NewPasswordResetHandler(userRepo, db, emailSvc, cfg.AppURL)
 	paymentHandler := handlers.NewPaymentHandler(paymentRepo)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
@@ -152,10 +157,11 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		// Public signup flow (no auth required)
 		signupHandler.RegisterPublicRoutes(r)
 
-		// Public tenant registration (no auth required, rate limited)
+		// Public tenant registration + password reset (rate limited)
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimiter.Limit)
 			registrationHandler.RegisterPublicRoutes(r)
+			passwordResetHandler.RegisterRoutes(r)
 		})
 
 		// Authenticated routes

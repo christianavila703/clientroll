@@ -3,6 +3,8 @@ import { AuthProvider } from "./store/AuthContext";
 import AppShell from "./components/layout/AppShell";
 import LoginPage from "./components/auth/LoginPage";
 import RegisterPage from "./components/auth/RegisterPage";
+import ForgotPasswordPage from "./components/auth/ForgotPasswordPage";
+import ResetPasswordPage from "./components/auth/ResetPasswordPage";
 import DashboardPage from "./components/dashboard/DashboardPage";
 import SettingsPage from "./components/settings/SettingsPage";
 import StaffPage from "./components/staff/StaffPage";
@@ -21,6 +23,8 @@ function App() {
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         {/* Public membership signup */}
         <Route path="/join/:tenantSlug" element={<SignupPage />} />

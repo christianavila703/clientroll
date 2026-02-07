@@ -60,7 +60,7 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-4 text-center">
-            <a href="#" className="text-[13px] text-indigo-600 hover:text-indigo-700">Forgot password?</a>
+            <Link to="/forgot-password" className="text-[13px] text-indigo-600 hover:text-indigo-700">Forgot password?</Link>
           </div>
         </div>
 
