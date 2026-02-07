@@ -18,6 +18,7 @@ import SignupPage from "./components/signup/SignupPage";
 import PaymentsPage from "./components/payments/PaymentsPage";
 import ReportsPage from "./components/reports/ReportsPage";
 import TermsPage from "./components/terms/TermsPage";
+import EmailTemplatesPage from "./components/settings/EmailTemplatesPage";
 import BonusesPage from "./components/bonuses/BonusesPage";
 import PlaceholderPage from "./components/common/PlaceholderPage";
 
@@ -48,6 +49,7 @@ function App() {
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/staff" element={<StaffPage />} />
+          <Route path="/email-templates" element={<EmailTemplatesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
 
           {/* Platform admin routes */}
