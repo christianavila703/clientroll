@@ -174,35 +174,148 @@ function TableSkeleton() {
 }
 
 function CreateClientForm({ onCreated }: { onCreated: () => void }) {
-  const [form, setForm] = useState({ name: "", email: "", phone: "", address: "", suburb: "", state: "", postcode: "" });
+  const [tab, setTab] = useState<"details" | "company">("details");
+  const [form, setForm] = useState({
+    name: "", email: "", phone: "", address: "", suburb: "", state: "", postcode: "",
+    birth_date: "", gender: "", emergency_contact_name: "", emergency_contact_phone: "",
+  });
+  const [company, setCompany] = useState({
+    business_structure: "", gst_registered: "", tax_number: "", company_number: "",
+    company_phone: "", company_fax: "", company_website: "",
+    company_address: "", company_suburb: "", company_state: "", company_postcode: "",
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true); setError("");
-    try { await api.createClient(form); onCreated(); }
+    try {
+      await api.createClient({ ...form, ...company });
+      onCreated();
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   };
 
+  const F = ({ label, value, onChange, type = "text", placeholder = "", required = false, colSpan = false }: {
+    label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; required?: boolean; colSpan?: boolean;
+  }) => (
+    <div className={colSpan ? "sm:col-span-2" : ""}>
+      <label className="block text-[13px] font-medium text-gray-700 mb-1">{label}{required && " *"}</label>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="input-field" placeholder={placeholder} required={required} />
+    </div>
+  );
+
   return (
-    <div className="mb-5 rounded-lg border border-gray-200 bg-white px-5 py-4 max-w-2xl">
-      <h3 className="text-base font-semibold text-gray-900 mb-4">Add Client</h3>
-      {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-100 px-4 py-2.5 text-sm text-red-600">{error}</div>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-field" required /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input-field" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input-field" /></div>
-          <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Address</label><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="input-field" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Suburb</label><input value={form.suburb} onChange={(e) => setForm({ ...form, suburb: e.target.value })} className="input-field" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">State</label><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} className="input-field" /></div>
+    <div className="mb-5 rounded-lg border border-gray-200 bg-white max-w-2xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+        <h3 className="text-base font-semibold text-gray-900">New client</h3>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onCreated} className="btn-secondary text-[12px]">Cancel</button>
+          <button type="button" onClick={(e) => { e.preventDefault(); const form2 = document.getElementById("create-client-form") as HTMLFormElement; form2?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+            {saving ? "Saving..." : "Save"}
+          </button>
         </div>
-        <div className="flex gap-2 justify-end pt-2">
-          <button type="button" onClick={onCreated} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
-          <button type="submit" disabled={saving} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50">{saving ? "Creating..." : "Create"}</button>
-        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 px-5">
+        {(["details", "company"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
+              tab === t ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t === "details" ? "Details" : "Company"}
+          </button>
+        ))}
+      </div>
+
+      {error && <div className="mx-5 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+
+      <form id="create-client-form" onSubmit={handleSubmit} className="px-5 py-4">
+        {tab === "details" && (
+          <div className="space-y-5">
+            {/* Personal info */}
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Personal information</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required colSpan />
+                <F label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
+                <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
+                <F label="Date of birth" value={form.birth_date} onChange={(v) => setForm({ ...form, birth_date: v })} type="date" />
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
+                  <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} className="input-field">
+                    <option value="">—</option>
+                    <option value="Female">Female</option>
+                    <option value="Male">Male</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Address */}
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Address</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Street address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} colSpan />
+                <F label="Suburb" value={form.suburb} onChange={(v) => setForm({ ...form, suburb: v })} />
+                <F label="State" value={form.state} onChange={(v) => setForm({ ...form, state: v })} />
+                <F label="Postcode" value={form.postcode} onChange={(v) => setForm({ ...form, postcode: v })} />
+              </div>
+            </div>
+
+            {/* Emergency contact */}
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Contact name" value={form.emergency_contact_name} onChange={(v) => setForm({ ...form, emergency_contact_name: v })} />
+                <F label="Contact phone" value={form.emergency_contact_phone} onChange={(v) => setForm({ ...form, emergency_contact_phone: v })} type="tel" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "company" && (
+          <div className="space-y-5">
+            {/* Company info */}
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Business structure" value={company.business_structure} onChange={(v) => setCompany({ ...company, business_structure: v })} placeholder="e.g. Sole Trader" />
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">GST registered</label>
+                  <select value={company.gst_registered} onChange={(e) => setCompany({ ...company, gst_registered: e.target.value })} className="input-field">
+                    <option value="">—</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                  </select>
+                </div>
+                <F label="Tax number" value={company.tax_number} onChange={(v) => setCompany({ ...company, tax_number: v })} placeholder="e.g. 123 456 789" />
+                <F label="Company number" value={company.company_number} onChange={(v) => setCompany({ ...company, company_number: v })} />
+                <F label="Phone" value={company.company_phone} onChange={(v) => setCompany({ ...company, company_phone: v })} type="tel" />
+                <F label="Fax" value={company.company_fax} onChange={(v) => setCompany({ ...company, company_fax: v })} />
+                <F label="Website" value={company.company_website} onChange={(v) => setCompany({ ...company, company_website: v })} colSpan placeholder="https://" />
+              </div>
+            </div>
+
+            {/* Company address */}
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company address</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <F label="Street address" value={company.company_address} onChange={(v) => setCompany({ ...company, company_address: v })} colSpan />
+                <F label="Suburb" value={company.company_suburb} onChange={(v) => setCompany({ ...company, company_suburb: v })} />
+                <F label="State" value={company.company_state} onChange={(v) => setCompany({ ...company, company_state: v })} />
+                <F label="Postcode" value={company.company_postcode} onChange={(v) => setCompany({ ...company, company_postcode: v })} />
+              </div>
+            </div>
+          </div>
+        )}
       </form>
     </div>
   );
