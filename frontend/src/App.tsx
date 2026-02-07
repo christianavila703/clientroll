@@ -16,6 +16,7 @@ import SignupPage from "./components/signup/SignupPage";
 import PaymentsPage from "./components/payments/PaymentsPage";
 import ReportsPage from "./components/reports/ReportsPage";
 import TermsPage from "./components/terms/TermsPage";
+import BonusesPage from "./components/bonuses/BonusesPage";
 import PlaceholderPage from "./components/common/PlaceholderPage";
 
 function App() {
@@ -38,16 +39,7 @@ function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/memberships" element={<MembershipTypesPage />} />
-          <Route
-            path="/bonuses"
-            element={
-              <PlaceholderPage
-                title="Bonuses"
-                description="Manage bonuses and assign to term options"
-                phase="Phase 4"
-              />
-            }
-          />
+          <Route path="/bonuses" element={<BonusesPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
