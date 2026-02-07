@@ -1,0 +1,3 @@
+-- Extensions are shared, only drop if truly needed
+-- DROP EXTENSION IF EXISTS "pgcrypto";
+-- DROP EXTENSION IF EXISTS "uuid-ossp";

@@ -1,0 +1,43 @@
+-- Disable RLS on all tenant-scoped tables
+ALTER TABLE audit_log DISABLE ROW LEVEL SECURITY;
+ALTER TABLE email_log DISABLE ROW LEVEL SECURITY;
+ALTER TABLE uploaded_files DISABLE ROW LEVEL SECURITY;
+ALTER TABLE password_reset_tokens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE staff_invitations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_deliveries DISABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_endpoints DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_failure_log DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_disputes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bank_details DISABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_addons DISABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships DISABLE ROW LEVEL SECURITY;
+ALTER TABLE clients DISABLE ROW LEVEL SECURITY;
+ALTER TABLE term_option_bonuses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bonuses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_type_terms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE terms_and_conditions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_term_options DISABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_types DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_invoices DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_usage_snapshots DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_subscriptions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE agreement_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_credentials DISABLE ROW LEVEL SECURITY;
+
+-- Drop all tenant_isolation policies
+DO $$ 
+DECLARE
+    tbl TEXT;
+BEGIN
+    FOR tbl IN 
+        SELECT tablename FROM pg_tables 
+        WHERE schemaname = 'public' 
+        AND tablename NOT IN ('tenants', 'platform_admins', 'platform_billing_config')
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', tbl);
+    END LOOP;
+END $$;
+
+DROP FUNCTION IF EXISTS current_tenant_id();

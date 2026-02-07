@@ -1,0 +1,149 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"clientroll/internal/database"
+	"clientroll/internal/models"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// ClientRepo handles database operations for clients.
+type ClientRepo struct {
+	db *database.Postgres
+}
+
+// NewClientRepo creates a new client repository.
+func NewClientRepo(db *database.Postgres) *ClientRepo {
+	return &ClientRepo{db: db}
+}
+
+const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
+	email, phone, birth_date, gender, emergency_contact_name,
+	emergency_contact_phone, created_at, updated_at`
+
+// List returns all clients for a tenant with optional search.
+func (r *ClientRepo) List(ctx context.Context, tenantID uuid.UUID, search string) ([]models.Client, error) {
+	query := `SELECT ` + clientFields + ` FROM clients WHERE tenant_id = $1`
+	args := []interface{}{tenantID}
+
+	if search != "" {
+		query += ` AND (name ILIKE $2 OR email ILIKE $2 OR phone ILIKE $2)`
+		args = append(args, "%"+search+"%")
+	}
+
+	query += ` ORDER BY name`
+
+	rows, err := r.db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing clients: %w", err)
+	}
+	defer rows.Close()
+	return r.scanMany(rows)
+}
+
+// FindByID returns a client by ID.
+func (r *ClientRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (*models.Client, error) {
+	query := `SELECT ` + clientFields + ` FROM clients WHERE id = $1 AND tenant_id = $2`
+
+	var c models.Client
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(r.scanFields(&c)...)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding client: %w", err)
+	}
+	return &c, nil
+}
+
+// Create inserts a new client.
+func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
+	query := `
+		INSERT INTO clients (tenant_id, name, address, suburb, state, postcode,
+		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING ` + clientFields
+
+	var out models.Client
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.Address, c.Suburb,
+		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
+		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client: %w", err)
+	}
+	return &out, nil
+}
+
+// Update updates a client.
+func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
+	query := `
+		UPDATE clients SET name=$3, address=$4, suburb=$5, state=$6, postcode=$7,
+		    email=$8, phone=$9, birth_date=$10, gender=$11,
+		    emergency_contact_name=$12, emergency_contact_phone=$13, updated_at=NOW()
+		WHERE id=$1 AND tenant_id=$2
+		RETURNING ` + clientFields
+
+	var out models.Client
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.Address, c.Suburb,
+		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
+		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
+	if err != nil {
+		return nil, fmt.Errorf("updating client: %w", err)
+	}
+	return &out, nil
+}
+
+// GetMemberships returns all memberships for a client.
+func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid.UUID) ([]models.Membership, error) {
+	query := `
+		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
+		       start_date, min_term_end_date, payment_method, payment_frequency,
+		       payment_amount, status, member_signature_data, member_signed_at,
+		       staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
+		FROM memberships WHERE client_id = $1 AND tenant_id = $2
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.Pool.Query(ctx, query, clientID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("getting client memberships: %w", err)
+	}
+	defer rows.Close()
+
+	var memberships []models.Membership
+	for rows.Next() {
+		var m models.Membership
+		if err := rows.Scan(&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID,
+			&m.TermOptionID, &m.StartDate, &m.MinTermEndDate, &m.PaymentMethod,
+			&m.PaymentFrequency, &m.PaymentAmount, &m.Status, &m.MemberSignature,
+			&m.MemberSignedAt, &m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt,
+			&m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		memberships = append(memberships, m)
+	}
+	return memberships, rows.Err()
+}
+
+func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
+	return []interface{}{
+		&c.ID, &c.TenantID, &c.Name, &c.Address, &c.Suburb, &c.State,
+		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
+		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.CreatedAt, &c.UpdatedAt,
+	}
+}
+
+func (r *ClientRepo) scanMany(rows pgx.Rows) ([]models.Client, error) {
+	var items []models.Client
+	for rows.Next() {
+		var c models.Client
+		if err := rows.Scan(r.scanFields(&c)...); err != nil {
+			return nil, fmt.Errorf("scanning client: %w", err)
+		}
+		items = append(items, c)
+	}
+	return items, rows.Err()
+}

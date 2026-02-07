@@ -1,0 +1,31 @@
+# Binaries
+bin/
+*.exe
+
+# Environment
+.env
+
+# Go
+vendor/
+
+# Frontend
+frontend/node_modules/
+frontend/.cache/
+
+# Build output
+web/assets/*.js
+web/assets/*.css
+web/assets/*.map
+
+# Uploads (user data)
+uploads/tenants/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.docker/
