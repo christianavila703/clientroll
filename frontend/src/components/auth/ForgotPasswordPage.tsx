@@ -28,7 +28,7 @@ export default function ForgotPasswordPage() {
           <p className="text-sm text-gray-500">Reset your password</p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white px-6 py-6 shadow-sm">
           {sent ? (
             <div className="text-center">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">

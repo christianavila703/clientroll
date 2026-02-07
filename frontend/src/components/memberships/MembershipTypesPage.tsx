@@ -124,8 +124,8 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   };
 
   return (
-    <div className="card mb-6 max-w-2xl">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">New Membership Type</h3>
+    <div className="card mb-5 max-w-2xl px-5 py-4">
+      <h3 className="text-base font-semibold text-gray-900 mb-4">New Membership Type</h3>
       {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>

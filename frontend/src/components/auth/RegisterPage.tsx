@@ -71,7 +71,7 @@ export default function RegisterPage() {
           <p className="mt-1 text-[13px] text-gray-500">Start managing memberships in minutes</p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white px-6 py-6 shadow-sm">
           {step === "verify" ? (
             <div className="text-center py-4">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50">

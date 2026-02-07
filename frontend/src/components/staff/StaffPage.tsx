@@ -152,8 +152,8 @@ function CreateStaffForm({ onCreated }: { onCreated: () => void }) {
   };
 
   return (
-    <div className="card mb-6 max-w-lg">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Staff Member</h3>
+    <div className="card mb-5 max-w-lg px-5 py-4">
+      <h3 className="text-base font-semibold text-gray-900 mb-4">Add Staff Member</h3>
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}

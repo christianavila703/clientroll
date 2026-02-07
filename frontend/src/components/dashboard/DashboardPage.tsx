@@ -51,7 +51,7 @@ export default function DashboardPage() {
           <h2>Revenue</h2>
           <span className="text-[12px] text-gray-400">Last 12 months</span>
         </div>
-        <div className="p-4">
+        <div className="px-5 py-4">
           {monthly.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthly} barSize={24}>
@@ -81,7 +81,7 @@ export default function DashboardPage() {
 
 function MetricCard({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
   return (
-    <div className="card p-4">
+    <div className="card px-5 py-4">
       <p className="text-[12px] font-medium text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-semibold tabular-nums ${alert ? "text-red-600" : "text-gray-900"}`}>{value}</p>
     </div>
@@ -90,7 +90,7 @@ function MetricCard({ label, value, alert }: { label: string; value: string; ale
 
 function QuickAction({ to, label, desc, icon }: { to: string; label: string; desc: string; icon: string }) {
   return (
-    <Link to={to} className="card flex items-center gap-3 p-3 hover:border-gray-300 hover:shadow-sm transition-all group">
+    <Link to={to} className="card flex items-center gap-3 px-4 py-3.5 hover:border-gray-300 hover:shadow-sm transition-all group">
       <div className="flex h-9 w-9 items-center justify-center rounded-md bg-gray-100 group-hover:bg-indigo-50 transition-colors">
         <svg className="h-4 w-4 text-gray-500 group-hover:text-indigo-600 transition-colors" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d={icon} /></svg>
       </div>
