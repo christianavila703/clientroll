@@ -124,10 +124,78 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
       {/* Right */}
       <div className="flex items-center gap-1">
-        <button className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Notifications">
-          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg>
-        </button>
+        <NotificationBell />
       </div>
     </header>
+  );
+}
+
+function NotificationBell() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ failed_payments: number; open_disputes: number; new_signups: number; active_members: number } | null>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (bellRef.current && !bellRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    fetch("/api/tenant/reports/dashboard", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => {});
+  }, []);
+
+  const alertCount = (data?.failed_payments || 0) + (data?.open_disputes || 0);
+
+  const items: { label: string; count: number; colour: string; url: string }[] = [];
+  if (data) {
+    if (data.failed_payments > 0) items.push({ label: "Failed payments", count: data.failed_payments, colour: "text-red-600 bg-red-50", url: "/payments" });
+    if (data.open_disputes > 0) items.push({ label: "Open disputes", count: data.open_disputes, colour: "text-amber-600 bg-amber-50", url: "/payments" });
+    if (data.new_signups > 0) items.push({ label: "New signups this month", count: data.new_signups, colour: "text-indigo-600 bg-indigo-50", url: "/clients" });
+  }
+
+  return (
+    <div className="relative" ref={bellRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="relative rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        title="Notifications"
+      >
+        <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg>
+        {alertCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">{alertCount}</span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+          <div className="px-3 py-2 border-b border-gray-100">
+            <p className="text-[13px] font-semibold text-gray-900">Notifications</p>
+          </div>
+          {items.length === 0 ? (
+            <div className="px-3 py-6 text-center text-[13px] text-gray-400">All clear — no alerts</div>
+          ) : (
+            <div className="py-1">
+              {items.map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => { setOpen(false); navigate(item.url); }}
+                  className="flex w-full items-center justify-between px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-[13px] text-gray-700">{item.label}</span>
+                  <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${item.colour}`}>{item.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
