@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext";
 
 interface SidebarProps {
@@ -23,9 +24,27 @@ const platformNav = [
   { to: "/platform/billing", label: "Billing", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
 ];
 
+const createActions = [
+  { label: "Client", desc: "Add to your client list", to: "/clients?new=1", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
+  { label: "Membership Type", desc: "Define a new offering", to: "/memberships?new=1", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+  { label: "Bonus", desc: "Create a signup bonus", to: "/bonuses?new=1", icon: "M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" },
+];
+
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, isPlatformAdmin, logout } = useAuth();
+  const navigate = useNavigate();
   const navItems = isPlatformAdmin ? platformNav : tenantNav;
+  const [createOpen, setCreateOpen] = useState(false);
+  const createRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (createRef.current && !createRef.current.contains(e.target as Node)) setCreateOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   return (
     <>
@@ -37,6 +56,42 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="flex h-6 w-6 items-center justify-center rounded bg-indigo-600 text-[10px] font-bold text-white">C</div>
           <span className="text-sm font-semibold text-gray-900">ClientRoll</span>
         </div>
+
+        {/* Create new button */}
+        {!isPlatformAdmin && (
+          <div className="px-3 pt-3 pb-1" ref={createRef}>
+            <div className="relative">
+              <button
+                onClick={() => setCreateOpen(!createOpen)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-indigo-50 px-3 py-2 text-[13px] font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                Create new
+                <svg className={`h-3 w-3 ml-auto transition-transform ${createOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+
+              {createOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50">
+                  {createActions.map((action) => (
+                    <button
+                      key={action.to}
+                      onClick={() => { setCreateOpen(false); onClose(); navigate(action.to); }}
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100">
+                        <svg className="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d={action.icon} /></svg>
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-medium text-gray-900">{action.label}</p>
+                        <p className="text-[11px] text-gray-500">{action.desc}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
