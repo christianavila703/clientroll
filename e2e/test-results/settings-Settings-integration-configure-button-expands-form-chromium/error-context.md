@@ -1,0 +1,126 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - button "Create new" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+      - text: Create new
+      - img [ref=e13]
+    - navigation [ref=e15]:
+      - link "Home" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e17]
+        - text: Home
+      - link "Clients" [ref=e19] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e20]
+        - text: Clients
+      - link "Active Members" [ref=e22] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e23]
+        - text: Active Members
+      - link "Membership Types" [ref=e25] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e26]
+        - text: Membership Types
+      - link "Bonuses" [ref=e28] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e29]
+        - text: Bonuses
+      - link "Terms" [ref=e31] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e32]
+        - text: Terms
+      - link "Payments" [ref=e34] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e35]
+        - text: Payments
+      - link "Reports" [ref=e37] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e38]
+        - text: Reports
+      - link "Team" [ref=e40] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e41]
+        - text: Team
+      - link "Settings" [ref=e43] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e44]
+        - text: Settings
+    - generic [ref=e47]:
+      - generic [ref=e48]: U
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: User
+        - paragraph [ref=e51]: Admin
+      - button "Sign out" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+  - generic [ref=e55]:
+    - banner [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - textbox "Search clients, memberships..." [ref=e60]
+      - button "3" [ref=e63] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e66]: "3"
+    - main [ref=e67]:
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - heading "Settings" [level=1] [ref=e70]
+          - paragraph [ref=e71]: Manage your organisation settings
+        - generic [ref=e72]:
+          - button "Agreement Details" [ref=e73] [cursor=pointer]
+          - button "Organisation" [ref=e74] [cursor=pointer]
+          - button "Integrations" [ref=e75] [cursor=pointer]
+        - generic [ref=e76]:
+          - generic [ref=e77]:
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - heading "GoCardless" [level=3] [ref=e80]
+                - generic [ref=e81]: Not configured
+              - button "Collapse" [ref=e82] [cursor=pointer]
+            - generic [ref=e83]:
+              - paragraph [ref=e84]: Direct debit payments for client memberships
+              - generic [ref=e85]:
+                - generic [ref=e86]:
+                  - generic [ref=e87]: Access Token
+                  - textbox "Enter key..." [ref=e88]
+                - generic [ref=e89]:
+                  - generic [ref=e90]: Webhook Secret
+                  - textbox "Enter secret..." [ref=e91]
+                - generic [ref=e92]:
+                  - generic [ref=e93]:
+                    - generic [ref=e94]: Environment
+                    - combobox [ref=e95]:
+                      - option "Sandbox" [selected]
+                      - option "Live"
+                  - generic [ref=e97]:
+                    - checkbox "Active" [checked] [ref=e98]
+                    - text: Active
+                - button "Save" [ref=e100] [cursor=pointer]
+          - generic [ref=e101]:
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - heading "MailerSend" [level=3] [ref=e104]
+                - generic [ref=e105]: Not configured
+              - button "Collapse" [ref=e106] [cursor=pointer]
+            - generic [ref=e107]:
+              - paragraph [ref=e108]: Transactional email delivery
+              - generic [ref=e109]:
+                - generic [ref=e110]:
+                  - generic [ref=e111]: API Key
+                  - textbox "Enter key..." [ref=e112]
+                - generic [ref=e113]:
+                  - generic [ref=e114]:
+                    - generic [ref=e115]: Environment
+                    - combobox [ref=e116]:
+                      - option "Sandbox" [selected]
+                      - option "Live"
+                  - generic [ref=e118]:
+                    - checkbox "Active" [checked] [ref=e119]
+                    - text: Active
+                - button "Save" [ref=e121] [cursor=pointer]
+```

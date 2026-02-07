@@ -1,0 +1,276 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - button "Create new" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+      - text: Create new
+      - img [ref=e13]
+    - navigation [ref=e15]:
+      - link "Home" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e17]
+        - text: Home
+      - link "Clients" [ref=e19] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e20]
+        - text: Clients
+      - link "Active Members" [ref=e22] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e23]
+        - text: Active Members
+      - link "Membership Types" [ref=e25] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e26]
+        - text: Membership Types
+      - link "Bonuses" [ref=e28] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e29]
+        - text: Bonuses
+      - link "Terms" [ref=e31] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e32]
+        - text: Terms
+      - link "Payments" [ref=e34] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e35]
+        - text: Payments
+      - link "Reports" [ref=e37] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e38]
+        - text: Reports
+      - link "Team" [ref=e40] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e41]
+        - text: Team
+      - link "Settings" [ref=e43] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e44]
+        - text: Settings
+    - generic [ref=e47]:
+      - generic [ref=e48]: U
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: User
+        - paragraph [ref=e51]: Admin
+      - button "Sign out" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+  - generic [ref=e55]:
+    - banner [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - textbox "Search clients, memberships..." [active] [ref=e60]: Sarah
+        - button "Sarah Mitchell sarah@email.com client" [ref=e62] [cursor=pointer]:
+          - img [ref=e63]
+          - generic [ref=e65]:
+            - paragraph [ref=e66]: Sarah Mitchell
+            - paragraph [ref=e67]: sarah@email.com
+          - generic [ref=e68]: client
+      - button "3" [ref=e71] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: "3"
+    - main [ref=e75]:
+      - generic [ref=e76]:
+        - generic [ref=e77]:
+          - generic [ref=e78]:
+            - heading "Clients" [level=1] [ref=e79]
+            - generic [ref=e80]: 13 results
+          - generic [ref=e81]:
+            - button "Export" [ref=e82] [cursor=pointer]:
+              - img [ref=e83]
+              - text: Export
+            - button "New client" [ref=e85] [cursor=pointer]:
+              - img [ref=e86]
+              - text: New client
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - button "All" [ref=e90] [cursor=pointer]
+            - button "Active" [ref=e91] [cursor=pointer]
+            - button "Inactive" [ref=e92] [cursor=pointer]
+          - generic [ref=e93]:
+            - img [ref=e94]
+            - textbox "Search..." [ref=e96]
+        - table [ref=e99]:
+          - rowgroup [ref=e100]:
+            - row "Client Contact Location Added" [ref=e101]:
+              - columnheader [ref=e102]:
+                - checkbox [ref=e103]
+              - columnheader "Client" [ref=e104]
+              - columnheader "Contact" [ref=e105]
+              - columnheader "Location" [ref=e106]
+              - columnheader "Added" [ref=e107]
+              - columnheader [ref=e108]
+          - rowgroup [ref=e109]:
+            - row "Amelia Taylor amelia.t@email.com 0401234567 Fortitude Valley, QLD 7 Feb 2026" [ref=e110] [cursor=pointer]:
+              - cell [ref=e111]:
+                - checkbox [ref=e112]
+              - cell "Amelia Taylor" [ref=e113]:
+                - paragraph [ref=e114]: Amelia Taylor
+              - cell "amelia.t@email.com 0401234567" [ref=e115]:
+                - paragraph [ref=e116]: amelia.t@email.com
+                - paragraph [ref=e117]: "0401234567"
+              - cell "Fortitude Valley, QLD" [ref=e118]
+              - cell "7 Feb 2026" [ref=e119]
+              - cell [ref=e120]:
+                - button [ref=e122]:
+                  - img [ref=e123]
+            - row "Ben Simkin ben@businessnet.com.au 0423033792 WYNNUM, QLD 7 Feb 2026" [ref=e125] [cursor=pointer]:
+              - cell [ref=e126]:
+                - checkbox [ref=e127]
+              - cell "Ben Simkin" [ref=e128]:
+                - paragraph [ref=e129]: Ben Simkin
+              - cell "ben@businessnet.com.au 0423033792" [ref=e130]:
+                - paragraph [ref=e131]: ben@businessnet.com.au
+                - paragraph [ref=e132]: "0423033792"
+              - cell "WYNNUM, QLD" [ref=e133]
+              - cell "7 Feb 2026" [ref=e134]
+              - cell [ref=e135]:
+                - button [ref=e137]:
+                  - img [ref=e138]
+            - row "Charlotte White charlotte.w@email.com 0490123456 Newstead, QLD 7 Feb 2026" [ref=e140] [cursor=pointer]:
+              - cell [ref=e141]:
+                - checkbox [ref=e142]
+              - cell "Charlotte White" [ref=e143]:
+                - paragraph [ref=e144]: Charlotte White
+              - cell "charlotte.w@email.com 0490123456" [ref=e145]:
+                - paragraph [ref=e146]: charlotte.w@email.com
+                - paragraph [ref=e147]: "0490123456"
+              - cell "Newstead, QLD" [ref=e148]
+              - cell "7 Feb 2026" [ref=e149]
+              - cell [ref=e150]:
+                - button [ref=e152]:
+                  - img [ref=e153]
+            - row "Emma Thompson emma.t@email.com 0423456789 Brisbane City, QLD 7 Feb 2026" [ref=e155] [cursor=pointer]:
+              - cell [ref=e156]:
+                - checkbox [ref=e157]
+              - cell "Emma Thompson" [ref=e158]:
+                - paragraph [ref=e159]: Emma Thompson
+              - cell "emma.t@email.com 0423456789" [ref=e160]:
+                - paragraph [ref=e161]: emma.t@email.com
+                - paragraph [ref=e162]: "0423456789"
+              - cell "Brisbane City, QLD" [ref=e163]
+              - cell "7 Feb 2026" [ref=e164]
+              - cell [ref=e165]:
+                - button [ref=e167]:
+                  - img [ref=e168]
+            - row "Grace Patel grace.p@email.com 0412345001 Fortitude Valley, QLD 7 Feb 2026" [ref=e170] [cursor=pointer]:
+              - cell [ref=e171]:
+                - checkbox [ref=e172]
+              - cell "Grace Patel" [ref=e173]:
+                - paragraph [ref=e174]: Grace Patel
+              - cell "grace.p@email.com 0412345001" [ref=e175]:
+                - paragraph [ref=e176]: grace.p@email.com
+                - paragraph [ref=e177]: "0412345001"
+              - cell "Fortitude Valley, QLD" [ref=e178]
+              - cell "7 Feb 2026" [ref=e179]
+              - cell [ref=e180]:
+                - button [ref=e182]:
+                  - img [ref=e183]
+            - row "Isabella Davis bella.d@email.com 0489012345 Newstead, QLD 7 Feb 2026" [ref=e185] [cursor=pointer]:
+              - cell [ref=e186]:
+                - checkbox [ref=e187]
+              - cell "Isabella Davis" [ref=e188]:
+                - paragraph [ref=e189]: Isabella Davis
+              - cell "bella.d@email.com 0489012345" [ref=e190]:
+                - paragraph [ref=e191]: bella.d@email.com
+                - paragraph [ref=e192]: "0489012345"
+              - cell "Newstead, QLD" [ref=e193]
+              - cell "7 Feb 2026" [ref=e194]
+              - cell [ref=e195]:
+                - button [ref=e197]:
+                  - img [ref=e198]
+            - row "Jessica Liu jess.liu@email.com 0434567890 Fortitude Valley, QLD 7 Feb 2026" [ref=e200] [cursor=pointer]:
+              - cell [ref=e201]:
+                - checkbox [ref=e202]
+              - cell "Jessica Liu" [ref=e203]:
+                - paragraph [ref=e204]: Jessica Liu
+              - cell "jess.liu@email.com 0434567890" [ref=e205]:
+                - paragraph [ref=e206]: jess.liu@email.com
+                - paragraph [ref=e207]: "0434567890"
+              - cell "Fortitude Valley, QLD" [ref=e208]
+              - cell "7 Feb 2026" [ref=e209]
+              - cell [ref=e210]:
+                - button [ref=e212]:
+                  - img [ref=e213]
+            - row "Lily Nguyen lily.n@email.com 0423456001 West End, QLD 7 Feb 2026" [ref=e215] [cursor=pointer]:
+              - cell [ref=e216]:
+                - checkbox [ref=e217]
+              - cell "Lily Nguyen" [ref=e218]:
+                - paragraph [ref=e219]: Lily Nguyen
+              - cell "lily.n@email.com 0423456001" [ref=e220]:
+                - paragraph [ref=e221]: lily.n@email.com
+                - paragraph [ref=e222]: "0423456001"
+              - cell "West End, QLD" [ref=e223]
+              - cell "7 Feb 2026" [ref=e224]
+              - cell [ref=e225]:
+                - button [ref=e227]:
+                  - img [ref=e228]
+            - row "Mia Chen mia.chen@email.com 0478901234 Brisbane City, QLD 7 Feb 2026" [ref=e230] [cursor=pointer]:
+              - cell [ref=e231]:
+                - checkbox [ref=e232]
+              - cell "Mia Chen" [ref=e233]:
+                - paragraph [ref=e234]: Mia Chen
+              - cell "mia.chen@email.com 0478901234" [ref=e235]:
+                - paragraph [ref=e236]: mia.chen@email.com
+                - paragraph [ref=e237]: "0478901234"
+              - cell "Brisbane City, QLD" [ref=e238]
+              - cell "7 Feb 2026" [ref=e239]
+              - cell [ref=e240]:
+                - button [ref=e242]:
+                  - img [ref=e243]
+            - row "Olivia Brown olivia.b@email.com 0456789012 Brisbane City, QLD 7 Feb 2026" [ref=e245] [cursor=pointer]:
+              - cell [ref=e246]:
+                - checkbox [ref=e247]
+              - cell "Olivia Brown" [ref=e248]:
+                - paragraph [ref=e249]: Olivia Brown
+              - cell "olivia.b@email.com 0456789012" [ref=e250]:
+                - paragraph [ref=e251]: olivia.b@email.com
+                - paragraph [ref=e252]: "0456789012"
+              - cell "Brisbane City, QLD" [ref=e253]
+              - cell "7 Feb 2026" [ref=e254]
+              - cell [ref=e255]:
+                - button [ref=e257]:
+                  - img [ref=e258]
+            - row "Rachel Anderson rachel.a@email.com 0445678901 Teneriffe, QLD 7 Feb 2026" [ref=e260] [cursor=pointer]:
+              - cell [ref=e261]:
+                - checkbox [ref=e262]
+              - cell "Rachel Anderson" [ref=e263]:
+                - paragraph [ref=e264]: Rachel Anderson
+              - cell "rachel.a@email.com 0445678901" [ref=e265]:
+                - paragraph [ref=e266]: rachel.a@email.com
+                - paragraph [ref=e267]: "0445678901"
+              - cell "Teneriffe, QLD" [ref=e268]
+              - cell "7 Feb 2026" [ref=e269]
+              - cell [ref=e270]:
+                - button [ref=e272]:
+                  - img [ref=e273]
+            - row "Sarah Mitchell sarah@email.com 0412345678 Newstead, QLD 7 Feb 2026" [ref=e275] [cursor=pointer]:
+              - cell [ref=e276]:
+                - checkbox [ref=e277]
+              - cell "Sarah Mitchell" [ref=e278]:
+                - paragraph [ref=e279]: Sarah Mitchell
+              - cell "sarah@email.com 0412345678" [ref=e280]:
+                - paragraph [ref=e281]: sarah@email.com
+                - paragraph [ref=e282]: "0412345678"
+              - cell "Newstead, QLD" [ref=e283]
+              - cell "7 Feb 2026" [ref=e284]
+              - cell [ref=e285]:
+                - button [ref=e287]:
+                  - img [ref=e288]
+            - row "Sophie Walker sophie.w@email.com 0467890123 Fortitude Valley, QLD 7 Feb 2026" [ref=e290] [cursor=pointer]:
+              - cell [ref=e291]:
+                - checkbox [ref=e292]
+              - cell "Sophie Walker" [ref=e293]:
+                - paragraph [ref=e294]: Sophie Walker
+              - cell "sophie.w@email.com 0467890123" [ref=e295]:
+                - paragraph [ref=e296]: sophie.w@email.com
+                - paragraph [ref=e297]: "0467890123"
+              - cell "Fortitude Valley, QLD" [ref=e298]
+              - cell "7 Feb 2026" [ref=e299]
+              - cell [ref=e300]:
+                - button [ref=e302]:
+                  - img [ref=e303]
+```

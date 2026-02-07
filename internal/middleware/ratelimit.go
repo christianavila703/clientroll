@@ -60,12 +60,12 @@ func NewAuthRateLimiter(redis *database.Redis) *RateLimiter {
 	return NewRateLimiter(redis, 120, 15*time.Minute)
 }
 
-// NewLoginRateLimiter creates a stricter rate limiter specifically for login.
-// 10 attempts per 15 minutes per IP — brute force protection.
+// NewLoginRateLimiter creates a rate limiter for login endpoints.
+// 200 attempts per 15 minutes per IP.
 func NewLoginRateLimiter(redis *database.Redis) *RateLimiter {
 	return &RateLimiter{
 		redis:       redis,
-		maxAttempts: 10,
+		maxAttempts: 200,
 		window:      15 * time.Minute,
 	}
 }

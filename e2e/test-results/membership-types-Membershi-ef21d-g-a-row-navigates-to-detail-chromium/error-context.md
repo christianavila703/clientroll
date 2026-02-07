@@ -1,0 +1,123 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - button "Create new" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+      - text: Create new
+      - img [ref=e13]
+    - navigation [ref=e15]:
+      - link "Home" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e17]
+        - text: Home
+      - link "Clients" [ref=e19] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e20]
+        - text: Clients
+      - link "Active Members" [ref=e22] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e23]
+        - text: Active Members
+      - link "Membership Types" [ref=e25] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e26]
+        - text: Membership Types
+      - link "Bonuses" [ref=e28] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e29]
+        - text: Bonuses
+      - link "Terms" [ref=e31] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e32]
+        - text: Terms
+      - link "Payments" [ref=e34] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e35]
+        - text: Payments
+      - link "Reports" [ref=e37] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e38]
+        - text: Reports
+      - link "Team" [ref=e40] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e41]
+        - text: Team
+      - link "Settings" [ref=e43] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e44]
+        - text: Settings
+    - generic [ref=e47]:
+      - generic [ref=e48]: U
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: User
+        - paragraph [ref=e51]: Admin
+      - button "Sign out" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+  - generic [ref=e55]:
+    - banner [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - textbox "Search clients, memberships..." [ref=e60]
+      - button "3" [ref=e63] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e66]: "3"
+    - main [ref=e67]:
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - button [ref=e70] [cursor=pointer]:
+            - img [ref=e71]
+          - generic [ref=e73]:
+            - generic [ref=e74]:
+              - heading "Platinum Membership" [level=1] [ref=e75]
+              - generic [ref=e76]: Active
+            - paragraph [ref=e77]: /platinum-membership
+        - generic [ref=e78]:
+          - button "Term Options & Pricing" [ref=e79] [cursor=pointer]
+          - button "Bonuses" [ref=e80] [cursor=pointer]
+          - button "Terms & Conditions" [ref=e81] [cursor=pointer]
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - paragraph [ref=e84]: Define pricing options for different contract lengths
+            - button "+ Add term option" [ref=e85] [cursor=pointer]
+          - table [ref=e87]:
+            - rowgroup [ref=e88]:
+              - row "Duration Total Weekly Fortnightly Monthly Upfront Bonuses" [ref=e89]:
+                - columnheader "Duration" [ref=e90]
+                - columnheader "Total" [ref=e91]
+                - columnheader "Weekly" [ref=e92]
+                - columnheader "Fortnightly" [ref=e93]
+                - columnheader "Monthly" [ref=e94]
+                - columnheader "Upfront" [ref=e95]
+                - columnheader "Bonuses" [ref=e96]
+                - columnheader [ref=e97]
+            - rowgroup [ref=e98]:
+              - row "6 months $3,600 $150 $300 $600 Yes 0" [ref=e99]:
+                - cell "6 months" [ref=e100]
+                - cell "$3,600" [ref=e101]
+                - cell "$150" [ref=e102]
+                - cell "$300" [ref=e103]
+                - cell "$600" [ref=e104]
+                - cell "Yes" [ref=e105]:
+                  - generic [ref=e106]: "Yes"
+                - cell "0" [ref=e107]
+                - cell [ref=e108]:
+                  - button [ref=e109] [cursor=pointer]:
+                    - img [ref=e110]
+              - row "12 months $7,200 $138 $277 $600 Yes 5" [ref=e112]:
+                - cell "12 months" [ref=e113]
+                - cell "$7,200" [ref=e114]
+                - cell "$138" [ref=e115]
+                - cell "$277" [ref=e116]
+                - cell "$600" [ref=e117]
+                - cell "Yes" [ref=e118]:
+                  - generic [ref=e119]: "Yes"
+                - cell "5" [ref=e120]
+                - cell [ref=e121]:
+                  - button [ref=e122] [cursor=pointer]:
+                    - img [ref=e123]
+```

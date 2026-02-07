@@ -1,0 +1,160 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - button "Create new" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+      - text: Create new
+      - img [ref=e13]
+    - navigation [ref=e15]:
+      - link "Home" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e17]
+        - text: Home
+      - link "Clients" [ref=e19] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e20]
+        - text: Clients
+      - link "Active Members" [ref=e22] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e23]
+        - text: Active Members
+      - link "Membership Types" [ref=e25] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e26]
+        - text: Membership Types
+      - link "Bonuses" [ref=e28] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e29]
+        - text: Bonuses
+      - link "Terms" [ref=e31] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e32]
+        - text: Terms
+      - link "Payments" [ref=e34] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e35]
+        - text: Payments
+      - link "Reports" [ref=e37] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e38]
+        - text: Reports
+      - link "Team" [ref=e40] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e41]
+        - text: Team
+      - link "Settings" [ref=e43] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e44]
+        - text: Settings
+    - generic [ref=e47]:
+      - generic [ref=e48]: U
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: User
+        - paragraph [ref=e51]: Admin
+      - button "Sign out" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+  - generic [ref=e55]:
+    - banner [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - textbox "Search clients, memberships..." [ref=e60]
+      - button "3" [ref=e63] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e66]: "3"
+    - main [ref=e67]:
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - heading "Bonuses" [level=1] [ref=e70]
+          - button "New bonus" [ref=e71] [cursor=pointer]:
+            - img [ref=e72]
+            - text: New bonus
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - img [ref=e76]
+            - textbox "Search..." [ref=e78]
+          - generic [ref=e79]: 5 results
+        - table [ref=e81]:
+          - rowgroup [ref=e82]:
+            - row "Bonus Value Status Last Updated" [ref=e83]:
+              - columnheader "Bonus" [ref=e84]
+              - columnheader "Value" [ref=e85]
+              - columnheader "Status" [ref=e86]
+              - columnheader "Last Updated" [ref=e87]
+              - columnheader [ref=e88]
+          - rowgroup [ref=e89]:
+            - row "Free Body Composition Scan Comprehensive InBody scan to track your starting measurements and body composition. $150 Active 7 February 2026" [ref=e90] [cursor=pointer]:
+              - cell "Free Body Composition Scan Comprehensive InBody scan to track your starting measurements and body composition." [ref=e91]:
+                - generic [ref=e92]:
+                  - img [ref=e94]
+                  - generic [ref=e96]:
+                    - paragraph [ref=e97]: Free Body Composition Scan
+                    - paragraph [ref=e98]: Comprehensive InBody scan to track your starting measurements and body composition.
+              - cell "$150" [ref=e99]
+              - cell "Active" [ref=e100]:
+                - generic [ref=e101]: Active
+              - cell "7 February 2026" [ref=e102]
+              - cell [ref=e103]:
+                - button "Delete" [ref=e104]:
+                  - img [ref=e105]
+            - row "Personal Training Session One-on-one personal training session with a certified trainer to kick-start your journey. $120 Active 7 February 2026" [ref=e107] [cursor=pointer]:
+              - cell "Personal Training Session One-on-one personal training session with a certified trainer to kick-start your journey." [ref=e108]:
+                - generic [ref=e109]:
+                  - img [ref=e111]
+                  - generic [ref=e113]:
+                    - paragraph [ref=e114]: Personal Training Session
+                    - paragraph [ref=e115]: One-on-one personal training session with a certified trainer to kick-start your journey.
+              - cell "$120" [ref=e116]
+              - cell "Active" [ref=e117]:
+                - generic [ref=e118]: Active
+              - cell "7 February 2026" [ref=e119]
+              - cell [ref=e120]:
+                - button "Delete" [ref=e121]:
+                  - img [ref=e122]
+            - row "Nutrition Consultation Personalised nutrition plan and consultation with our wellness expert. $200 Active 7 February 2026" [ref=e124] [cursor=pointer]:
+              - cell "Nutrition Consultation Personalised nutrition plan and consultation with our wellness expert." [ref=e125]:
+                - generic [ref=e126]:
+                  - img [ref=e128]
+                  - generic [ref=e130]:
+                    - paragraph [ref=e131]: Nutrition Consultation
+                    - paragraph [ref=e132]: Personalised nutrition plan and consultation with our wellness expert.
+              - cell "$200" [ref=e133]
+              - cell "Active" [ref=e134]:
+                - generic [ref=e135]: Active
+              - cell "7 February 2026" [ref=e136]
+              - cell [ref=e137]:
+                - button "Delete" [ref=e138]:
+                  - img [ref=e139]
+            - row "Wellness Starter Pack Includes branded water bottle, gym towel, and supplement samples. $80 Active 7 February 2026" [ref=e141] [cursor=pointer]:
+              - cell "Wellness Starter Pack Includes branded water bottle, gym towel, and supplement samples." [ref=e142]:
+                - generic [ref=e143]:
+                  - img [ref=e145]
+                  - generic [ref=e147]:
+                    - paragraph [ref=e148]: Wellness Starter Pack
+                    - paragraph [ref=e149]: Includes branded water bottle, gym towel, and supplement samples.
+              - cell "$80" [ref=e150]
+              - cell "Active" [ref=e151]:
+                - generic [ref=e152]: Active
+              - cell "7 February 2026" [ref=e153]
+              - cell [ref=e154]:
+                - button "Delete" [ref=e155]:
+                  - img [ref=e156]
+            - row "Infrared Sauna Sessions (5x) Five complimentary infrared sauna sessions for detox and recovery. $250 Active 7 February 2026" [ref=e158] [cursor=pointer]:
+              - cell "Infrared Sauna Sessions (5x) Five complimentary infrared sauna sessions for detox and recovery." [ref=e159]:
+                - generic [ref=e160]:
+                  - img [ref=e162]
+                  - generic [ref=e164]:
+                    - paragraph [ref=e165]: Infrared Sauna Sessions (5x)
+                    - paragraph [ref=e166]: Five complimentary infrared sauna sessions for detox and recovery.
+              - cell "$250" [ref=e167]
+              - cell "Active" [ref=e168]:
+                - generic [ref=e169]: Active
+              - cell "7 February 2026" [ref=e170]
+              - cell [ref=e171]:
+                - button "Delete" [ref=e172]:
+                  - img [ref=e173]
+```

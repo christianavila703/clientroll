@@ -1,0 +1,113 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - button "Create new" [ref=e10] [cursor=pointer]:
+      - img [ref=e11]
+      - text: Create new
+      - img [ref=e13]
+    - navigation [ref=e15]:
+      - link "Home" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e17]
+        - text: Home
+      - link "Clients" [ref=e19] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e20]
+        - text: Clients
+      - link "Active Members" [ref=e22] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e23]
+        - text: Active Members
+      - link "Membership Types" [ref=e25] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e26]
+        - text: Membership Types
+      - link "Bonuses" [ref=e28] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e29]
+        - text: Bonuses
+      - link "Terms" [ref=e31] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e32]
+        - text: Terms
+      - link "Payments" [ref=e34] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e35]
+        - text: Payments
+      - link "Reports" [ref=e37] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e38]
+        - text: Reports
+      - link "Team" [ref=e40] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e41]
+        - text: Team
+      - link "Settings" [ref=e43] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e44]
+        - text: Settings
+    - generic [ref=e47]:
+      - generic [ref=e48]: U
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: User
+        - paragraph [ref=e51]: Admin
+      - button "Sign out" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+  - generic [ref=e55]:
+    - banner [ref=e56]:
+      - generic [ref=e57]:
+        - img [ref=e58]
+        - textbox "Search clients, memberships..." [ref=e60]
+      - button "3" [ref=e63] [cursor=pointer]:
+        - img [ref=e64]
+        - generic [ref=e66]: "3"
+    - main [ref=e67]:
+      - generic [ref=e68]:
+        - heading "Memberships" [level=1] [ref=e70]
+        - generic [ref=e71]:
+          - button "Active" [ref=e72] [cursor=pointer]
+          - button "Expired" [active] [ref=e73] [cursor=pointer]
+          - button "Cancelled" [ref=e74] [cursor=pointer]
+          - button "All" [ref=e75] [cursor=pointer]
+        - generic [ref=e76]:
+          - generic [ref=e77]:
+            - img [ref=e78]
+            - textbox "Search by client or type..." [ref=e80]
+          - generic [ref=e81]: 1 results
+        - table [ref=e84]:
+          - rowgroup [ref=e85]:
+            - row "Client Membership Term Payment Last Payment Paid / Expected Ends Status" [ref=e86]:
+              - columnheader "Client" [ref=e87]
+              - columnheader "Membership" [ref=e88]
+              - columnheader "Term" [ref=e89]
+              - columnheader "Payment" [ref=e90]
+              - columnheader "Last Payment" [ref=e91]
+              - columnheader "Paid / Expected" [ref=e92]
+              - columnheader "Ends" [ref=e93]
+              - columnheader "Status" [ref=e94]
+          - rowgroup [ref=e95]:
+            - row "Grace Patel grace.p@email.com Silver Membership 6mo $200.00 Monthly No payments $0 $1,200 1 Dec 2025 68d overdue expired" [ref=e96]:
+              - cell "Grace Patel grace.p@email.com" [ref=e97]:
+                - paragraph [ref=e98]: Grace Patel
+                - paragraph [ref=e99]: grace.p@email.com
+              - cell "Silver Membership" [ref=e100]
+              - cell "6mo" [ref=e101]
+              - cell "$200.00 Monthly" [ref=e102]:
+                - paragraph [ref=e103]: $200.00
+                - paragraph [ref=e104]: Monthly
+              - cell "No payments" [ref=e105]
+              - cell "$0 $1,200" [ref=e106]:
+                - generic [ref=e108]:
+                  - generic [ref=e109]: $0
+                  - generic [ref=e110]: $1,200
+              - cell "1 Dec 2025 68d overdue" [ref=e112]:
+                - paragraph [ref=e113]: 1 Dec 2025
+                - paragraph [ref=e114]: 68d overdue
+              - cell "expired" [ref=e115]:
+                - generic [ref=e116]: expired
+```

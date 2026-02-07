@@ -1,0 +1,140 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: C
+      - generic [ref=e7]: ClientRoll
+    - generic [ref=e9]:
+      - button "Create new" [active] [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+        - text: Create new
+        - img [ref=e13]
+      - generic [ref=e15]:
+        - button "Client Add to your client list" [ref=e16] [cursor=pointer]:
+          - img [ref=e18]
+          - generic [ref=e20]:
+            - paragraph [ref=e21]: Client
+            - paragraph [ref=e22]: Add to your client list
+        - button "Membership Type Define a new offering" [ref=e23] [cursor=pointer]:
+          - img [ref=e25]
+          - generic [ref=e27]:
+            - paragraph [ref=e28]: Membership Type
+            - paragraph [ref=e29]: Define a new offering
+        - button "Bonus Create a signup bonus" [ref=e30] [cursor=pointer]:
+          - img [ref=e32]
+          - generic [ref=e34]:
+            - paragraph [ref=e35]: Bonus
+            - paragraph [ref=e36]: Create a signup bonus
+    - navigation [ref=e37]:
+      - link "Home" [ref=e38] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e39]
+        - text: Home
+      - link "Clients" [ref=e41] [cursor=pointer]:
+        - /url: /clients
+        - img [ref=e42]
+        - text: Clients
+      - link "Active Members" [ref=e44] [cursor=pointer]:
+        - /url: /active-memberships
+        - img [ref=e45]
+        - text: Active Members
+      - link "Membership Types" [ref=e47] [cursor=pointer]:
+        - /url: /memberships
+        - img [ref=e48]
+        - text: Membership Types
+      - link "Bonuses" [ref=e50] [cursor=pointer]:
+        - /url: /bonuses
+        - img [ref=e51]
+        - text: Bonuses
+      - link "Terms" [ref=e53] [cursor=pointer]:
+        - /url: /terms
+        - img [ref=e54]
+        - text: Terms
+      - link "Payments" [ref=e56] [cursor=pointer]:
+        - /url: /payments
+        - img [ref=e57]
+        - text: Payments
+      - link "Reports" [ref=e59] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e60]
+        - text: Reports
+      - link "Team" [ref=e62] [cursor=pointer]:
+        - /url: /staff
+        - img [ref=e63]
+        - text: Team
+      - link "Settings" [ref=e65] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e66]
+        - text: Settings
+    - generic [ref=e69]:
+      - generic [ref=e70]: U
+      - generic [ref=e71]:
+        - paragraph [ref=e72]: User
+        - paragraph [ref=e73]: Admin
+      - button "Sign out" [ref=e74] [cursor=pointer]:
+        - img [ref=e75]
+  - generic [ref=e77]:
+    - banner [ref=e78]:
+      - generic [ref=e79]:
+        - img [ref=e80]
+        - textbox "Search clients, memberships..." [ref=e82]
+      - button "3" [ref=e85] [cursor=pointer]:
+        - img [ref=e86]
+        - generic [ref=e88]: "3"
+    - main [ref=e89]:
+      - generic [ref=e90]:
+        - generic [ref=e91]:
+          - button [ref=e92] [cursor=pointer]:
+            - img [ref=e93]
+          - generic [ref=e95]:
+            - generic [ref=e96]:
+              - heading "Platinum Membership" [level=1] [ref=e97]
+              - generic [ref=e98]: Active
+            - paragraph [ref=e99]: /platinum-membership
+        - generic [ref=e100]:
+          - button "Term Options & Pricing" [ref=e101] [cursor=pointer]
+          - button "Bonuses" [ref=e102] [cursor=pointer]
+          - button "Terms & Conditions" [ref=e103] [cursor=pointer]
+        - generic [ref=e104]:
+          - generic [ref=e105]:
+            - paragraph [ref=e106]: Define pricing options for different contract lengths
+            - button "+ Add term option" [ref=e107] [cursor=pointer]
+          - table [ref=e109]:
+            - rowgroup [ref=e110]:
+              - row "Duration Total Weekly Fortnightly Monthly Upfront Bonuses" [ref=e111]:
+                - columnheader "Duration" [ref=e112]
+                - columnheader "Total" [ref=e113]
+                - columnheader "Weekly" [ref=e114]
+                - columnheader "Fortnightly" [ref=e115]
+                - columnheader "Monthly" [ref=e116]
+                - columnheader "Upfront" [ref=e117]
+                - columnheader "Bonuses" [ref=e118]
+                - columnheader [ref=e119]
+            - rowgroup [ref=e120]:
+              - row "6 months $3,600 $150 $300 $600 Yes 0" [ref=e121]:
+                - cell "6 months" [ref=e122]
+                - cell "$3,600" [ref=e123]
+                - cell "$150" [ref=e124]
+                - cell "$300" [ref=e125]
+                - cell "$600" [ref=e126]
+                - cell "Yes" [ref=e127]:
+                  - generic [ref=e128]: "Yes"
+                - cell "0" [ref=e129]
+                - cell [ref=e130]:
+                  - button [ref=e131] [cursor=pointer]:
+                    - img [ref=e132]
+              - row "12 months $7,200 $138 $277 $600 Yes 5" [ref=e134]:
+                - cell "12 months" [ref=e135]
+                - cell "$7,200" [ref=e136]
+                - cell "$138" [ref=e137]
+                - cell "$277" [ref=e138]
+                - cell "$600" [ref=e139]
+                - cell "Yes" [ref=e140]:
+                  - generic [ref=e141]: "Yes"
+                - cell "5" [ref=e142]
+                - cell [ref=e143]:
+                  - button [ref=e144] [cursor=pointer]:
+                    - img [ref=e145]
+```
