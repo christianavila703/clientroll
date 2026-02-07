@@ -140,6 +140,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
+	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db)
 	fileStore := storage.NewFileStore("./uploads")
 	uploadHandler := handlers.NewUploadHandler(fileStore)
 
@@ -207,6 +208,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				// Payments + Reports (Phase 6)
 				paymentHandler.RegisterRoutes(r)
 				reportsHandler.RegisterRoutes(r)
+
+				// Active memberships view
+				activeMembershipsHandler.RegisterRoutes(r)
 
 				// Integrations (GoCardless, MailerSend keys)
 				integrationsHandler.RegisterRoutes(r)

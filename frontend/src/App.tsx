@@ -13,6 +13,7 @@ import PlatformDashboard from "./components/platform/PlatformDashboard";
 import ClientsPage from "./components/clients/ClientsPage";
 import MembershipTypesPage from "./components/memberships/MembershipTypesPage";
 import MembershipTypeDetail from "./components/memberships/MembershipTypeDetail";
+import ActiveMembershipsPage from "./components/memberships/ActiveMembershipsPage";
 import SignupPage from "./components/signup/SignupPage";
 import PaymentsPage from "./components/payments/PaymentsPage";
 import ReportsPage from "./components/reports/ReportsPage";
@@ -39,6 +40,7 @@ function App() {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/active-memberships" element={<ActiveMembershipsPage />} />
           <Route path="/memberships" element={<MembershipTypesPage />} />
           <Route path="/memberships/:mtId" element={<MembershipTypeDetail />} />
           <Route path="/bonuses" element={<BonusesPage />} />
