@@ -84,14 +84,14 @@ export default function LoginPage() {
             <div className="mb-5 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-[13px] text-red-600">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-7">
             <div>
               <label htmlFor="email" className="block text-[15px] font-medium text-gray-900 mb-2">
                 Business email
               </label>
               <input
                 id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-full rounded-xl border-2 border-gray-100 bg-white px-4 py-3.5 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:outline-none transition-colors"
                 placeholder="you@company.com" required autoComplete="email"
               />
             </div>
@@ -105,7 +105,7 @@ export default function LoginPage() {
                 <input
                   id="password" type={showPassword ? "text" : "password"} value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 pr-12 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                  className="w-full rounded-xl border-2 border-gray-100 bg-white px-4 py-3.5 pr-14 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:outline-none transition-colors"
                   required autoComplete="current-password"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
@@ -120,13 +120,13 @@ export default function LoginPage() {
             </div>
 
             <button type="submit" disabled={loading}
-              className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 text-[15px] font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+              className="w-full rounded-2xl bg-indigo-600 px-4 py-4 text-[15px] font-semibold text-white hover:bg-indigo-700 focus:outline-none disabled:opacity-50 transition-colors"
             >
               {loading ? "Logging in..." : "Log in"}
             </button>
 
             <Link to="/register"
-              className="flex w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-[15px] font-medium text-indigo-600 hover:bg-gray-50 transition-colors"
+              className="flex w-full items-center justify-center rounded-2xl border-2 border-gray-100 bg-white px-4 py-4 text-[15px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               New to ClientRoll? Sign up
             </Link>
