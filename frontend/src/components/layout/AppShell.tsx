@@ -10,11 +10,8 @@ export default function AppShell() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
-          <span className="text-sm text-gray-500">Loading...</span>
-        </div>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-600" />
       </div>
     );
   }
@@ -24,13 +21,11 @@ export default function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-
       <div className="flex flex-1 flex-col min-w-0">
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-
-        <main className="flex-1 p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 bg-gray-50/50 p-4 lg:p-6">
           <Outlet />
         </main>
       </div>

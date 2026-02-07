@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: ["./src/**/*.{ts,tsx}", "../web/index.html"],
+  content: ["./src/**/*.{ts,tsx}", "./src/index.html"],
   theme: {
     extend: {
       colors: {
@@ -19,16 +19,13 @@ const config: Config = {
           950: "#1e1b4b",
         },
       },
-      fontFamily: {
-        sans: [
-          "Inter",
-          "system-ui",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "Roboto",
-          "sans-serif",
-        ],
+      fontSize: {
+        "2xs": ["11px", { lineHeight: "16px" }],
+      },
+      boxShadow: {
+        "btn": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "card": "0 0 0 1px rgb(0 0 0 / 0.05)",
+        "dropdown": "0 4px 12px rgb(0 0 0 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.05)",
       },
     },
   },
