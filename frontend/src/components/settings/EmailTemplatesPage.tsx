@@ -14,38 +14,17 @@ interface Template {
 
 const DEFAULT_TEMPLATES: Template[] = [
   {
-    id: "welcome", name: "Welcome Email", subject: "Welcome to {{company_name}}, {{first_name}}!",
-    body: "<p>Hi {{first_name}},</p><p>Your account for <strong>{{company_name}}</strong> has been created successfully. You can now start your wellness journey with us.</p><p>Visit your dashboard to get started.</p>",
-    category: "signup", description: "Sent after a new tenant registers",
-    variables: ["first_name", "company_name", "dashboard_url"],
-    lastUpdated: "7 February 2026",
-  },
-  {
     id: "membership_confirmation", name: "Membership Confirmation", subject: "Your {{membership_title}} membership is confirmed",
     body: "<p>Hi {{client_name}},</p><p>Your membership has been successfully set up:</p><ul><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Term:</strong> {{term_months}} months</li><li><strong>Total Fee:</strong> ${{total_fee}}</li></ul><p>If you have any questions, please contact us.</p>",
-    category: "signup", description: "Sent to client after completing membership signup",
+    category: "client", description: "Sent to client after completing membership signup",
     variables: ["client_name", "membership_title", "term_months", "total_fee", "company_name"],
     lastUpdated: "7 February 2026",
   },
   {
-    id: "verify_email", name: "Verify Email", subject: "Verify your email — {{company_name}}",
-    body: "<p>Hi {{first_name}},</p><p>Please confirm your email address by clicking the button below. This link expires in 24 hours.</p>",
-    category: "signup", description: "Sent during tenant registration for email verification",
-    variables: ["first_name", "verify_url"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "staff_invitation", name: "Staff Invitation", subject: "You're invited to join {{company_name}} on ClientRoll",
-    body: "<p>Hi{{invitee_name}},</p><p>{{inviter_name}} has invited you to join <strong>{{company_name}}</strong> on ClientRoll. Click below to set up your account. This link expires in 48 hours.</p>",
-    category: "signup", description: "Sent when a tenant admin invites a new staff member",
-    variables: ["invitee_name", "inviter_name", "company_name", "invite_url"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "password_reset", name: "Password Reset", subject: "Reset your ClientRoll password",
-    body: "<p>Hi {{first_name}},</p><p>We received a request to reset your password. Click the button below to choose a new one. This link expires in 1 hour.</p><p>If you didn't request this, you can safely ignore this email.</p>",
-    category: "signup", description: "Sent when a user requests a password reset",
-    variables: ["first_name", "reset_url"],
+    id: "membership_welcome", name: "New Member Welcome", subject: "Welcome to {{company_name}}, {{client_name}}!",
+    body: "<p>Hi {{client_name}},</p><p>Welcome to <strong>{{company_name}}</strong>! We're excited to have you as a member.</p><p>Your <strong>{{membership_title}}</strong> membership is now active. Here's what to expect:</p><ul><li>Your first payment of ${{payment_amount}} will be debited {{payment_frequency}}</li><li>Your membership runs until {{end_date}}</li></ul><p>If you have any questions, don't hesitate to reach out.</p>",
+    category: "client", description: "Welcome email sent to new clients after signing up",
+    variables: ["client_name", "company_name", "membership_title", "payment_amount", "payment_frequency", "end_date"],
     lastUpdated: "7 February 2026",
   },
   {
@@ -63,16 +42,16 @@ const DEFAULT_TEMPLATES: Template[] = [
     lastUpdated: "7 February 2026",
   },
   {
-    id: "payment_failed_alert", name: "Payment Failed (Admin Alert)", subject: "Payment failed: {{client_name}} — ${{amount}}",
-    body: "<p>Hi {{admin_name}},</p><p>A payment has failed:</p><ul><li><strong>Client:</strong> {{client_name}}</li><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Reason:</strong> {{failure_reason}}</li></ul><p>Review this in your dashboard under Payments.</p>",
-    category: "payments", description: "Sent to tenant admin when a client's payment fails",
+    id: "payment_failed_alert", name: "Payment Failed (Staff Alert)", subject: "Payment failed: {{client_name}} — ${{amount}}",
+    body: "<p>Hi {{admin_name}},</p><p>A payment has failed for one of your clients:</p><ul><li><strong>Client:</strong> {{client_name}}</li><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Reason:</strong> {{failure_reason}}</li></ul><p>Review this in your dashboard under Payments.</p>",
+    category: "internal", description: "Sent to staff when a client's payment fails",
     variables: ["admin_name", "client_name", "amount", "membership_title", "failure_reason"],
     lastUpdated: "7 February 2026",
   },
   {
     id: "dispute_alert", name: "Dispute Alert", subject: "Dispute opened: {{client_name}} — ${{amount}}",
     body: "<p>Hi {{admin_name}},</p><p>A payment dispute has been opened:</p><ul><li><strong>Client:</strong> {{client_name}}</li><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Reason:</strong> {{reason}}</li></ul><p>Please review and respond in your dashboard.</p>",
-    category: "payments", description: "Sent to tenant admin when a dispute is opened",
+    category: "internal", description: "Sent to staff when a client disputes a payment",
     variables: ["admin_name", "client_name", "amount", "reason"],
     lastUpdated: "7 February 2026",
   },
@@ -86,13 +65,14 @@ const DEFAULT_TEMPLATES: Template[] = [
 ];
 
 const CATEGORIES = [
-  { key: "signup", label: "Signup & Account" },
-  { key: "payments", label: "Payments" },
+  { key: "client", label: "Client Communications" },
+  { key: "payments", label: "Payment Notifications" },
+  { key: "internal", label: "Staff Alerts" },
   { key: "reminders", label: "Reminders" },
 ];
 
 export default function EmailTemplatesPage() {
-  const [tab, setTab] = useState("signup");
+  const [tab, setTab] = useState("client");
   const [editing, setEditing] = useState<Template | null>(null);
   const [search, setSearch] = useState("");
 
@@ -121,9 +101,10 @@ export default function EmailTemplatesPage() {
       </div>
 
       <p className="text-[13px] text-gray-500 mb-4">
-        {tab === "signup" && "Emails sent during registration, verification, and membership signup."}
-        {tab === "payments" && "Emails sent for payment receipts, failures, and disputes."}
-        {tab === "reminders" && "Emails sent for membership renewals and expiry reminders."}
+        {tab === "client" && "Emails sent to your clients for membership confirmations and welcomes."}
+        {tab === "payments" && "Emails sent to clients for payment receipts and failed payment notifications."}
+        {tab === "internal" && "Alerts sent to your staff when payments fail or disputes are opened."}
+        {tab === "reminders" && "Emails sent to clients when their membership is nearing expiry."}
       </p>
 
       {/* Search + count */}
