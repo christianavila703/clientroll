@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import ImageUpload from "../common/ImageUpload";
 
 interface MembershipType {
   id: string;
@@ -217,14 +218,13 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
             className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
             rows={5} placeholder={"• Unlimited access to all classes\n• Personal training session monthly\n• Nutrition consultation"} />
         </div>
-        <div>
-          <label className="block text-[13px] font-medium text-gray-700 mb-1">Hero Image</label>
-          <p className="text-[11px] text-gray-400 mb-1.5">Banner at the top of the signup page</p>
-          <div className="flex items-center gap-3">
-            <input type="url" value={form.top_image_url} onChange={(e) => setForm({ ...form, top_image_url: e.target.value })} className="input-field flex-1" placeholder="https://example.com/image.jpg" />
-            {form.top_image_url && <img src={form.top_image_url} alt="" className="h-10 w-16 rounded object-cover border border-gray-200" />}
-          </div>
-        </div>
+        <ImageUpload
+          value={form.top_image_url}
+          entityType="memberships"
+          onChange={(url) => setForm({ ...form, top_image_url: url })}
+          label="Hero Image"
+          hint="Banner displayed at the top of the public signup page"
+        />
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Total Value ($)</label>

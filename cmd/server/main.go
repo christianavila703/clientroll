@@ -142,7 +142,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db)
 	fileStore := storage.NewFileStore("./uploads")
-	uploadHandler := handlers.NewUploadHandler(fileStore)
+	fileHandler := handlers.NewFileHandler(fileStore, db)
 
 	// Health check
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +158,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Use(loginLimiter.Limit)
 			authHandler.RegisterRoutes(r)
 		})
+
+		// Public files (signup images, no auth)
+		fileHandler.RegisterPublicRoutes(r)
 
 		// Public signup flow (no auth required)
 		signupHandler.RegisterPublicRoutes(r)
@@ -218,8 +221,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				// Webhook management (Phase 7)
 				webhookHandler.RegisterRoutes(r)
 
-				// File uploads
-				uploadHandler.RegisterRoutes(r)
+				// File uploads + serving
+				fileHandler.RegisterAuthRoutes(r)
 			})
 
 			// Platform admin routes

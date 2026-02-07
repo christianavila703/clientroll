@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../api/client";
+import ImageUpload from "../common/ImageUpload";
 
 interface AgreementData {
   company_name?: string;
@@ -203,13 +204,13 @@ function TenantSettings() {
               placeholder="Your membership has been successfully created."
             />
           </div>
-          <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Image URL</label>
-            <div className="flex items-center gap-3">
-              <input value={data.default_thankyou_image_url || ""} onChange={(e) => setData({ ...data, default_thankyou_image_url: e.target.value })} className="input-field flex-1" placeholder="https://example.com/thankyou.jpg" />
-              {data.default_thankyou_image_url && <img src={data.default_thankyou_image_url} alt="" className="h-10 w-16 rounded object-cover border border-gray-200" />}
-            </div>
-          </div>
+          <ImageUpload
+            value={data.default_thankyou_image_url || ""}
+            entityType="thankyou"
+            onChange={(url) => setData({ ...data, default_thankyou_image_url: url })}
+            label="Image"
+            hint="Shown on the thank you page after signup"
+          />
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Redirect URL</label>
             <p className="text-[11px] text-gray-400 mb-1.5">Optional — auto-redirect after 5 seconds</p>

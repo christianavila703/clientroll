@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../../api/client";
+import ImageUpload from "../common/ImageUpload";
 
 interface Bonus {
   id: string;
@@ -202,14 +203,13 @@ function BonusForm({ initial, onSaved, onCancel }: {
             placeholder="Describe what the client receives..."
           />
         </div>
-        <div>
-          <label className="block text-[13px] font-medium text-gray-700 mb-1">Image</label>
-          <p className="text-[11px] text-gray-400 mb-1.5">Displayed as a visual card during signup</p>
-          <div className="flex items-center gap-3">
-            <input type="url" value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} className="input-field flex-1" placeholder="https://example.com/image.jpg" />
-            {form.image_url && <img src={form.image_url} alt="" className="h-10 w-16 rounded object-cover border border-gray-200" />}
-          </div>
-        </div>
+        <ImageUpload
+          value={form.image_url}
+          entityType="bonuses"
+          onChange={(url) => setForm({ ...form, image_url: url })}
+          label="Image"
+          hint="Displayed as a visual card during signup"
+        />
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Value ($)</label>
