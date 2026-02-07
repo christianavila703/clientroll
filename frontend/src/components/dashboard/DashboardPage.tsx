@@ -4,100 +4,202 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
-interface Summary {
-  active_members: number;
-  month_revenue: number;
-  failed_payments: number;
-  new_signups: number;
-  open_disputes: number;
-}
-
+interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; }
 interface MonthlyData { month: string; revenue: number; }
+interface BreakdownData { type_title: string; revenue: number; count: number; }
+interface RecentClient { id: string; name: string; email?: string; created_at: string; }
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [monthly, setMonthly] = useState<MonthlyData[]>([]);
+  const [breakdown, setBreakdown] = useState<BreakdownData[]>([]);
+  const [recentClients, setRecentClients] = useState<RecentClient[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     const h = { Authorization: `Bearer ${token}` };
     fetch("/api/tenant/reports/dashboard", { headers: h }).then(r => r.json()).then(setSummary).catch(() => {});
     fetch("/api/tenant/reports/revenue/monthly", { headers: h }).then(r => r.json()).then(d => setMonthly(d.months || [])).catch(() => {});
+    fetch("/api/tenant/reports/memberships/breakdown", { headers: h }).then(r => r.json()).then(d => setBreakdown(d.breakdown || [])).catch(() => {});
+    fetch("/api/tenant/clients?search=", { headers: h }).then(r => r.json()).then(d => setRecentClients((d.clients || []).slice(0, 7))).catch(() => {});
   }, []);
 
-  return (
-    <div className="max-w-6xl">
-      <h1 className="text-lg font-semibold text-gray-900 mb-5">Overview</h1>
+  const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
+  const totalBreakdownRevenue = breakdown.reduce((s, b) => s + b.revenue, 0);
 
-      {/* Alerts */}
-      {summary && summary.failed_payments > 0 && (
-        <Link to="/payments" className="mb-5 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800 hover:bg-amber-100 transition-colors">
-          <svg className="h-4 w-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" /></svg>
-          {summary.failed_payments} failed payment{summary.failed_payments !== 1 ? "s" : ""} require attention
-        </Link>
+  return (
+    <div>
+      <h1 className="page-title mb-5">Home</h1>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Main content */}
+        <div className="lg:col-span-2 space-y-5">
+
+          {/* Billing section */}
+          <div className="card">
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Revenue</h2>
+                <span className="text-[11px] text-gray-400">Current financial year</span>
+              </div>
+            </div>
+            <div className="px-5 pt-4 pb-2">
+              {monthly.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={monthly} barSize={20}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={v => `$${v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}`} width={45} />
+                    <Tooltip formatter={(v: number) => [`$${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "Revenue"]} contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid #e5e7eb" }} />
+                    <Bar dataKey="revenue" fill="#818cf8" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-[200px] items-center justify-center text-[13px] text-gray-400">No revenue data yet</div>
+              )}
+            </div>
+            <div className="grid grid-cols-3 divide-x divide-gray-100 border-t border-gray-200">
+              <StatBox label="This month" value={`$${fmtK(summary?.month_revenue || 0)}`} />
+              <StatBox label="Total revenue" value={`$${fmtK(totalRevenue)}`} sub={`/ $${fmtK(totalRevenue * 1.5)}`} progress={66} />
+              <StatBox label="Active members" value={String(summary?.active_members || 0)} action="View" actionTo="/active-memberships" />
+            </div>
+          </div>
+
+          {/* Payments section */}
+          <div className="card">
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Payments</h2>
+                <span className="text-[11px] text-gray-400">Collected</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 divide-x divide-gray-100">
+              <StatBox label="This month" value={`$${fmtK(summary?.month_revenue || 0)}`} progress={summary ? Math.min(Math.round((summary.month_revenue / Math.max(totalRevenue / Math.max(monthly.length, 1), 1)) * 100), 100) : 0} progressColour="bg-emerald-500" />
+              <StatBox label="New signups" value={String(summary?.new_signups || 0)} />
+              <StatBox label="Failed" value={String(summary?.failed_payments || 0)} valueColour={summary && summary.failed_payments > 0 ? "text-red-600" : undefined} />
+            </div>
+          </div>
+
+          {/* Insights table */}
+          <div className="card">
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Insights</h2>
+                <span className="text-[11px] text-gray-400">Membership performance</span>
+              </div>
+              <Link to="/reports" className="text-[12px] text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1">
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                Export
+              </Link>
+            </div>
+            {breakdown.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th className="text-right">Revenue</th>
+                      <th className="text-right">%</th>
+                      <th className="text-right">Members</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {breakdown.map(b => (
+                      <tr key={b.type_title}>
+                        <td className="font-medium text-gray-900 text-[13px]">{b.type_title}</td>
+                        <td className="text-right tabular-nums text-[13px]">${b.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="text-right text-gray-500 text-[13px]">{totalBreakdownRevenue > 0 ? Math.round((b.revenue / totalBreakdownRevenue) * 100) : 0}%</td>
+                        <td className="text-right text-gray-500 text-[13px]">{b.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="px-5 py-8 text-center text-[13px] text-gray-400">No data yet</div>
+            )}
+          </div>
+        </div>
+
+        {/* Right sidebar */}
+        <div className="space-y-5">
+          {/* Action required */}
+          <div className="card">
+            <div className="px-5 py-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900">Action required</h3>
+            </div>
+            <div className="divide-y divide-gray-50">
+              <Link to="/payments" className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-50">
+                  <svg className="h-4 w-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </div>
+                <div>
+                  <p className="text-[13px] text-gray-900">{summary?.failed_payments || 0} Failed payments</p>
+                </div>
+              </Link>
+              <Link to="/payments" className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-50">
+                  <svg className="h-4 w-4 text-orange-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" /></svg>
+                </div>
+                <div>
+                  <p className="text-[13px] text-gray-900">{summary?.open_disputes || 0} Open disputes</p>
+                </div>
+              </Link>
+            </div>
+          </div>
+
+          {/* Recent clients */}
+          <div className="card">
+            <div className="px-5 py-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900">Recent</h3>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {recentClients.map(c => (
+                <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center gap-3 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-semibold flex-shrink-0">
+                    {c.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium text-gray-900 truncate">{c.name}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{c.email || "Client"}</p>
+                  </div>
+                </Link>
+              ))}
+              {recentClients.length === 0 && (
+                <div className="px-5 py-6 text-center text-[13px] text-gray-400">No clients yet</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatBox({ label, value, sub, action, actionTo, progress, progressColour, valueColour }: {
+  label: string; value: string; sub?: string; action?: string; actionTo?: string;
+  progress?: number; progressColour?: string; valueColour?: string;
+}) {
+  return (
+    <div className="px-5 py-3">
+      <p className="text-[11px] text-gray-500 mb-1">{label}</p>
+      <div className="flex items-baseline gap-2">
+        <p className={`text-lg font-semibold tabular-nums ${valueColour || "text-gray-900"}`}>{value}</p>
+        {sub && <span className="text-[12px] text-gray-400 tabular-nums">{sub}</span>}
+        {action && actionTo && (
+          <Link to={actionTo} className="ml-auto rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-200 transition-colors">{action}</Link>
+        )}
+      </div>
+      {typeof progress === "number" && (
+        <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${progressColour || "bg-indigo-500"}`} style={{ width: `${Math.min(progress, 100)}%` }} />
+        </div>
       )}
-
-      {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <MetricCard label="Active members" value={summary ? String(summary.active_members) : "–"} />
-        <MetricCard label="Revenue this month" value={summary ? `$${summary.month_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "–"} />
-        <MetricCard label="Failed payments" value={summary ? String(summary.failed_payments) : "–"} alert={!!summary && summary.failed_payments > 0} />
-        <MetricCard label="New signups" value={summary ? String(summary.new_signups) : "–"} />
-      </div>
-
-      {/* Revenue chart */}
-      <div className="card mb-6">
-        <div className="card-header">
-          <h2>Revenue</h2>
-          <span className="text-[12px] text-gray-400">Last 12 months</span>
-        </div>
-        <div className="px-5 py-4">
-          {monthly.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={monthly} barSize={24}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={v => `$${v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}`} width={50} />
-                <Tooltip formatter={(v: number) => [`$${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "Revenue"]} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgb(0 0 0 / 0.06)" }} />
-                <Bar dataKey="revenue" fill="#6366f1" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-[240px] items-center justify-center text-sm text-gray-400">No revenue data yet</div>
-          )}
-        </div>
-      </div>
-
-      {/* Quick actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <QuickAction to="/clients" label="New client" desc="Add a new member" icon="M12 4.5v15m7.5-7.5h-15" />
-        <QuickAction to="/memberships" label="Memberships" desc="Manage types" icon="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-        <QuickAction to="/reports" label="Reports" desc="Financial data" icon="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-        <QuickAction to="/settings" label="Settings" desc="Configure account" icon="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </div>
     </div>
   );
 }
 
-function MetricCard({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
-  return (
-    <div className="card px-5 py-4">
-      <p className="text-[12px] font-medium text-gray-500 mb-1">{label}</p>
-      <p className={`text-2xl font-semibold tabular-nums ${alert ? "text-red-600" : "text-gray-900"}`}>{value}</p>
-    </div>
-  );
-}
-
-function QuickAction({ to, label, desc, icon }: { to: string; label: string; desc: string; icon: string }) {
-  return (
-    <Link to={to} className="card flex items-center gap-3 px-4 py-3.5 hover:border-gray-300 hover:shadow-sm transition-all group">
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-gray-100 group-hover:bg-indigo-50 transition-colors">
-        <svg className="h-4 w-4 text-gray-500 group-hover:text-indigo-600 transition-colors" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d={icon} /></svg>
-      </div>
-      <div>
-        <p className="text-[13px] font-medium text-gray-900">{label}</p>
-        <p className="text-[11px] text-gray-500">{desc}</p>
-      </div>
-    </Link>
-  );
+function fmtK(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`;
+  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
