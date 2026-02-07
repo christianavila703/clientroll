@@ -42,7 +42,7 @@ export default function LoginPage() {
         </div>
       ),
       title: "Direct Debit Payments",
-      desc: "Automated payment collection with GoCardless integration.",
+      desc: "Automated payment collection with seamless direct debit integration.",
     },
     {
       icon: (
