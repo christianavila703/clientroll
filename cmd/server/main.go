@@ -118,6 +118,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	paymentRepo := repository.NewPaymentRepo(db)
 	reportsRepo := repository.NewReportsRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
+	credRepo := repository.NewTenantCredentialRepo(db)
 
 	// Email service
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
@@ -138,6 +139,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	paymentHandler := handlers.NewPaymentHandler(paymentRepo)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
+	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
 	fileStore := storage.NewFileStore("./uploads")
 	uploadHandler := handlers.NewUploadHandler(fileStore)
 
@@ -205,6 +207,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				// Payments + Reports (Phase 6)
 				paymentHandler.RegisterRoutes(r)
 				reportsHandler.RegisterRoutes(r)
+
+				// Integrations (GoCardless, MailerSend keys)
+				integrationsHandler.RegisterRoutes(r)
 
 				// Webhook management (Phase 7)
 				webhookHandler.RegisterRoutes(r)

@@ -175,6 +175,13 @@ export const api = {
   detachTerms: (mtId: string, termsId: string) =>
     request(`/tenant/membership-types/${mtId}/terms/${termsId}`, { method: "DELETE" }),
 
+  // Integrations
+  listIntegrations: () => request("/tenant/integrations"),
+  saveIntegration: (provider: string, data: unknown) =>
+    request(`/tenant/integrations/${provider}`, { method: "PUT", body: data }),
+  deleteIntegration: (provider: string) =>
+    request(`/tenant/integrations/${provider}`, { method: "DELETE" }),
+
   // Platform admin
   listTenants: () => request("/platform/tenants"),
   createTenant: (data: unknown) =>

@@ -14,7 +14,7 @@ interface AgreementData {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<"agreement" | "tenant">("agreement");
+  const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">("agreement");
 
   return (
     <div>
@@ -26,31 +26,27 @@ export default function SettingsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-6 flex gap-1 rounded-lg bg-gray-100 p-1 max-w-md">
-        <button
-          onClick={() => setTab("agreement")}
-          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors min-h-[44px] ${
-            tab === "agreement"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          Agreement Details
-        </button>
-        <button
-          onClick={() => setTab("tenant")}
-          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors min-h-[44px] ${
-            tab === "tenant"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          Organisation
-        </button>
+      <div className="flex border-b border-gray-200 mb-5">
+        {([
+          { key: "agreement" as const, label: "Agreement Details" },
+          { key: "tenant" as const, label: "Organisation" },
+          { key: "integrations" as const, label: "Integrations" },
+        ]).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
+              tab === t.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {tab === "agreement" && <AgreementSettings />}
       {tab === "tenant" && <TenantSettings />}
+      {tab === "integrations" && <IntegrationsSettings />}
     </div>
   );
 }
@@ -224,6 +220,132 @@ function TenantSettings() {
 
       <div className="flex justify-end">
         <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Saving..." : "Save Settings"}</button>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationsSettings() {
+  const [integrations, setIntegrations] = useState<{ provider: string; environment: string; is_active: boolean; has_key: boolean; has_secret: boolean; key_hint: string }[]>([]);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    api.listIntegrations().then((data) => {
+      setIntegrations((data as { integrations: typeof integrations }).integrations || []);
+    }).catch(() => {});
+  }, []);
+
+  const providers = [
+    { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for client memberships", hasSecret: true,
+      fields: { key: "Access Token", secret: "Webhook Secret" } },
+    { id: "mailersend", name: "MailerSend", desc: "Transactional email delivery", hasSecret: false,
+      fields: { key: "API Key", secret: "" } },
+  ];
+
+  const handleSave = async (providerId: string, data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => {
+    setSaving(providerId); setMessage("");
+    try {
+      await api.saveIntegration(providerId, data);
+      setMessage(`${providerId} saved`);
+      // Reload
+      const res = (await api.listIntegrations()) as { integrations: typeof integrations };
+      setIntegrations(res.integrations || []);
+    } catch { setMessage("Failed to save"); }
+    finally { setSaving(null); }
+  };
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      {message && (
+        <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("Failed") ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
+      )}
+
+      {providers.map((provider) => {
+        const existing = integrations.find(i => i.provider === provider.id);
+        return (
+          <IntegrationCard
+            key={provider.id}
+            provider={provider}
+            existing={existing || null}
+            saving={saving === provider.id}
+            onSave={(data) => handleSave(provider.id, data)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function IntegrationCard({ provider, existing, saving, onSave }: {
+  provider: { id: string; name: string; desc: string; hasSecret: boolean; fields: { key: string; secret: string } };
+  existing: { environment: string; is_active: boolean; has_key: boolean; key_hint: string } | null;
+  saving: boolean;
+  onSave: (data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [environment, setEnvironment] = useState(existing?.environment || "sandbox");
+  const [isActive, setIsActive] = useState(existing?.is_active ?? true);
+  const [expanded, setExpanded] = useState(!existing?.has_key);
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <h3>{provider.name}</h3>
+          {existing?.has_key ? (
+            <span className="badge badge-green">Connected</span>
+          ) : (
+            <span className="badge badge-gray">Not configured</span>
+          )}
+        </div>
+        <button onClick={() => setExpanded(!expanded)} className="text-[12px] text-indigo-600 hover:text-indigo-700 font-medium">
+          {expanded ? "Collapse" : existing?.has_key ? "Update" : "Configure"}
+        </button>
+      </div>
+      <div className="card-body">
+        <p className="text-[12px] text-gray-500 mb-3">{provider.desc}</p>
+        {existing?.has_key && !expanded && (
+          <p className="text-[12px] text-gray-400">API key ending in <span className="font-mono">{existing.key_hint}</span> · {existing.environment}</p>
+        )}
+        {expanded && (
+          <div className="space-y-3 mt-2">
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">{provider.fields.key}</label>
+              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                className="input-field font-mono text-[13px]" placeholder={existing?.has_key ? "Leave blank to keep existing" : "Enter key..."} />
+            </div>
+            {provider.hasSecret && (
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">{provider.fields.secret}</label>
+                <input type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)}
+                  className="input-field font-mono text-[13px]" placeholder={existing?.has_key ? "Leave blank to keep existing" : "Enter secret..."} />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Environment</label>
+                <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className="input-field">
+                  <option value="sandbox">Sandbox</option>
+                  <option value="live">Live</option>
+                </select>
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 text-[13px] text-gray-700">
+                  <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
+                  Active
+                </label>
+              </div>
+            </div>
+            <div className="flex justify-end pt-1">
+              <button onClick={() => onSave({ api_key: apiKey, api_secret: apiSecret, environment, is_active: isActive })}
+                disabled={saving} className="btn-primary text-[12px]">
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
