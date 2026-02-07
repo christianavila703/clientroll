@@ -240,8 +240,6 @@ function IntegrationsSettings() {
   const providers = [
     { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for client memberships", hasSecret: true,
       fields: { key: "Access Token", secret: "Webhook Secret" } },
-    { id: "mailersend", name: "MailerSend", desc: "Transactional email delivery", hasSecret: false,
-      fields: { key: "API Key", secret: "" } },
   ];
 
   const handleSave = async (providerId: string, data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => {
