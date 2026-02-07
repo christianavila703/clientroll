@@ -158,10 +158,13 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		// Public signup flow (no auth required)
 		signupHandler.RegisterPublicRoutes(r)
 
-		// Public tenant registration + password reset (rate limited)
+		// Public slug check (no rate limit — read-only)
+		r.Get("/register/check-slug/{slug}", registrationHandler.CheckSlug)
+
+		// Public registration + password reset + email verify (rate limited)
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimiter.Limit)
-			registrationHandler.RegisterPublicRoutes(r)
+			r.Post("/register", registrationHandler.Register)
 			passwordResetHandler.RegisterRoutes(r)
 			emailVerifier.RegisterRoutes(r)
 		})

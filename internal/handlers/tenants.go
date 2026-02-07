@@ -52,6 +52,9 @@ func (h *TenantRegistrationHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/register/check-slug/{slug}", h.CheckSlug)
 }
 
+// Register is exported for direct route mounting.
+// CheckSlug is exported for direct route mounting.
+
 var slugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$`)
 
 // Register handles new tenant self-registration.
