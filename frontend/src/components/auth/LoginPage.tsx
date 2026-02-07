@@ -91,7 +91,7 @@ export default function LoginPage() {
               </label>
               <input
                 id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border-2 border-gray-100 bg-white px-4 py-3.5 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:outline-none transition-colors"
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600 focus:outline-none transition-all"
                 placeholder="you@company.com" required autoComplete="email"
               />
             </div>
@@ -105,7 +105,7 @@ export default function LoginPage() {
                 <input
                   id="password" type={showPassword ? "text" : "password"} value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border-2 border-gray-100 bg-white px-4 py-3.5 pr-14 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:outline-none transition-colors"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 pr-14 text-[15px] text-gray-900 placeholder:text-gray-400 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600 focus:outline-none transition-all"
                   required autoComplete="current-password"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
@@ -120,13 +120,13 @@ export default function LoginPage() {
             </div>
 
             <button type="submit" disabled={loading}
-              className="w-full rounded-2xl bg-indigo-600 px-4 py-4 text-[15px] font-semibold text-white hover:bg-indigo-700 focus:outline-none disabled:opacity-50 transition-colors"
+              className="w-full rounded-lg bg-indigo-600 px-4 py-3 text-[15px] font-semibold text-white hover:bg-indigo-700 focus:outline-none disabled:opacity-50 transition-colors"
             >
               {loading ? "Logging in..." : "Log in"}
             </button>
 
             <Link to="/register"
-              className="flex w-full items-center justify-center rounded-2xl border-2 border-gray-100 bg-white px-4 py-4 text-[15px] font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="flex w-full items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-3 text-[15px] font-medium text-indigo-600 hover:bg-gray-50 transition-colors"
             >
               New to ClientRoll? Sign up
             </Link>
