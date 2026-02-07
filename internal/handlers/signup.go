@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
 
+	"clientroll/internal/email"
 	"clientroll/internal/models"
 	"clientroll/internal/repository"
 
@@ -15,13 +17,14 @@ import (
 // SignupHandler handles the public membership signup flow.
 // These endpoints are accessible without authentication (resolved via tenant slug).
 type SignupHandler struct {
-	tenantRepo *repository.TenantRepo
-	mtRepo     *repository.MembershipTypeRepo
-	bonusRepo  *repository.BonusRepo
-	termsRepo  *repository.TermsRepo
-	clientRepo *repository.ClientRepo
-	memberRepo *repository.MembershipRepo
+	tenantRepo   *repository.TenantRepo
+	mtRepo       *repository.MembershipTypeRepo
+	bonusRepo    *repository.BonusRepo
+	termsRepo    *repository.TermsRepo
+	clientRepo   *repository.ClientRepo
+	memberRepo   *repository.MembershipRepo
 	settingsRepo *repository.SettingsRepo
+	emailSvc     email.Provider
 }
 
 // NewSignupHandler creates a new signup handler.
@@ -33,10 +36,11 @@ func NewSignupHandler(
 	cr *repository.ClientRepo,
 	mr *repository.MembershipRepo,
 	sr *repository.SettingsRepo,
+	es email.Provider,
 ) *SignupHandler {
 	return &SignupHandler{
 		tenantRepo: tr, mtRepo: mt, bonusRepo: br, termsRepo: terms,
-		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
+		clientRepo: cr, memberRepo: mr, settingsRepo: sr, emailSvc: es,
 	}
 }
 
@@ -192,6 +196,18 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// Determine thank you page
 	mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
 	thankyou := buildThankyouResponse(tenant, mt)
+
+	// Send membership confirmation email to client (async)
+	if client.Email != nil && *client.Email != "" && mt != nil {
+		go func() {
+			emailInput := email.MembershipConfirmationEmail(
+				client.Name, mt.Title, 0, input.PaymentAmount, tenant.Name)
+			emailInput.To = *client.Email
+			if _, err := h.emailSvc.Send(context.Background(), emailInput); err != nil {
+				log.Printf("Error sending membership confirmation to %s: %v", *client.Email, err)
+			}
+		}()
+	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"membership": membership,

@@ -132,7 +132,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	mtHandler := handlers.NewMembershipTypeHandler(mtRepo, termsRepo)
 	termsHandler := handlers.NewTermsHandler(termsRepo)
 	clientHandler := handlers.NewClientHandler(clientRepo)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, emailSvc)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
 	passwordResetHandler := handlers.NewPasswordResetHandler(userRepo, db, emailSvc, cfg.AppURL)
