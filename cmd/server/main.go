@@ -136,7 +136,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
 	passwordResetHandler := handlers.NewPasswordResetHandler(userRepo, db, emailSvc, cfg.AppURL)
-	paymentHandler := handlers.NewPaymentHandler(paymentRepo)
+	paymentHandler := handlers.NewPaymentHandler(paymentRepo, db)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)

@@ -1,21 +1,32 @@
 import { useState, useEffect } from "react";
-import api from "../../api/client";
+import { useNavigate } from "react-router-dom";
 
 interface Payment {
-  id: string;
+  payment_id: string;
   client_id: string;
+  client_name: string;
+  client_email?: string;
+  membership_type: string;
+  membership_id: string;
+  term_months: number;
   amount: number;
   status: string;
   due_date: string;
   paid_date?: string;
   failure_reason?: string;
   retry_count: number;
-  created_at: string;
+  total_paid: number;
+  total_expected: number;
+  membership_end: string;
+  membership_status: string;
+  payment_frequency?: string;
 }
 
 export default function PaymentsPage() {
+  const navigate = useNavigate();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [filter, setFilter] = useState("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadPayments(); }, [filter]);
@@ -34,87 +45,194 @@ export default function PaymentsPage() {
     finally { setLoading(false); }
   };
 
-  const statusColours: Record<string, string> = {
-    pending: "bg-yellow-100 text-yellow-700",
-    succeeded: "bg-green-100 text-green-700",
-    failed: "bg-red-100 text-red-700",
-    disputed: "bg-orange-100 text-orange-700",
-    refunded: "bg-gray-100 text-gray-700",
+  const filtered = payments.filter(p =>
+    !search ||
+    p.client_name.toLowerCase().includes(search.toLowerCase()) ||
+    p.membership_type.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
+
+  const daysUntilEnd = (endDate: string) => {
+    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, colour: "text-red-600" };
+    if (diff <= 30) return { text: `${diff}d left`, colour: "text-amber-600" };
+    return { text: `${diff}d left`, colour: "text-gray-500" };
   };
+
+  const tabs = [
+    { key: "", label: "All" },
+    { key: "succeeded", label: "Succeeded" },
+    { key: "failed", label: "Failed" },
+    { key: "pending", label: "Pending" },
+    { key: "disputed", label: "Disputed" },
+  ];
+
+  // Summary stats
+  const totalCount = payments.length;
+  const succeededCount = payments.filter(p => p.status === "succeeded").length;
+  const failedCount = payments.filter(p => p.status === "failed").length;
+  const totalCollected = payments.filter(p => p.status === "succeeded").reduce((s, p) => s + p.amount, 0);
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
-        <p className="mt-1 text-sm text-gray-500">Track all payment activity</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Payments</h1>
+          <p className="text-[13px] text-gray-500">Track all payment activity across memberships</p>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="mb-6 flex flex-wrap gap-2">
-        {["", "pending", "succeeded", "failed", "disputed"].map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`rounded-full px-4 py-2 text-sm font-medium min-h-[44px] transition-colors ${
-              filter === s ? "bg-primary-100 text-primary-700" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            {s || "All"}
-          </button>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Total Payments</p>
+          <p className="text-xl font-bold text-gray-900 mt-1 tabular-nums">{totalCount}</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Collected</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">${totalCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Succeeded</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">{succeededCount}</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Failed</p>
+          <p className="text-xl font-bold text-red-600 mt-1 tabular-nums">{failedCount}</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 mb-4">
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setFilter(t.key)}
+            className={`px-3 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
+              filter === t.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}>{t.label}{t.key === "failed" && failedCount > 0 ? ` (${failedCount})` : ""}</button>
         ))}
       </div>
 
+      {/* Search + count */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative max-w-xs w-full">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by client or membership..."
+            className="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[13px] placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none" />
+        </div>
+        <span className="text-[13px] text-gray-400">{filtered.length} results</span>
+      </div>
+
       {loading ? (
-        <div className="card text-center text-gray-500">Loading...</div>
-      ) : payments.length === 0 ? (
-        <div className="card text-center text-gray-500 py-12">No payments found</div>
+        <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>
+      ) : filtered.length === 0 ? (
+        <div className="card px-5 py-12 text-center text-[13px] text-gray-500">No payments found</div>
       ) : (
-        <div className="card overflow-hidden p-0">
-          {/* Desktop */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Amount</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Due Date</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Paid Date</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500">Retries</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {payments.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">${p.amount.toFixed(2)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColours[p.status] || "bg-gray-100"}`}>
+        <>
+          {/* Desktop table */}
+          <div className="card overflow-hidden hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th>Membership</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Due Date</th>
+                    <th>Paid Date</th>
+                    <th>Contract Paid</th>
+                    <th>Contract Ends</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(p => {
+                    const paidPct = p.total_expected > 0 ? Math.round((p.total_paid / p.total_expected) * 100) : 0;
+                    const remaining = Math.max(0, p.total_expected - p.total_paid);
+                    const end = daysUntilEnd(p.membership_end);
+                    return (
+                      <tr key={p.payment_id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${p.client_id}`)}>
+                        <td>
+                          <p className="font-medium text-gray-900">{p.client_name}</p>
+                          {p.client_email && <p className="text-[11px] text-gray-400">{p.client_email}</p>}
+                        </td>
+                        <td>
+                          <p className="text-gray-900">{p.membership_type}</p>
+                          <p className="text-[11px] text-gray-400">{p.term_months}mo · {fmtFreq(p.payment_frequency)}</p>
+                        </td>
+                        <td className="tabular-nums font-medium text-gray-900">${p.amount.toFixed(2)}</td>
+                        <td>
+                          <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" ? "badge-yellow" : "badge-gray"}`}>
+                            {p.status}
+                          </span>
+                          {p.retry_count > 0 && (
+                            <span className="ml-1 text-[10px] text-red-500">{p.retry_count} retries</span>
+                          )}
+                          {p.failure_reason && (
+                            <p className="text-[10px] text-red-400 mt-0.5 truncate max-w-[150px]" title={p.failure_reason}>{p.failure_reason}</p>
+                          )}
+                        </td>
+                        <td className="text-[13px] text-gray-700">{fmtDate(p.due_date)}</td>
+                        <td className="text-[13px] text-gray-500">{p.paid_date ? fmtDate(p.paid_date) : "—"}</td>
+                        <td>
+                          <div className="w-28">
+                            <div className="flex items-center justify-between text-[11px] mb-1">
+                              <span className="text-gray-500 tabular-nums">${p.total_paid.toLocaleString()}</span>
+                              <span className="text-gray-400 tabular-nums">${p.total_expected.toLocaleString()}</span>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${paidPct >= 100 ? "bg-emerald-500" : paidPct >= 50 ? "bg-indigo-500" : "bg-amber-500"}`}
+                                style={{ width: `${Math.min(paidPct, 100)}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5">${remaining.toLocaleString()} remaining</p>
+                          </div>
+                        </td>
+                        <td>
+                          <p className="text-[12px] text-gray-700">{fmtDate(p.membership_end)}</p>
+                          <p className={`text-[11px] ${end.colour}`}>{end.text}</p>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="lg:hidden space-y-3">
+            {filtered.map(p => {
+              const remaining = Math.max(0, p.total_expected - p.total_paid);
+              const end = daysUntilEnd(p.membership_end);
+              return (
+                <div key={p.payment_id} className="card px-4 py-3 cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/clients/${p.client_id}`)}>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="text-[13px] font-medium text-gray-900">{p.client_name}</p>
+                      <p className="text-[12px] text-gray-500">{p.membership_type} · {p.term_months}mo</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[14px] font-semibold text-gray-900 tabular-nums">${p.amount.toFixed(2)}</p>
+                      <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
                         {p.status}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{new Date(p.due_date).toLocaleDateString()}</td>
-                    <td className="px-4 py-3 text-gray-600">{p.paid_date ? new Date(p.paid_date).toLocaleDateString() : "—"}</td>
-                    <td className="px-4 py-3 text-gray-600">{p.retry_count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {/* Mobile */}
-          <div className="md:hidden divide-y divide-gray-100">
-            {payments.map((p) => (
-              <div key={p.id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-gray-900">${p.amount.toFixed(2)}</span>
-                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColours[p.status] || "bg-gray-100"}`}>
-                    {p.status}
-                  </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[12px]">
+                    <div><span className="text-gray-400">Due</span><p className="text-gray-700">{fmtDate(p.due_date)}</p></div>
+                    <div><span className="text-gray-400">Paid</span><p className="text-gray-700">{p.paid_date ? fmtDate(p.paid_date) : "—"}</p></div>
+                    <div><span className="text-gray-400">Contract</span><p className="tabular-nums">${p.total_paid.toLocaleString()} / ${p.total_expected.toLocaleString()}</p></div>
+                    <div><span className="text-gray-400">Ends</span><p className={end.colour}>{fmtDate(p.membership_end)} ({end.text})</p></div>
+                  </div>
+                  {p.failure_reason && <p className="mt-2 text-[11px] text-red-500">{p.failure_reason}</p>}
                 </div>
-                <p className="mt-1 text-sm text-gray-500">Due: {new Date(p.due_date).toLocaleDateString()}</p>
-                {p.failure_reason && <p className="mt-1 text-xs text-red-500">{p.failure_reason}</p>}
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
