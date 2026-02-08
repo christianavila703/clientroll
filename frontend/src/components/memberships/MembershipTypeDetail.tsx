@@ -149,7 +149,7 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly fee ($)</label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">e.g. "3" = 3 payments then stops, membership stays active</p></div>
             <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Allow upfront</label>
+              <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>
             </div>
           </div>
           <div className="flex gap-2 justify-end pt-1">
@@ -229,7 +229,7 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
             <div><span className="text-gray-400 block mb-0.5">Fortnightly</span><span className="tabular-nums text-gray-900">{to.fee_fortnightly ? `$${to.fee_fortnightly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `$${to.fee_monthly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `$${to.fee_quarterly}` : "—"}</span></div>
-            <div><span className="text-gray-400 block mb-0.5">Upfront</span><span>{to.allow_upfront ? "Yes" : "No"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">In Advance</span><span>{to.allow_upfront ? "Yes" : "Post-payment"}</span></div>
             <div><span className="text-gray-400 block mb-0.5"># Payments</span><span className="tabular-nums text-gray-900">{to.num_payments ? `${to.num_payments} then stops` : "Continuous"}</span></div>
           </div>
         </div>
@@ -280,7 +280,7 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
           <div className="flex items-end pb-1">
             <label className="flex items-center gap-2 text-[12px] text-gray-700">
               <input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
-              Allow upfront
+              Payment in advance
             </label>
           </div>
         </div>

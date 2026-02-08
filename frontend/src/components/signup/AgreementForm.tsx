@@ -227,11 +227,11 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all";
 
   const frequencies = [
-    { value: "upfront", label: "Upfront pre-payment", desc: "Pay the full amount now", icon: "💳", enabled: termOption.allow_upfront, amount: termOption.fee_total },
-    { value: "weekly", label: "Weekly", desc: "Paid in advance each week", icon: "📅", enabled: !!termOption.fee_weekly, amount: termOption.fee_weekly },
-    { value: "fortnightly", label: "Fortnightly", desc: "Paid in advance every 2 weeks", icon: "📅", enabled: !!termOption.fee_fortnightly, amount: termOption.fee_fortnightly },
-    { value: "monthly", label: "Monthly", desc: "Paid in advance each month", icon: "📅", enabled: !!termOption.fee_monthly, amount: termOption.fee_monthly },
-    { value: "quarterly", label: "Quarterly", desc: "Paid in advance every 3 months", icon: "📅", enabled: !!(termOption as any).fee_quarterly, amount: (termOption as any).fee_quarterly },
+    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termOption.allow_upfront, amount: termOption.fee_total },
+    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: !!termOption.fee_weekly, amount: termOption.fee_weekly },
+    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: !!termOption.fee_fortnightly, amount: termOption.fee_fortnightly },
+    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: !!termOption.fee_monthly, amount: termOption.fee_monthly },
+    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: !!(termOption as any).fee_quarterly, amount: (termOption as any).fee_quarterly },
   ].filter((f) => f.enabled);
 
   return (
