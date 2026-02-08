@@ -231,6 +231,7 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
     { value: "weekly", label: "Weekly", desc: "Paid in advance each week", icon: "📅", enabled: !!termOption.fee_weekly, amount: termOption.fee_weekly },
     { value: "fortnightly", label: "Fortnightly", desc: "Paid in advance every 2 weeks", icon: "📅", enabled: !!termOption.fee_fortnightly, amount: termOption.fee_fortnightly },
     { value: "monthly", label: "Monthly", desc: "Paid in advance each month", icon: "📅", enabled: !!termOption.fee_monthly, amount: termOption.fee_monthly },
+    { value: "quarterly", label: "Quarterly", desc: "Paid in advance every 3 months", icon: "📅", enabled: !!(termOption as any).fee_quarterly, amount: (termOption as any).fee_quarterly },
   ].filter((f) => f.enabled);
 
   return (

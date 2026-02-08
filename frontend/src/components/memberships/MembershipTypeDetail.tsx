@@ -9,8 +9,8 @@ interface MembershipType {
 }
 interface TermOption {
   id: string; duration_months: number; fee_total: number;
-  fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number;
-  allow_upfront: boolean; bonuses?: Bonus[];
+  fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
+  allow_upfront: boolean; num_payments?: number; bonuses?: Bonus[];
 }
 interface Bonus { id: string; title: string; value: number; image_url?: string; }
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
@@ -101,7 +101,7 @@ export default function MembershipTypeDetail() {
 // === Term Options Tab ===
 function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ duration_months: 6, fee_total: 0, fee_weekly: "", fee_fortnightly: "", fee_monthly: "", allow_upfront: true });
+  const [form, setForm] = useState({ duration_months: 6, fee_total: 0, fee_weekly: "", fee_fortnightly: "", fee_monthly: "", fee_quarterly: "", allow_upfront: true, num_payments: "" });
   const [saving, setSaving] = useState(false);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -112,6 +112,8 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
         fee_weekly: form.fee_weekly ? Number(form.fee_weekly) : null,
         fee_fortnightly: form.fee_fortnightly ? Number(form.fee_fortnightly) : null,
         fee_monthly: form.fee_monthly ? Number(form.fee_monthly) : null,
+        fee_quarterly: form.fee_quarterly ? Number(form.fee_quarterly) : null,
+        num_payments: form.num_payments ? Number(form.num_payments) : null,
       });
       setShowAdd(false); onReload();
     } catch { /* handle */ }
@@ -144,6 +146,8 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly fee ($)</label><input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly fee ($)</label><input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly fee ($)</label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly fee ($)</label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">e.g. "3" = 3 payments then stops, membership stays active</p></div>
             <div className="flex items-end pb-1">
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Allow upfront</label>
             </div>
@@ -179,7 +183,9 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
     fee_weekly: to.fee_weekly ?? "",
     fee_fortnightly: to.fee_fortnightly ?? "",
     fee_monthly: to.fee_monthly ?? "",
+    fee_quarterly: to.fee_quarterly ?? "",
     allow_upfront: to.allow_upfront,
+    num_payments: to.num_payments ?? "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -191,6 +197,8 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
         fee_weekly: form.fee_weekly !== "" ? Number(form.fee_weekly) : null,
         fee_fortnightly: form.fee_fortnightly !== "" ? Number(form.fee_fortnightly) : null,
         fee_monthly: form.fee_monthly !== "" ? Number(form.fee_monthly) : null,
+        fee_quarterly: form.fee_quarterly !== "" ? Number(form.fee_quarterly) : null,
+        num_payments: form.num_payments !== "" ? Number(form.num_payments) : null,
       });
       setEditing(false);
       onReload();
@@ -216,11 +224,13 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
           </div>
         </div>
         <div className="px-5 py-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[13px]">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-[13px]">
             <div><span className="text-gray-400 block mb-0.5">Weekly</span><span className="tabular-nums text-gray-900">{to.fee_weekly ? `$${to.fee_weekly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">Fortnightly</span><span className="tabular-nums text-gray-900">{to.fee_fortnightly ? `$${to.fee_fortnightly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `$${to.fee_monthly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `$${to.fee_quarterly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">Upfront</span><span>{to.allow_upfront ? "Yes" : "No"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5"># Payments</span><span className="tabular-nums text-gray-900">{to.num_payments ? `${to.num_payments} then stops` : "Continuous"}</span></div>
           </div>
         </div>
       </div>
@@ -257,6 +267,15 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
           <div>
             <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ($)</label>
             <input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Quarterly ($)</label>
+            <input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1"># Payments</label>
+            <input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" placeholder="Continuous" />
+            <p className="text-[10px] text-gray-400 mt-0.5">Blank = pay until end of term</p>
           </div>
           <div className="flex items-end pb-1">
             <label className="flex items-center gap-2 text-[12px] text-gray-700">

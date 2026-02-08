@@ -100,7 +100,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 	// Copy term options
 	for _, to := range source.TermOptions {
 		_, err := r.CreateTermOption(ctx, tenantID, mt.ID, to.DurationMonths,
-			to.FeeTotal, to.FeeWeekly, to.FeeFortnightly, to.FeeMonthly, to.AllowUpfront)
+			to.FeeTotal, to.FeeWeekly, to.FeeFortnightly, to.FeeMonthly, to.FeeQuarterly, to.AllowUpfront, to.NumPayments)
 		if err != nil {
 			return nil, fmt.Errorf("duplicating term option: %w", err)
 		}
@@ -110,19 +110,19 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 }
 
 // CreateTermOption adds a term option to a membership type.
-func (r *MembershipTypeRepo) CreateTermOption(ctx context.Context, tenantID, membershipTypeID uuid.UUID, durationMonths int, feeTotal float64, feeWeekly, feeFortnightly, feeMonthly *float64, allowUpfront bool) (*models.TermOption, error) {
+func (r *MembershipTypeRepo) CreateTermOption(ctx context.Context, tenantID, membershipTypeID uuid.UUID, durationMonths int, feeTotal float64, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly *float64, allowUpfront bool, numPayments *int) (*models.TermOption, error) {
 	query := `
 		INSERT INTO membership_term_options (tenant_id, membership_type_id, duration_months,
-		    fee_total, fee_weekly, fee_fortnightly, fee_monthly, allow_upfront)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		    fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, allow_upfront`
+		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments`
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipTypeID, durationMonths,
-		feeTotal, feeWeekly, feeFortnightly, feeMonthly, allowUpfront).Scan(
+		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments).Scan(
 		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.AllowUpfront)
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments)
 	if err != nil {
 		return nil, fmt.Errorf("creating term option: %w", err)
 	}
@@ -130,19 +130,19 @@ func (r *MembershipTypeRepo) CreateTermOption(ctx context.Context, tenantID, mem
 }
 
 // UpdateTermOption updates a term option.
-func (r *MembershipTypeRepo) UpdateTermOption(ctx context.Context, id, tenantID uuid.UUID, durationMonths int, feeTotal float64, feeWeekly, feeFortnightly, feeMonthly *float64, allowUpfront bool) (*models.TermOption, error) {
+func (r *MembershipTypeRepo) UpdateTermOption(ctx context.Context, id, tenantID uuid.UUID, durationMonths int, feeTotal float64, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly *float64, allowUpfront bool, numPayments *int) (*models.TermOption, error) {
 	query := `
 		UPDATE membership_term_options SET duration_months=$3, fee_total=$4,
-		    fee_weekly=$5, fee_fortnightly=$6, fee_monthly=$7, allow_upfront=$8, updated_at=NOW()
+		    fee_weekly=$5, fee_fortnightly=$6, fee_monthly=$7, fee_quarterly=$8, allow_upfront=$9, num_payments=$10, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2
 		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, allow_upfront`
+		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments`
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, durationMonths,
-		feeTotal, feeWeekly, feeFortnightly, feeMonthly, allowUpfront).Scan(
+		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments).Scan(
 		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.AllowUpfront)
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments)
 	if err != nil {
 		return nil, fmt.Errorf("updating term option: %w", err)
 	}
@@ -203,7 +203,7 @@ func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID 
 func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeID, tenantID uuid.UUID) ([]models.TermOption, error) {
 	query := `
 		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, allow_upfront
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments
 		FROM membership_term_options
 		WHERE membership_type_id = $1 AND tenant_id = $2
 		ORDER BY duration_months`
@@ -219,7 +219,7 @@ func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeI
 		var to models.TermOption
 		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
 			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
-			&to.FeeFortnightly, &to.FeeMonthly, &to.AllowUpfront); err != nil {
+			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments); err != nil {
 			return nil, err
 		}
 		opts = append(opts, to)

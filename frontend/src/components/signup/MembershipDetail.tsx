@@ -157,6 +157,11 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
                         or ${term.fee_monthly.toLocaleString()}/month
                       </p>
                     )}
+                    {(term as any).num_payments && (
+                      <p className="text-xs text-indigo-600 font-medium mt-1">
+                        {(term as any).num_payments} payments then membership stays active
+                      </p>
+                    )}
                   </button>
                 ))}
               </div>

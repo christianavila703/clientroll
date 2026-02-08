@@ -30,7 +30,9 @@ interface TermOption {
   fee_weekly?: number;
   fee_fortnightly?: number;
   fee_monthly?: number;
+  fee_quarterly?: number;
   allow_upfront: boolean;
+  num_payments?: number;
   bonuses?: Bonus[];
 }
 

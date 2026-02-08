@@ -39,7 +39,9 @@ type TermOption struct {
 	FeeWeekly        *float64  `json:"fee_weekly"`
 	FeeFortnightly   *float64  `json:"fee_fortnightly"`
 	FeeMonthly       *float64  `json:"fee_monthly"`
+	FeeQuarterly     *float64  `json:"fee_quarterly"`
 	AllowUpfront     bool      `json:"allow_upfront"`
+	NumPayments      *int      `json:"num_payments"` // if set, payments stop after N (membership stays active)
 	// Joined data
 	Bonuses          []Bonus   `json:"bonuses,omitempty"`
 }

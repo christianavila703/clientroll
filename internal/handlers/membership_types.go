@@ -204,7 +204,9 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		FeeWeekly      *float64 `json:"fee_weekly"`
 		FeeFortnightly *float64 `json:"fee_fortnightly"`
 		FeeMonthly     *float64 `json:"fee_monthly"`
+		FeeQuarterly   *float64 `json:"fee_quarterly"`
 		AllowUpfront   bool     `json:"allow_upfront"`
+		NumPayments    *int     `json:"num_payments"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.DurationMonths <= 0 {
 		writeError(w, http.StatusBadRequest, "Duration months must be positive")
@@ -212,7 +214,7 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	}
 	to, err := h.mtRepo.CreateTermOption(r.Context(), tenantID, mtID,
 		input.DurationMonths, input.FeeTotal, input.FeeWeekly,
-		input.FeeFortnightly, input.FeeMonthly, input.AllowUpfront)
+		input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments)
 	if err != nil {
 		log.Printf("Error creating term option: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create term option")
@@ -235,14 +237,16 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		FeeWeekly      *float64 `json:"fee_weekly"`
 		FeeFortnightly *float64 `json:"fee_fortnightly"`
 		FeeMonthly     *float64 `json:"fee_monthly"`
+		FeeQuarterly   *float64 `json:"fee_quarterly"`
 		AllowUpfront   bool     `json:"allow_upfront"`
+		NumPayments    *int     `json:"num_payments"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
-		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.AllowUpfront)
+		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments)
 	if err != nil {
 		log.Printf("Error updating term option: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update term option")
