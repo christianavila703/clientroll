@@ -106,8 +106,8 @@ export default function SignupPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Branded header */}
       {tenant && (
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <div className="mx-auto max-w-5xl flex items-center gap-3">
+        <header className="bg-white border-b border-gray-200 px-6 sm:px-10 py-5">
+          <div className="mx-auto max-w-6xl flex items-center gap-3">
             {tenant.logo_url ? (
               <img src={tenant.logo_url} alt="" className="h-10 w-auto" />
             ) : (
@@ -123,7 +123,7 @@ export default function SignupPage() {
         </header>
       )}
 
-      <div className="mx-auto max-w-5xl px-6 py-10">
+      <div className="mx-auto max-w-6xl px-6 sm:px-10 py-10">
         {step === "select" && (
           <MembershipSelect
             memberships={memberships}

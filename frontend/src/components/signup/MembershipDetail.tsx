@@ -30,9 +30,9 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
   }, [selectedTermIdx, currentTerm, tenantSlug, membership.slug]);
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <button onClick={onBack} className="mb-6 text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+    <div>
+      <button onClick={onBack} className="mb-8 text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1.5 group">
+        <svg className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
         Back to memberships
@@ -40,7 +40,7 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
 
       {/* Hero image - full width, prominent */}
       {membership.top_image_url && (
-        <div className="mb-8 rounded-2xl overflow-hidden shadow-lg">
+        <div className="mb-10 rounded-2xl overflow-hidden shadow-lg">
           <img
             src={membership.top_image_url}
             alt={membership.title}
@@ -49,16 +49,16 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-10 lg:grid-cols-3">
         {/* Main content - walkthrough/selling section */}
-        <div className="lg:col-span-2 space-y-8">
+        <div className="lg:col-span-2 space-y-10">
           {/* Title and value */}
           <div>
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-3">
+            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4">
               {membership.title}
             </h1>
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-primary-600 tabular-nums">
+            <div className="flex items-baseline gap-3">
+              <span className="text-4xl font-bold text-indigo-600 tabular-nums">
                 ${membership.total_value.toLocaleString()}
               </span>
               <span className="text-lg text-gray-500">total membership value</span>
@@ -67,19 +67,19 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
 
           {/* Description - selling copy */}
           {membership.description && (
-            <div className="prose prose-lg max-w-none">
-              <h2 className="text-2xl font-bold text-gray-900 mb-3">About This Membership</h2>
-              <div className="text-gray-700 text-lg leading-relaxed whitespace-pre-line">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">About This Membership</h2>
+              <p className="text-gray-700 text-[16px] leading-relaxed whitespace-pre-line">
                 {membership.description}
-              </div>
+              </p>
             </div>
           )}
 
           {/* Inclusions - what's included */}
           {membership.inclusions && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">What's Included</h2>
-              <div className="text-gray-700 text-lg leading-relaxed whitespace-pre-line bg-gray-50 rounded-xl p-6 border border-gray-200">
+              <h2 className="text-2xl font-bold text-gray-900 mb-5">What's Included</h2>
+              <div className="text-gray-700 text-[16px] leading-relaxed whitespace-pre-line bg-gray-50 rounded-2xl p-7 border border-gray-200">
                 {membership.inclusions}
               </div>
             </div>
@@ -121,7 +121,7 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
         {/* Sidebar: term selection - sticky for iPad */}
         <div className="lg:col-span-1">
           <div className="sticky top-6">
-            <div className="card shadow-lg border-2 border-gray-200">
+            <div className="rounded-2xl border border-gray-200 bg-white shadow-lg px-6 py-6">
               <h3 className="text-xl font-bold text-gray-900 mb-5">Choose Your Term</h3>
 
               <div className="space-y-3 mb-6">
@@ -164,7 +164,7 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
               {currentTerm && (
                 <button
                   onClick={() => onSelectTerm(currentTerm)}
-                  className="btn-primary w-full text-lg py-4 font-semibold shadow-md hover:shadow-lg transition-all"
+                  className="w-full rounded-xl bg-indigo-600 text-white text-lg py-4 font-semibold shadow-md hover:bg-indigo-700 hover:shadow-lg transition-all"
                 >
                   Continue to Signup →
                 </button>
