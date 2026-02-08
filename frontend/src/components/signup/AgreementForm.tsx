@@ -102,7 +102,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       </div>
 
       {/* Summary bar */}
-      <div className="card mb-6 bg-primary-50 border-primary-200">
+      <div className="card mb-6 bg-primary-50 border-primary-200 px-5 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span className="font-semibold text-gray-900">{membership.title}</span>
@@ -116,7 +116,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       {/* Step content */}
-      <div className="card">
+      <div className="card px-6 py-6 sm:px-8 sm:py-8">
         {formStep === "member" && (
           <MemberSection data={member} onChange={setMember} onNext={() => setFormStep("payment")} />
         )}
@@ -142,25 +142,25 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   return (
     <div>
-      <h2 className="text-xl font-bold text-gray-900 mb-6">Member Details</h2>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label><input value={data.name} onChange={(e) => set("name", e.target.value)} className="input-field" required /></div>
-        <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Address</label><input value={data.address} onChange={(e) => set("address", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Suburb</label><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">State</label><input value={data.state} onChange={(e) => set("state", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Postcode</label><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Email *</label><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className="input-field" required /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className="input-field" required /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+      <h2 className="text-xl font-bold text-gray-900 mb-8">Member Details</h2>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name *</label><input value={data.name} onChange={(e) => set("name", e.target.value)} className="input-field" required /></div>
+        <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1.5">Address</label><input value={data.address} onChange={(e) => set("address", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Suburb</label><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">State</label><input value={data.state} onChange={(e) => set("state", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Postcode</label><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className="input-field" required /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Phone *</label><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className="input-field" required /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Date of Birth</label><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Gender</label>
           <div className="flex gap-4 mt-2">
             {["Female", "Male"].map((g) => (<label key={g} className="flex items-center gap-2 min-h-[44px]"><input type="radio" name="gender" value={g} checked={data.gender === g} onChange={(e) => set("gender", e.target.value)} className="h-4 w-4 text-primary-600" />{g}</label>))}
           </div>
         </div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Name</label><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className="input-field" /></div>
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact Phone</label><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Emergency Contact Name</label><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className="input-field" /></div>
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Emergency Contact Phone</label><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className="input-field" /></div>
       </div>
-      <div className="mt-6 flex justify-end"><button onClick={onNext} className="btn-primary">Next: Payment Details</button></div>
+      <div className="mt-8 flex justify-end"><button onClick={onNext} className="btn-primary py-2.5 px-6">Next: Payment Details</button></div>
     </div>
   );
 }
@@ -177,14 +177,14 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-gray-900 mb-6">Payment Details</h2>
-      <div className="space-y-4">
-        <div><label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label><input type="date" value={data.start_date} onChange={(e) => set("start_date", e.target.value)} className="input-field max-w-xs" /></div>
+      <h2 className="text-xl font-bold text-gray-900 mb-8">Payment Details</h2>
+      <div className="space-y-5">
+        <div><label className="block text-sm font-medium text-gray-700 mb-1.5">Start Date</label><input type="date" value={data.start_date} onChange={(e) => set("start_date", e.target.value)} className="input-field max-w-xs" /></div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Payment Frequency</label>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {frequencies.map((f) => (
-              <label key={f.value} className="flex items-center gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50 min-h-[44px]">
+              <label key={f.value} className="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3.5 cursor-pointer hover:bg-gray-50 min-h-[48px]">
                 <input type="radio" name="frequency" value={f.value} checked={data.payment_frequency === f.value} onChange={(e) => set("payment_frequency", e.target.value)} className="h-4 w-4 text-primary-600" />
                 <span className="flex-1">{f.label}</span>
               </label>
@@ -192,9 +192,9 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
           </div>
         </div>
       </div>
-      <div className="mt-6 flex justify-between">
-        <button onClick={onBack} className="btn-secondary">Back</button>
-        <button onClick={onNext} className="btn-primary">Next: Bank Details</button>
+      <div className="mt-8 flex justify-between">
+        <button onClick={onBack} className="btn-secondary py-2.5 px-6">Back</button>
+        <button onClick={onNext} className="btn-primary py-2.5 px-6">Next: Bank Details</button>
       </div>
     </div>
   );
@@ -206,20 +206,20 @@ function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-2">Bank Account Details</h2>
-      <p className="text-sm text-gray-500 mb-6">Please fill out your bank account details for direct debit.</p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <p className="text-sm text-gray-500 mb-8">Please fill out your bank account details for direct debit.</p>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div><label className="block text-sm font-medium text-gray-700 mb-1">Name of Institution</label><input value={data.institution_name} onChange={(e) => set("institution_name", e.target.value)} className="input-field" placeholder='e.g. "Commonwealth Bank"' /></div>
         <div><label className="block text-sm font-medium text-gray-700 mb-1">Branch Location</label><input value={data.branch_location} onChange={(e) => set("branch_location", e.target.value)} className="input-field" placeholder="Suburb where branch is located" /></div>
         <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Account Holder Name(s)</label><input value={data.account_holder_name} onChange={(e) => set("account_holder_name", e.target.value)} className="input-field" /></div>
         <div><label className="block text-sm font-medium text-gray-700 mb-1">BSB</label><input value={data.bsb} onChange={(e) => set("bsb", e.target.value)} className="input-field" placeholder="000-000" /></div>
         <div><label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label><input value={data.account_number} onChange={(e) => set("account_number", e.target.value)} className="input-field" /></div>
       </div>
-      <div className="mt-6 rounded-lg bg-gray-50 p-4 text-sm text-gray-600">
+      <div className="mt-8 rounded-lg bg-gray-50 p-5 text-sm text-gray-600">
         I/we authorise <strong>{tenant.name}</strong> to debit my/our account as described in this agreement.
       </div>
-      <div className="mt-6 flex justify-between">
-        <button onClick={onBack} className="btn-secondary">Back</button>
-        <button onClick={onNext} className="btn-primary">Next: Sign Agreement</button>
+      <div className="mt-8 flex justify-between">
+        <button onClick={onBack} className="btn-secondary py-2.5 px-6">Back</button>
+        <button onClick={onNext} className="btn-primary py-2.5 px-6">Next: Sign Agreement</button>
       </div>
     </div>
   );
@@ -230,7 +230,7 @@ function SignSection({ signature, onSign, onSubmit, onBack, submitting }: { sign
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-2">Authorisation</h2>
-      <p className="text-sm text-gray-600 mb-6">
+      <p className="text-sm text-gray-600 mb-8">
         I/we have read through this Agreement in full and understand my/our obligations under this agreement.
         By signing below, I/we agree to be bound by the provisions of this Agreement.
       </p>
@@ -239,8 +239,8 @@ function SignSection({ signature, onSign, onSubmit, onBack, submitting }: { sign
         <SignatureCanvas onSave={onSign} />
         {signature && <p className="mt-2 text-xs text-green-600">Signature captured</p>}
       </div>
-      <div className="mt-8 flex justify-between">
-        <button onClick={onBack} className="btn-secondary">Back</button>
+      <div className="mt-10 flex justify-between">
+        <button onClick={onBack} className="btn-secondary py-2.5 px-6">Back</button>
         <button onClick={onSubmit} disabled={submitting || !signature} className="btn-primary text-base px-8 py-3">
           {submitting ? "Submitting..." : "Submit Agreement"}
         </button>
