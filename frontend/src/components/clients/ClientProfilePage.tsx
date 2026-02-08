@@ -220,8 +220,9 @@ export default function ClientProfilePage() {
             {/* Emergency contact */}
             {client.emergency_contact_name && (
               <div className="border-t border-gray-100 px-5 py-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-2">Emergency Contact</p>
                 <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-500 text-[11px] font-bold">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-50 text-red-500 text-[11px] font-bold">
                     {client.emergency_contact_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
                   </div>
                   <div>
