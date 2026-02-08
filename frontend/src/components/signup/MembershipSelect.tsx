@@ -52,9 +52,9 @@ export default function MembershipSelect({ memberships, onSelect }: Props) {
               )}
               <div className="mt-5 flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-indigo-600 tabular-nums">
-                  ${mt.total_value.toLocaleString()}
+                  ${((mt as any).intrinsic_value || mt.total_value).toLocaleString()}
                 </span>
-                <span className="text-[13px] text-gray-400">total value</span>
+                <span className="text-[13px] text-gray-400">membership value</span>
               </div>
               {mt.term_options && mt.term_options.length > 0 && (
                 <p className="mt-2 text-[12px] text-gray-400">

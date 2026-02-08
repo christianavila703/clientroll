@@ -26,7 +26,7 @@ func NewMembershipTypeRepo(db *database.Postgres) *MembershipTypeRepo {
 func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]models.MembershipType, error) {
 	query := `
 		SELECT id, tenant_id, title, slug, description, inclusions, top_image_url,
-		       is_active, total_value, sort_order, use_custom_thankyou,
+		       is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -64,10 +64,10 @@ func (r *MembershipTypeRepo) FindBySlug(ctx context.Context, slug string, tenant
 func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int) (*models.MembershipType, error) {
 	query := `
 		INSERT INTO membership_types (tenant_id, title, slug, description, inclusions,
-		    top_image_url, total_value, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		    top_image_url, intrinsic_value, total_value, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
 		RETURNING id, tenant_id, title, slug, description, inclusions, top_image_url,
-		          is_active, total_value, sort_order, use_custom_thankyou,
+		          is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
@@ -230,7 +230,7 @@ func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeI
 func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...interface{}) (*models.MembershipType, error) {
 	query := `
 		SELECT id, tenant_id, title, slug, description, inclusions, top_image_url,
-		       is_active, total_value, sort_order, use_custom_thankyou,
+		       is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
@@ -249,7 +249,7 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType) []interface{} {
 	return []interface{}{
 		&mt.ID, &mt.TenantID, &mt.Title, &mt.Slug, &mt.Description,
-		&mt.Inclusions, &mt.TopImageURL, &mt.IsActive, &mt.TotalValue, &mt.SortOrder,
+		&mt.Inclusions, &mt.TopImageURL, &mt.IsActive, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}

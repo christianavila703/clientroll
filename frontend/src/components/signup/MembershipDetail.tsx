@@ -59,10 +59,15 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
             </h1>
             <div className="flex items-baseline gap-3">
               <span className="text-4xl font-bold text-indigo-600 tabular-nums">
-                ${membership.total_value.toLocaleString()}
+                ${((membership as any).intrinsic_value || membership.total_value + bonuses.reduce((s, b) => s + b.value, 0)).toLocaleString()}
               </span>
               <span className="text-lg text-gray-500">total membership value</span>
             </div>
+            {bonuses.length > 0 && (
+              <p className="text-[13px] text-gray-400 mt-1">
+                Includes ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm?.duration_months}-month term
+              </p>
+            )}
           </div>
 
           {/* Description - selling copy */}

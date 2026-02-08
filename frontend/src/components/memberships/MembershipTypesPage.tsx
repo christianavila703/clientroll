@@ -9,6 +9,7 @@ interface MembershipType {
   slug: string;
   description?: string;
   is_active: boolean;
+  intrinsic_value: number;
   total_value: number;
   sort_order: number;
   term_options?: TermOption[];
@@ -180,7 +181,7 @@ export default function MembershipTypesPage() {
                       {mt.is_active ? "Active" : "Draft"}
                     </span>
                   </td>
-                  <td className="tabular-nums">${mt.total_value.toLocaleString()}</td>
+                  <td className="tabular-nums">${mt.intrinsic_value?.toLocaleString() || mt.total_value.toLocaleString()}</td>
                   <td className="text-gray-500">{mt.term_options?.length || 0} options</td>
                   <td className="text-gray-500">
                     {new Date(mt.updated_at || mt.created_at).toLocaleDateString("en-AU", {
@@ -257,7 +258,7 @@ function MtRowMenu({ mt, onArchive, onActivate, onDelete }: {
 
 function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState({
-    title: "", description: "", inclusions: "", total_value: 0, sort_order: 0, top_image_url: "",
+    title: "", description: "", inclusions: "", total_value: 0, sort_order: 0, top_image_url: "", intrinsic_value: 0,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -310,7 +311,8 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
         />
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Total Value ($)</label>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Value ($)</label>
+            <p className="text-[10px] text-gray-400 mb-1">Base value of the membership (excl. bonuses)</p>
             <input type="number" value={form.total_value} onChange={(e) => setForm({ ...form, total_value: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
           </div>
           <div>
