@@ -126,7 +126,10 @@ export default function ClientsPage() {
               </thead>
               <tbody>
                 {clients.map((c) => (
-                  <tr key={c.id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${c.id}`)}>
+                  <tr key={c.id} className="cursor-pointer hover:bg-gray-50" onClick={() => {
+                    if (showForm) { setShowForm(false); setEditingClient(null); }
+                    else { navigate(`/clients/${c.id}`); }
+                  }}>
                     <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="rounded border-gray-300" /></td>
                     <td className="font-medium text-gray-900">{c.name}</td>
                     <td><span className="badge badge-green">Active</span></td>
@@ -155,7 +158,10 @@ export default function ClientsPage() {
           {/* Mobile */}
           <div className="lg:hidden divide-y divide-gray-100">
             {clients.map((c) => (
-              <div key={c.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${c.id}`)}>
+              <div key={c.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => {
+                if (showForm) { setShowForm(false); setEditingClient(null); }
+                else { navigate(`/clients/${c.id}`); }
+              }}>
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[13px] font-medium text-gray-900">{c.name}</p>
