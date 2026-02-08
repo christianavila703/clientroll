@@ -34,10 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // On mount: verify token
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     if (token) {
-      // Verify token is still valid
       api
         .me()
         .then((data: unknown) => {
@@ -57,6 +57,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setIsLoading(false);
     }
+  }, []);
+
+  // Cross-tab sync: when another tab refreshes the token or logs out,
+  // this tab picks it up immediately via the storage event.
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "access_token") {
+        if (!e.newValue) {
+          // Token was removed (logged out in another tab)
+          setUser(null);
+          window.location.href = "/login";
+        }
+        // Token was updated (refreshed in another tab) — no action needed,
+        // the next API call will use the new token from localStorage
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
