@@ -98,11 +98,31 @@ export default function MembershipTypeDetail() {
   );
 }
 
+// Auto-calculate payment frequencies from duration + total
+function autoCalcFees(duration: number, total: number) {
+  if (!duration || !total) return { weekly: "", fortnightly: "", monthly: "", quarterly: "" };
+  const months = duration;
+  const weekly = Math.round((total / (months * 4.33)) * 100) / 100;
+  const fortnightly = Math.round((total / (months * 2.17)) * 100) / 100;
+  const monthly = Math.round((total / months) * 100) / 100;
+  const quarterly = months >= 3 ? Math.round((total / (months / 3)) * 100) / 100 : "";
+  return { weekly: String(weekly), fortnightly: String(fortnightly), monthly: String(monthly), quarterly: quarterly ? String(quarterly) : "" };
+}
+
 // === Term Options Tab ===
 function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ duration_months: 6, fee_total: 0, fee_weekly: "", fee_fortnightly: "", fee_monthly: "", fee_quarterly: "", allow_upfront: true, num_payments: "" });
   const [saving, setSaving] = useState(false);
+
+  // Auto-calc when duration or total changes in add form
+  const updateWithCalc = (key: "duration_months" | "fee_total", value: number) => {
+    const newForm = { ...form, [key]: value };
+    const dur = key === "duration_months" ? value : form.duration_months;
+    const tot = key === "fee_total" ? value : form.fee_total;
+    const calc = autoCalcFees(dur, tot);
+    setForm({ ...newForm, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true);
@@ -137,16 +157,16 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Duration (months) *</label>
-              <input type="number" value={form.duration_months} onChange={(e) => setForm({ ...form, duration_months: Number(e.target.value) })} className="input-field" min="1" required />
+              <input type="number" value={form.duration_months} onChange={(e) => updateWithCalc("duration_months", Number(e.target.value))} className="input-field" min="1" required />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ($) *</label>
-              <input type="number" value={form.fee_total} onChange={(e) => setForm({ ...form, fee_total: Number(e.target.value) })} className="input-field" min="0" step="0.01" required />
+              <input type="number" value={form.fee_total} onChange={(e) => updateWithCalc("fee_total", Number(e.target.value))} className="input-field" min="0" step="0.01" required />
             </div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly fee ($)</label><input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly fee ($)</label><input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly fee ($)</label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly fee ($)</label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Optional" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">e.g. "3" = 3 payments then stops, membership stays active</p></div>
             <div className="flex items-end pb-1">
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>
@@ -188,6 +208,14 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
     num_payments: to.num_payments ?? "",
   });
   const [saving, setSaving] = useState(false);
+
+  const updateEditCalc = (key: "duration_months" | "fee_total", value: number) => {
+    const newForm = { ...form, [key]: value };
+    const dur = key === "duration_months" ? value : form.duration_months;
+    const tot = key === "fee_total" ? value : form.fee_total;
+    const calc = autoCalcFees(dur, tot);
+    setForm({ ...newForm, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -250,11 +278,11 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-[12px] font-medium text-gray-700 mb-1">Duration (months)</label>
-            <input type="number" value={form.duration_months} onChange={(e) => setForm({ ...form, duration_months: Number(e.target.value) })} className="input-field" min="1" />
+            <input type="number" value={form.duration_months} onChange={(e) => updateEditCalc("duration_months", Number(e.target.value))} className="input-field" min="1" />
           </div>
           <div>
             <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ($)</label>
-            <input type="number" value={form.fee_total} onChange={(e) => setForm({ ...form, fee_total: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+            <input type="number" value={form.fee_total} onChange={(e) => updateEditCalc("fee_total", Number(e.target.value))} className="input-field" min="0" step="0.01" />
           </div>
           <div>
             <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ($)</label>
