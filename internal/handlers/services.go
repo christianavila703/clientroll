@@ -54,6 +54,7 @@ func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.serviceRepo.Create(r.Context(), tenantID, input.Name, input.Description, input.Price, input.TaxRate, input.SortOrder)
 	if err != nil {
+		log.Printf("Error creating service: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create service")
 		return
 	}

@@ -9,7 +9,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: "https://clientroll.com",
+    baseURL: "https://app.clientroll.com",
     headless: true,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
