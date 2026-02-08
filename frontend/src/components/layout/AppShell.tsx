@@ -25,7 +25,7 @@ export default function AppShell() {
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col min-w-0">
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 bg-gray-50/50 px-5 py-5 lg:px-8 lg:py-6">
+        <main className="flex-1 bg-gray-50/50 px-5 py-5 lg:px-8 lg:py-6 min-h-[calc(100vh-3.5rem)]">
           <Outlet />
         </main>
       </div>
