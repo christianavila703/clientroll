@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import api from "../../api/client";
 
 interface Client {
@@ -16,6 +16,7 @@ interface Client {
 
 export default function ClientsPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -125,7 +126,7 @@ export default function ClientsPage() {
               </thead>
               <tbody>
                 {clients.map((c) => (
-                  <tr key={c.id} className="cursor-pointer" onClick={() => { setEditingClient(c); setShowForm(true); }}>
+                  <tr key={c.id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${c.id}`)}>
                     <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="rounded border-gray-300" /></td>
                     <td className="font-medium text-gray-900">{c.name}</td>
                     <td><span className="badge badge-green">Active</span></td>
@@ -154,7 +155,7 @@ export default function ClientsPage() {
           {/* Mobile */}
           <div className="lg:hidden divide-y divide-gray-100">
             {clients.map((c) => (
-              <div key={c.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => { setEditingClient(c); setShowForm(true); }}>
+              <div key={c.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${c.id}`)}>
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[13px] font-medium text-gray-900">{c.name}</p>

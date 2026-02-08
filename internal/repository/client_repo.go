@@ -21,6 +21,11 @@ func NewClientRepo(db *database.Postgres) *ClientRepo {
 	return &ClientRepo{db: db}
 }
 
+// DB returns the underlying database connection.
+func (r *ClientRepo) DB() *database.Postgres {
+	return r.db
+}
+
 const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
 	emergency_contact_phone, created_at, updated_at`
