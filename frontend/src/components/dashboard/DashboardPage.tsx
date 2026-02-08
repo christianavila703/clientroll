@@ -1,16 +1,14 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import {
-  AreaChart, BarList, DonutChart,
-  Card, Metric, Text, Flex, BadgeDelta, Grid, Title, Bold, List, ListItem,
-  Tracker, Color,
-} from "@tremor/react";
+import ReactECharts from "echarts-for-react";
 
 interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; }
 interface MonthlyData { month: string; revenue: number; }
 interface BreakdownData { type_title: string; revenue: number; count: number; }
 interface StatusData { [key: string]: number; }
 interface RecentClient { id: string; name: string; email?: string; created_at: string; }
+
+const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6"];
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -31,18 +29,87 @@ export default function DashboardPage() {
 
   const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
   const prevMonthRevenue = monthly.length >= 2 ? monthly[monthly.length - 2]?.revenue || 0 : 0;
-  const deltaType = (summary?.month_revenue || 0) >= prevMonthRevenue ? "increase" : "decrease";
+  const curMonthRevenue = summary?.month_revenue || 0;
+  const revDelta = prevMonthRevenue > 0 ? Math.round(((curMonthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100) : 0;
 
-  // Payment tracker data
   const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
-  const trackerData: { color: Color; tooltip: string }[] = [];
-  for (let i = 0; i < (statuses.succeeded || 0); i++) trackerData.push({ color: "emerald", tooltip: "Succeeded" });
-  for (let i = 0; i < (statuses.failed || 0); i++) trackerData.push({ color: "red", tooltip: "Failed" });
-  for (let i = 0; i < (statuses.pending || 0); i++) trackerData.push({ color: "yellow", tooltip: "Pending" });
-  for (let i = 0; i < (statuses.disputed || 0); i++) trackerData.push({ color: "orange", tooltip: "Disputed" });
 
-  // BarList data for membership breakdown
-  const barListData = breakdown.map(b => ({ name: b.type_title, value: b.revenue }));
+  /* ─── Revenue Area Chart ─── */
+  const revenueChart = {
+    tooltip: { trigger: "axis" as const, formatter: (params: any) => {
+      const p = params[0];
+      return `<div style="font-size:13px"><b>${p.name}</b><br/>Revenue: <b>$${p.value.toLocaleString()}</b></div>`;
+    }},
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: "category" as const, data: monthly.map(m => m.month), axisLine: { lineStyle: { color: "#e5e7eb" } }, axisLabel: { color: "#9ca3af", fontSize: 11 } },
+    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(0)}k` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    series: [{
+      data: monthly.map(m => m.revenue),
+      type: "line" as const,
+      smooth: true,
+      symbol: "circle",
+      symbolSize: 6,
+      lineStyle: { width: 3, color: "#6366f1" },
+      itemStyle: { color: "#6366f1" },
+      areaStyle: {
+        color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: "rgba(99,102,241,0.3)" }, { offset: 1, color: "rgba(99,102,241,0.02)" }]
+        }
+      },
+    }],
+  };
+
+  /* ─── Payment Health Gauge ─── */
+  const successRate = totalPayments > 0 ? Math.round(((statuses.succeeded || 0) / totalPayments) * 100) : 0;
+  const paymentGauge = {
+    series: [{
+      type: "gauge" as const,
+      startAngle: 200, endAngle: -20,
+      min: 0, max: 100,
+      pointer: { show: false },
+      progress: { show: true, overlap: false, roundCap: true, clip: false,
+        itemStyle: { color: successRate >= 90 ? "#10b981" : successRate >= 70 ? "#f59e0b" : "#ef4444" }
+      },
+      axisLine: { lineStyle: { width: 18, color: [[1, "#f3f4f6"]] } },
+      axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+      detail: { valueAnimation: true, fontSize: 28, fontWeight: 700, color: "#111827",
+        formatter: "{value}%", offsetCenter: [0, "0%"] },
+      title: { fontSize: 12, color: "#9ca3af", offsetCenter: [0, "30%"] },
+      data: [{ value: successRate, name: "Success Rate" }],
+    }],
+  };
+
+  /* ─── Revenue by Type Bar ─── */
+  const revenueByType = {
+    tooltip: { trigger: "axis" as const, formatter: (params: any) => {
+      const p = params[0];
+      return `<div style="font-size:13px"><b>${p.name}</b><br/>$${p.value.toLocaleString()}</div>`;
+    }},
+    grid: { left: 10, right: 40, top: 10, bottom: 30, containLabel: true },
+    xAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    yAxis: { type: "category" as const, data: breakdown.map(b => b.type_title), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#374151", fontSize: 12 } },
+    series: [{
+      type: "bar" as const,
+      data: breakdown.map((b, i) => ({ value: b.revenue, itemStyle: { color: COLOURS[i % COLOURS.length], borderRadius: [0, 4, 4, 0] } })),
+      barWidth: 24,
+    }],
+  };
+
+  /* ─── Membership Mix Donut ─── */
+  const membershipDonut = {
+    tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
+    legend: { bottom: 0, left: "center", textStyle: { color: "#6b7280", fontSize: 12 } },
+    series: [{
+      type: "pie" as const,
+      radius: ["45%", "70%"],
+      center: ["50%", "40%"],
+      avoidLabelOverlap: true,
+      itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 },
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
+      data: breakdown.map((b, i) => ({ value: b.count, name: b.type_title, itemStyle: { color: COLOURS[i % COLOURS.length] } })),
+    }],
+  };
 
   return (
     <div>
@@ -50,179 +117,148 @@ export default function DashboardPage() {
 
       {/* Alert */}
       {summary && summary.failed_payments > 0 && (
-        <Link to="/payments" className="mb-5 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800 hover:bg-amber-100 transition-colors">
+        <Link to="/payments" className="mb-5 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 hover:bg-amber-100 transition-colors">
           <svg className="h-4 w-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" /></svg>
-          {summary.failed_payments} failed payment{summary.failed_payments !== 1 ? "s" : ""} require attention
+          <span><strong>{summary.failed_payments} failed payment{summary.failed_payments !== 1 ? "s" : ""}</strong> require attention</span>
         </Link>
       )}
 
       {/* KPI Cards */}
-      <Grid numItemsMd={2} numItemsLg={4} className="gap-4 mb-6">
-        <Card decoration="top" decorationColor="indigo">
-          <Flex justifyContent="between" alignItems="center">
-            <div>
-              <Text>Active Members</Text>
-              <Metric>{summary?.active_members ?? "–"}</Metric>
-            </div>
-          </Flex>
-        </Card>
-        <Card decoration="top" decorationColor="emerald">
-          <Flex justifyContent="between" alignItems="center">
-            <div>
-              <Text>Revenue This Month</Text>
-              <Metric>${(summary?.month_revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Metric>
-            </div>
-            {prevMonthRevenue > 0 && (
-              <BadgeDelta deltaType={deltaType} size="xs">
-                {Math.abs(Math.round(((summary?.month_revenue || 0) - prevMonthRevenue) / prevMonthRevenue * 100))}%
-              </BadgeDelta>
-            )}
-          </Flex>
-        </Card>
-        <Card decoration="top" decorationColor="red">
-          <Flex justifyContent="between" alignItems="center">
-            <div>
-              <Text>Failed Payments</Text>
-              <Metric className={summary && summary.failed_payments > 0 ? "text-red-600" : ""}>{summary?.failed_payments ?? "–"}</Metric>
-            </div>
-          </Flex>
-        </Card>
-        <Card decoration="top" decorationColor="blue">
-          <Flex justifyContent="between" alignItems="center">
-            <div>
-              <Text>New Signups</Text>
-              <Metric>{summary?.new_signups ?? "–"}</Metric>
-            </div>
-          </Flex>
-        </Card>
-      </Grid>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <KpiCard label="Active Members" value={summary?.active_members ?? "–"} colour="indigo" />
+        <KpiCard label="Revenue This Month" value={`$${curMonthRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} colour="emerald" delta={revDelta} />
+        <KpiCard label="Failed Payments" value={summary?.failed_payments ?? "–"} colour="red" alert={(summary?.failed_payments || 0) > 0} />
+        <KpiCard label="New Signups" value={summary?.new_signups ?? "–"} colour="blue" />
+      </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* Main */}
         <div className="lg:col-span-2 space-y-5">
           {/* Revenue Chart */}
-          <Card>
-            <Title>Revenue</Title>
-            <Text>Monthly revenue over the past year</Text>
-            {monthly.length > 0 ? (
-              <AreaChart
-                className="mt-4 h-64"
-                data={monthly}
-                index="month"
-                categories={["revenue"]}
-                colors={["indigo"]}
-                valueFormatter={(v) => `$${v.toLocaleString()}`}
-                showAnimation
-                curveType="monotone"
-              />
-            ) : (
-              <div className="flex h-64 items-center justify-center text-sm text-gray-400">No revenue data yet</div>
-            )}
-            <Flex className="mt-4 border-t border-gray-200 pt-4">
-              <div>
-                <Text>Total Revenue</Text>
-                <Bold>${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</Bold>
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Revenue</h3><span className="text-[12px] text-gray-400">Monthly revenue over the past year</span></div>
+            <div className="px-5 py-4">
+              {monthly.length > 0 ? (
+                <ReactECharts option={revenueChart} style={{ height: 280 }} />
+              ) : (
+                <div className="flex h-64 items-center justify-center text-[13px] text-gray-400">No revenue data yet</div>
+              )}
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 text-[13px]">
+                <div><span className="text-gray-500">Total Revenue</span><p className="font-semibold text-gray-900 tabular-nums">${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                <div className="text-right"><span className="text-gray-500">Avg Monthly</span><p className="font-semibold text-gray-900 tabular-nums">${monthly.length > 0 ? (totalRevenue / monthly.length).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "0.00"}</p></div>
               </div>
-              <div className="text-right">
-                <Text>Avg Monthly</Text>
-                <Bold>${monthly.length > 0 ? (totalRevenue / monthly.length).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "0.00"}</Bold>
-              </div>
-            </Flex>
-          </Card>
+            </div>
+          </div>
 
           {/* Payment Health */}
-          <Card>
-            <Title>Payment Health</Title>
-            <Text>{totalPayments} total payments</Text>
-            {trackerData.length > 0 ? (
-              <Tracker data={trackerData} className="mt-4" />
-            ) : (
-              <div className="flex h-10 items-center justify-center text-sm text-gray-400 mt-4">No payments yet</div>
-            )}
-            <Flex className="mt-4">
-              <div className="flex items-center gap-4 text-sm">
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />{statuses.succeeded || 0} succeeded</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />{statuses.failed || 0} failed</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />{statuses.pending || 0} pending</span>
-              </div>
-            </Flex>
-          </Card>
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Payment Health</h3><span className="text-[12px] text-gray-400">{totalPayments} total payments</span></div>
+            <div className="px-5 py-4">
+              {totalPayments > 0 ? (
+                <div className="flex items-center gap-6">
+                  <ReactECharts option={paymentGauge} style={{ height: 180, width: 200 }} />
+                  <div className="space-y-2 flex-1">
+                    <StatRow label="Succeeded" value={statuses.succeeded || 0} colour="bg-emerald-500" />
+                    <StatRow label="Failed" value={statuses.failed || 0} colour="bg-red-500" />
+                    <StatRow label="Pending" value={statuses.pending || 0} colour="bg-amber-400" />
+                    <StatRow label="Disputed" value={statuses.disputed || 0} colour="bg-orange-400" />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center text-[13px] text-gray-400">No payments yet</div>
+              )}
+            </div>
+          </div>
 
-          {/* Revenue by Membership */}
-          <Card>
-            <Title>Revenue by Membership Type</Title>
-            <Text>Breakdown of revenue per offering</Text>
-            {barListData.length > 0 ? (
-              <BarList
-                data={barListData}
-                className="mt-4"
-                valueFormatter={(v) => `$${v.toLocaleString()}`}
-                color="indigo"
-              />
-            ) : (
-              <div className="flex h-24 items-center justify-center text-sm text-gray-400 mt-4">No data yet</div>
-            )}
-          </Card>
+          {/* Revenue by Type */}
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Revenue by Membership Type</h3></div>
+            <div className="px-5 py-4">
+              {breakdown.length > 0 ? (
+                <ReactECharts option={revenueByType} style={{ height: Math.max(120, breakdown.length * 50) }} />
+              ) : (
+                <div className="flex h-24 items-center justify-center text-[13px] text-gray-400">No data yet</div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Sidebar */}
         <div className="space-y-5">
-          {/* Membership Breakdown Donut */}
-          <Card>
-            <Title>Membership Mix</Title>
-            {breakdown.length > 0 ? (
-              <>
-                <DonutChart
-                  className="mt-4"
-                  data={breakdown.map(b => ({ name: b.type_title, value: b.count }))}
-                  category="value"
-                  index="name"
-                  colors={["indigo", "cyan", "amber", "emerald", "rose"]}
-                  showAnimation
-                />
-                <List className="mt-4">
-                  {breakdown.map(b => (
-                    <ListItem key={b.type_title}>
-                      <span>{b.type_title}</span>
-                      <span><Bold>{b.count}</Bold> members</span>
-                    </ListItem>
-                  ))}
-                </List>
-              </>
-            ) : (
-              <div className="flex h-40 items-center justify-center text-sm text-gray-400 mt-4">No data yet</div>
-            )}
-          </Card>
+          {/* Membership Mix Donut */}
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Membership Mix</h3></div>
+            <div className="px-3 py-4">
+              {breakdown.length > 0 ? (
+                <ReactECharts option={membershipDonut} style={{ height: 280 }} />
+              ) : (
+                <div className="flex h-40 items-center justify-center text-[13px] text-gray-400">No data yet</div>
+              )}
+            </div>
+          </div>
 
           {/* Action Required */}
-          <Card>
-            <Title>Action Required</Title>
-            <List className="mt-2">
-              <ListItem>
-                <Link to="/payments" className="text-sm hover:text-indigo-600">Failed payments</Link>
-                <span className={`text-sm font-semibold ${summary && summary.failed_payments > 0 ? "text-red-600" : ""}`}>{summary?.failed_payments || 0}</span>
-              </ListItem>
-              <ListItem>
-                <Link to="/payments" className="text-sm hover:text-indigo-600">Open disputes</Link>
-                <span className={`text-sm font-semibold ${summary && summary.open_disputes > 0 ? "text-amber-600" : ""}`}>{summary?.open_disputes || 0}</span>
-              </ListItem>
-            </List>
-          </Card>
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Action Required</h3></div>
+            <div className="divide-y divide-gray-100">
+              <ActionItem label="Failed payments" count={summary?.failed_payments || 0} url="/payments" alert />
+              <ActionItem label="Open disputes" count={summary?.open_disputes || 0} url="/payments" />
+            </div>
+          </div>
 
           {/* Recent Clients */}
-          <Card>
-            <Title>Recent Clients</Title>
-            <List className="mt-2">
+          <div className="card overflow-hidden">
+            <div className="card-header"><h3>Recent Clients</h3></div>
+            <div className="divide-y divide-gray-100">
               {recentClients.map(c => (
-                <ListItem key={c.id}>
-                  <Link to={`/clients/${c.id}`} className="text-sm font-medium hover:text-indigo-600">{c.name}</Link>
-                  <span className="text-xs text-gray-400">{new Date(c.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</span>
-                </ListItem>
+                <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center justify-between px-5 py-2.5 hover:bg-gray-50 transition-colors">
+                  <span className="text-[13px] font-medium text-gray-900 hover:text-indigo-600">{c.name}</span>
+                  <span className="text-[11px] text-gray-400">{new Date(c.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</span>
+                </Link>
               ))}
-            </List>
-          </Card>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/* ─── Sub-components ─── */
+function KpiCard({ label, value, colour, delta, alert }: { label: string; value: string | number; colour: string; delta?: number; alert?: boolean }) {
+  const colourMap: Record<string, string> = {
+    indigo: "border-t-indigo-500", emerald: "border-t-emerald-500", red: "border-t-red-500", blue: "border-t-blue-500",
+  };
+  return (
+    <div className={`card px-4 py-3 border-t-2 ${colourMap[colour] || "border-t-gray-300"}`}>
+      <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">{label}</p>
+      <div className="flex items-end gap-2 mt-1">
+        <p className={`text-2xl font-bold tabular-nums ${alert ? "text-red-600" : "text-gray-900"}`}>{value}</p>
+        {delta !== undefined && delta !== 0 && (
+          <span className={`text-[11px] font-semibold rounded-full px-1.5 py-0.5 mb-0.5 ${delta > 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+            {delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, colour }: { label: string; value: number; colour: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`h-2.5 w-2.5 rounded-full ${colour} flex-shrink-0`} />
+      <span className="text-[13px] text-gray-600 flex-1">{label}</span>
+      <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function ActionItem({ label, count, url, alert }: { label: string; count: number; url: string; alert?: boolean }) {
+  return (
+    <Link to={url} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+      <span className="text-[13px] text-gray-700">{label}</span>
+      <span className={`text-[13px] font-semibold tabular-nums ${alert && count > 0 ? "text-red-600" : count > 0 ? "text-amber-600" : "text-gray-400"}`}>{count}</span>
+    </Link>
   );
 }
