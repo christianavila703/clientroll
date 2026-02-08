@@ -131,7 +131,7 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="card px-5 py-4 mb-4 max-w-xl space-y-3">
+        <form onSubmit={handleAdd} className="card px-5 py-4 mb-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Duration (months) *</label>

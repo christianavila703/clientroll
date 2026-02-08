@@ -82,7 +82,7 @@ function AgreementSettings() {
   };
 
   return (
-    <div className="card max-w-2xl px-5 py-4">
+    <div className="card px-5 py-4">
       <h2 className="text-base font-semibold text-gray-900 mb-4">
         Agreement Details (Section A)
       </h2>
@@ -159,7 +159,7 @@ function TenantSettings() {
   ];
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="space-y-5">
       {message && (
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("success") ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-600"}`}>{message}</div>
       )}
@@ -255,7 +255,7 @@ function IntegrationsSettings() {
   };
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="space-y-5">
       {message && (
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("Failed") ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
       )}

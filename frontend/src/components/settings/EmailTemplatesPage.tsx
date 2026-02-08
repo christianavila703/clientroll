@@ -185,7 +185,7 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
       </div>
 
       {/* Main card — Ignition "Template details" style */}
-      <div className="card max-w-4xl overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Template details</h2>
         </div>

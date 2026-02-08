@@ -174,7 +174,7 @@ function BonusForm({ initial, onSaved, onCancel }: {
   };
 
   return (
-    <div className="card mb-5 max-w-2xl overflow-hidden">
+    <div className="card mb-5 overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">
           {initial ? `Edit: ${initial.title}` : "New Bonus"}

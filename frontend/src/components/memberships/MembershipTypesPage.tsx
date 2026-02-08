@@ -188,7 +188,7 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   };
 
   return (
-    <div className="card mb-5 max-w-3xl overflow-hidden">
+    <div className="card mb-5 overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">New Membership Type</h3>
         <div className="flex items-center gap-2">

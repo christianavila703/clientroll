@@ -269,7 +269,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
   );
 
   return (
-    <div className="mb-5 card max-w-2xl overflow-hidden">
+    <div className="mb-5 card overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">{editing ? `Edit: ${editing.name}` : "New client"}</h3>
         <div className="flex items-center gap-2">
