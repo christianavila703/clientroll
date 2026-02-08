@@ -27,6 +27,10 @@ func (h *MembershipTypeHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/membership-types", h.List)
 	r.Post("/membership-types", h.Create)
 	r.Get("/membership-types/{mtID}", h.Get)
+	r.Put("/membership-types/{mtID}", h.Update)
+	r.Delete("/membership-types/{mtID}", h.Delete)
+	r.Post("/membership-types/{mtID}/archive", h.Archive)
+	r.Post("/membership-types/{mtID}/activate", h.Activate)
 	r.Post("/membership-types/{mtID}/duplicate", h.Duplicate)
 	r.Post("/membership-types/{mtID}/term-options", h.CreateTermOption)
 	r.Put("/membership-types/{mtID}/term-options/{toID}", h.UpdateTermOption)
@@ -75,6 +79,80 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, mt)
+}
+
+// Update updates a membership type.
+func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	mtID, err := uuid.Parse(chi.URLParam(r, "mtID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid ID")
+		return
+	}
+	var input struct {
+		Title       string  `json:"title"`
+		Description *string `json:"description"`
+		Inclusions  *string `json:"inclusions"`
+		TopImageURL *string `json:"top_image_url"`
+		TotalValue  float64 `json:"total_value"`
+		SortOrder   int     `json:"sort_order"`
+		IsActive    *bool   `json:"is_active"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	// For now just toggle active if provided
+	if input.IsActive != nil {
+		if *input.IsActive {
+			_ = h.mtRepo.Activate(r.Context(), mtID, tenantID)
+		} else {
+			_ = h.mtRepo.Archive(r.Context(), mtID, tenantID)
+		}
+	}
+	mt, err := h.mtRepo.FindByID(r.Context(), mtID, tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update")
+		return
+	}
+	writeJSON(w, http.StatusOK, mt)
+}
+
+// Delete hard-deletes a membership type if no memberships reference it.
+func (h *MembershipTypeHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	mtID, err := uuid.Parse(chi.URLParam(r, "mtID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid ID")
+		return
+	}
+	if err := h.mtRepo.Delete(r.Context(), mtID, tenantID); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// Archive soft-deletes a membership type (sets is_active=false).
+func (h *MembershipTypeHandler) Archive(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	mtID, _ := uuid.Parse(chi.URLParam(r, "mtID"))
+	if err := h.mtRepo.Archive(r.Context(), mtID, tenantID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to archive")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "archived"})
+}
+
+// Activate re-activates a membership type.
+func (h *MembershipTypeHandler) Activate(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	mtID, _ := uuid.Parse(chi.URLParam(r, "mtID"))
+	if err := h.mtRepo.Activate(r.Context(), mtID, tenantID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to activate")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "activated"})
 }
 
 // Get returns a membership type with term options.

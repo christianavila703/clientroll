@@ -149,6 +149,41 @@ func (r *MembershipTypeRepo) UpdateTermOption(ctx context.Context, id, tenantID 
 	return &to, nil
 }
 
+// Archive sets is_active = false (soft delete). Existing memberships are unaffected.
+func (r *MembershipTypeRepo) Archive(ctx context.Context, id, tenantID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE membership_types SET is_active = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	return err
+}
+
+// Activate sets is_active = true.
+func (r *MembershipTypeRepo) Activate(ctx context.Context, id, tenantID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE membership_types SET is_active = true, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	return err
+}
+
+// Delete hard-deletes a membership type ONLY if no memberships reference it.
+func (r *MembershipTypeRepo) Delete(ctx context.Context, id, tenantID uuid.UUID) error {
+	// Check for existing memberships
+	var count int
+	err := r.db.Pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM memberships WHERE membership_type_id=$1 AND tenant_id=$2", id, tenantID).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("checking membership references: %w", err)
+	}
+	if count > 0 {
+		return fmt.Errorf("cannot delete: %d membership(s) reference this type — archive it instead", count)
+	}
+	// Delete term options first
+	_, _ = r.db.Pool.Exec(ctx,
+		"DELETE FROM membership_term_options WHERE membership_type_id=$1 AND tenant_id=$2", id, tenantID)
+	// Delete the type
+	_, err = r.db.Pool.Exec(ctx,
+		"DELETE FROM membership_types WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	return err
+}
+
 // DeleteTermOption removes a term option.
 func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID uuid.UUID) error {
 	_, err := r.db.Pool.Exec(ctx,

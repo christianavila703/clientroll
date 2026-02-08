@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 import ImageUpload from "../common/ImageUpload";
@@ -44,6 +44,45 @@ export default function MembershipTypesPage() {
 
   const handleDuplicate = async (id: string) => {
     try { await api.duplicateMembershipType(id); loadTypes(); } catch { /* handle */ }
+  };
+
+  const handleArchive = async (id: string) => {
+    try {
+      const token = localStorage.getItem("access_token");
+      await fetch(`/api/tenant/membership-types/${id}/archive`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      loadTypes();
+    } catch { /* handle */ }
+  };
+
+  const handleActivate = async (id: string) => {
+    try {
+      const token = localStorage.getItem("access_token");
+      await fetch(`/api/tenant/membership-types/${id}/activate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      loadTypes();
+    } catch { /* handle */ }
+  };
+
+  const handleDelete = async (id: string, title: string) => {
+    if (!confirm(`Delete "${title}"?\n\nThis will permanently remove it. If there are active memberships using this type, it cannot be deleted — archive it instead.`)) return;
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`/api/tenant/membership-types/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Failed to delete");
+        return;
+      }
+      loadTypes();
+    } catch { /* handle */ }
   };
 
   const filtered = types.filter((mt) => {
@@ -148,7 +187,7 @@ export default function MembershipTypesPage() {
                       day: "numeric", month: "long", year: "numeric"
                     })}
                   </td>
-                  <td>
+                  <td onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleDuplicate(mt.id)}
@@ -157,15 +196,59 @@ export default function MembershipTypesPage() {
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>
                       </button>
-                      <button className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100" title="More">
-                        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
-                      </button>
+                      <MtRowMenu
+                        mt={mt}
+                        onArchive={() => handleArchive(mt.id)}
+                        onActivate={() => handleActivate(mt.id)}
+                        onDelete={() => handleDelete(mt.id, mt.title)}
+                      />
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MtRowMenu({ mt, onArchive, onActivate, onDelete }: {
+  mt: MembershipType; onArchive: () => void; onActivate: () => void; onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(!open)} className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100" title="More">
+        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50">
+          {mt.is_active ? (
+            <button onClick={() => { setOpen(false); onArchive(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
+              <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>
+              Archive (set inactive)
+            </button>
+          ) : (
+            <button onClick={() => { setOpen(false); onActivate(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-emerald-700 hover:bg-emerald-50">
+              <svg className="h-3.5 w-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Activate
+            </button>
+          )}
+          <div className="my-1 border-t border-gray-100" />
+          <button onClick={() => { setOpen(false); onDelete(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-red-600 hover:bg-red-50">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+            Delete permanently
+          </button>
         </div>
       )}
     </div>
