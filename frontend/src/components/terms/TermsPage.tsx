@@ -91,7 +91,10 @@ export default function TermsPage() {
                 <tr
                   key={t.id}
                   className="cursor-pointer"
-                  onClick={() => { setEditing(t); setShowForm(true); }}
+                  onClick={() => {
+                    if (showForm && editing?.id === t.id) { setShowForm(false); setEditing(null); }
+                    else { setEditing(t); setShowForm(true); }
+                  }}
                 >
                   <td>
                     <div className="flex items-center gap-2">

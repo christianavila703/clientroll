@@ -97,7 +97,10 @@ export default function BonusesPage() {
             </thead>
             <tbody>
               {filtered.map((b) => (
-                <tr key={b.id} className="cursor-pointer" onClick={() => { setEditing(b); setShowForm(true); }}>
+                <tr key={b.id} className="cursor-pointer" onClick={() => {
+                  if (showForm && editing?.id === b.id) { setShowForm(false); setEditing(null); }
+                  else { setEditing(b); setShowForm(true); }
+                }}>
                   <td>
                     <div className="flex items-center gap-3">
                       {b.image_url ? (
