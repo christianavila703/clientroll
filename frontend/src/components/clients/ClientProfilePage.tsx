@@ -49,6 +49,7 @@ export default function ClientProfilePage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"summary" | "memberships" | "billing" | "payments">("summary");
   const [showEdit, setShowEdit] = useState(false);
+  const [showSetupMembership, setShowSetupMembership] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
@@ -111,7 +112,7 @@ export default function ClientProfilePage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <MoreActionsMenu clientId={client.id} clientName={client.name} />
+          <MoreActionsMenu clientId={client.id} clientName={client.name} onSetupMembership={() => setShowSetupMembership(true)} />
           <button onClick={() => setShowEdit(true)} className="btn-secondary text-[12px]">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
             Edit client
@@ -292,6 +293,16 @@ export default function ClientProfilePage() {
           client={client}
           onClose={() => setShowEdit(false)}
           onSaved={() => { setShowEdit(false); loadAll(); }}
+        />
+      )}
+
+      {/* Setup membership modal */}
+      {showSetupMembership && (
+        <SetupMembershipModal
+          clientId={client.id}
+          clientName={client.name}
+          onClose={() => setShowSetupMembership(false)}
+          onCreated={() => { setShowSetupMembership(false); loadAll(); }}
         />
       )}
     </div>
@@ -685,7 +696,7 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
 }
 
 /* ─── More Actions Dropdown ─── */
-function MoreActionsMenu({ clientId, clientName }: { clientId: string; clientName: string }) {
+function MoreActionsMenu({ clientId, clientName, onSetupMembership }: { clientId: string; clientName: string; onSetupMembership: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -702,7 +713,12 @@ function MoreActionsMenu({ clientId, clientName }: { clientId: string; clientNam
         <svg className="h-3.5 w-3.5 ml-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50">
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50">
+          <button onClick={() => { setOpen(false); onSetupMembership(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-indigo-700 hover:bg-indigo-50 font-medium">
+            <svg className="h-3.5 w-3.5 text-indigo-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Set up membership
+          </button>
+          <div className="my-1 border-t border-gray-100" />
           <button onClick={() => setOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
             <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
             Send email
@@ -849,6 +865,217 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
               </div>
             )}
           </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Setup Membership Modal ─── */
+interface MembershipTypeOption {
+  id: string; title: string; slug: string; total_value: number; is_active: boolean;
+  term_options?: {
+    id: string; duration_months: number; fee_total: number;
+    fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
+    allow_upfront: boolean; num_payments?: number;
+    bonuses?: { id: string; title: string; value: number }[];
+  }[];
+}
+
+function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
+  clientId: string; clientName: string; onClose: () => void; onCreated: () => void;
+}) {
+  const [step, setStep] = useState<"type" | "term" | "details" | "confirm">("type");
+  const [types, setTypes] = useState<MembershipTypeOption[]>([]);
+  const [selectedType, setSelectedType] = useState<MembershipTypeOption | null>(null);
+  const [selectedTerm, setSelectedTerm] = useState<any>(null);
+  const [frequency, setFrequency] = useState("monthly");
+  const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    fetch("/api/tenant/membership-types", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const active = (d.membership_types || []).filter((mt: any) => mt.is_active);
+        setTypes(active);
+        // Load full details for each type
+        active.forEach((mt: any) => {
+          fetch(`/api/tenant/membership-types/${mt.id}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.json())
+            .then(full => {
+              setTypes(prev => prev.map(t => t.id === full.id ? full : t));
+            });
+        });
+      });
+  }, []);
+
+  const handleSubmit = async () => {
+    if (!selectedType || !selectedTerm) return;
+    setSaving(true); setError("");
+    try {
+      const token = localStorage.getItem("access_token");
+      const paymentAmount = selectedTerm[`fee_${frequency}`] || selectedTerm.fee_total;
+      const res = await fetch("/api/tenant/memberships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          client_id: clientId,
+          membership_type_id: selectedType.id,
+          term_option_id: selectedTerm.id,
+          start_date: startDate,
+          payment_method: "direct_debit",
+          payment_frequency: frequency === "upfront" ? "monthly" : frequency,
+          payment_amount: paymentAmount,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      onCreated();
+    } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
+    finally { setSaving(false); }
+  };
+
+  const frequencies = selectedTerm ? [
+    { value: "upfront", label: "Pay in full", amount: selectedTerm.fee_total, enabled: selectedTerm.allow_upfront },
+    { value: "weekly", label: "Weekly", amount: selectedTerm.fee_weekly, enabled: !!selectedTerm.fee_weekly },
+    { value: "fortnightly", label: "Fortnightly", amount: selectedTerm.fee_fortnightly, enabled: !!selectedTerm.fee_fortnightly },
+    { value: "monthly", label: "Monthly", amount: selectedTerm.fee_monthly, enabled: !!selectedTerm.fee_monthly },
+    { value: "quarterly", label: "Quarterly", amount: selectedTerm.fee_quarterly, enabled: !!selectedTerm.fee_quarterly },
+  ].filter(f => f.enabled) : [];
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
+        <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-2xl">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-[15px] font-bold text-gray-900">Set up membership</h2>
+              <p className="text-[12px] text-gray-500">for {clientName}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+
+          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
+            {/* Step 1: Select membership type */}
+            {step === "type" && (
+              <div>
+                <p className="text-[13px] text-gray-500 mb-4">Select a membership type for this client:</p>
+                <div className="space-y-3">
+                  {types.map(mt => (
+                    <button key={mt.id} onClick={() => { setSelectedType(mt); setStep("term"); }}
+                      className="w-full text-left rounded-xl border-2 border-gray-200 px-5 py-4 hover:border-indigo-400 hover:bg-indigo-50/30 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[14px] font-semibold text-gray-900">{mt.title}</p>
+                          <p className="text-[12px] text-gray-400 mt-0.5">{mt.term_options?.length || 0} term options</p>
+                        </div>
+                        <span className="text-[16px] font-bold text-indigo-600 tabular-nums">${mt.total_value.toLocaleString()}</span>
+                      </div>
+                    </button>
+                  ))}
+                  {types.length === 0 && <p className="text-[13px] text-gray-400 text-center py-6">No active membership types. Create one first.</p>}
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Select term */}
+            {step === "term" && selectedType && (
+              <div>
+                <button onClick={() => setStep("type")} className="text-[12px] text-indigo-600 hover:text-indigo-700 font-medium mb-4 flex items-center gap-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  Back to membership types
+                </button>
+                <p className="text-[14px] font-semibold text-gray-900 mb-1">{selectedType.title}</p>
+                <p className="text-[13px] text-gray-500 mb-4">Select a term option:</p>
+                <div className="space-y-3">
+                  {(selectedType.term_options || []).map(to => (
+                    <button key={to.id} onClick={() => { setSelectedTerm(to); setStep("details"); }}
+                      className="w-full text-left rounded-xl border-2 border-gray-200 px-5 py-4 hover:border-indigo-400 hover:bg-indigo-50/30 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[14px] font-semibold text-gray-900">{to.duration_months} months</p>
+                          {to.fee_monthly && <p className="text-[12px] text-gray-400">${to.fee_monthly}/month</p>}
+                          {to.num_payments && <p className="text-[11px] text-indigo-600">{to.num_payments} payments then active</p>}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[18px] font-bold text-gray-900 tabular-nums">${to.fee_total.toLocaleString()}</span>
+                          {to.bonuses && to.bonuses.length > 0 && (
+                            <p className="text-[11px] text-emerald-600">{to.bonuses.length} bonus{to.bonuses.length !== 1 ? "es" : ""}</p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                  {(selectedType.term_options || []).length === 0 && <p className="text-[13px] text-gray-400 text-center py-6">No term options. Add them on the membership type page.</p>}
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Payment details */}
+            {step === "details" && selectedType && selectedTerm && (
+              <div>
+                <button onClick={() => setStep("term")} className="text-[12px] text-indigo-600 hover:text-indigo-700 font-medium mb-4 flex items-center gap-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  Back to term options
+                </button>
+
+                <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-5 py-3 mb-5">
+                  <p className="text-[14px] font-semibold text-gray-900">{selectedType.title}</p>
+                  <p className="text-[12px] text-gray-500">{selectedTerm.duration_months} months · ${selectedTerm.fee_total.toLocaleString()} total</p>
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-[13px] font-semibold text-gray-700 mb-2">Start Date</label>
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-field max-w-xs" />
+                  </div>
+
+                  <div>
+                    <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment Frequency</label>
+                    <div className="space-y-2">
+                      {frequencies.map(f => (
+                        <label key={f.value} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
+                          frequency === f.value ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
+                        }`}>
+                          <input type="radio" name="freq" value={f.value} checked={frequency === f.value} onChange={() => setFrequency(f.value)} className="h-4 w-4 text-indigo-600" />
+                          <span className="flex-1 text-[13px] font-medium text-gray-900">{f.label}</span>
+                          <span className="text-[14px] font-bold text-gray-900 tabular-nums">${f.amount?.toLocaleString()}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedTerm.bonuses && selectedTerm.bonuses.length > 0 && (
+                    <div>
+                      <label className="block text-[13px] font-semibold text-gray-700 mb-2">Included Bonuses</label>
+                      <div className="space-y-2">
+                        {selectedTerm.bonuses.map((b: any) => (
+                          <div key={b.id} className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2">
+                            <span className="text-[13px] text-emerald-800">{b.title}</span>
+                            <span className="text-[13px] font-semibold text-emerald-700 tabular-nums">${b.value.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex justify-between">
+                  <button onClick={() => setStep("term")} className="btn-secondary text-[12px]">Back</button>
+                  <button onClick={handleSubmit} disabled={saving} className="btn-primary text-[12px]">
+                    {saving ? "Creating..." : "Create Membership"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"clientroll/internal/database"
 	"clientroll/internal/middleware"
+	"clientroll/internal/models"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,17 +16,55 @@ import (
 
 // ActiveMembershipsHandler serves the active memberships view.
 type ActiveMembershipsHandler struct {
-	db *database.Postgres
+	db          *database.Postgres
+	memberRepo  interface{ Create(ctx context.Context, tenantID, clientID, membershipTypeID, termOptionID uuid.UUID, startDate time.Time, paymentMethod, paymentFrequency string, paymentAmount float64, memberSignature string, staffUserID *uuid.UUID, staffSignature string) (*models.Membership, error) }
 }
 
 // NewActiveMembershipsHandler creates a new handler.
-func NewActiveMembershipsHandler(db *database.Postgres) *ActiveMembershipsHandler {
-	return &ActiveMembershipsHandler{db: db}
+func NewActiveMembershipsHandler(db *database.Postgres, mr interface{ Create(ctx context.Context, tenantID, clientID, membershipTypeID, termOptionID uuid.UUID, startDate time.Time, paymentMethod, paymentFrequency string, paymentAmount float64, memberSignature string, staffUserID *uuid.UUID, staffSignature string) (*models.Membership, error) }) *ActiveMembershipsHandler {
+	return &ActiveMembershipsHandler{db: db, memberRepo: mr}
 }
 
 // RegisterRoutes registers routes.
 func (h *ActiveMembershipsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/active-memberships", h.List)
+	r.Post("/memberships", h.CreateMembership)
+}
+
+// CreateMembership creates a membership for a client (staff-initiated).
+func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
+
+	var input struct {
+		ClientID         string  `json:"client_id"`
+		MembershipTypeID string  `json:"membership_type_id"`
+		TermOptionID     string  `json:"term_option_id"`
+		StartDate        string  `json:"start_date"`
+		PaymentMethod    string  `json:"payment_method"`
+		PaymentFrequency string  `json:"payment_frequency"`
+		PaymentAmount    float64 `json:"payment_amount"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+
+	clientID, _ := uuid.Parse(input.ClientID)
+	mtID, _ := uuid.Parse(input.MembershipTypeID)
+	toID, _ := uuid.Parse(input.TermOptionID)
+	startDate, _ := time.Parse("2006-01-02", input.StartDate)
+
+	m, err := h.memberRepo.Create(r.Context(), tenantID, clientID, mtID, toID,
+		startDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		"", &userID, "")
+	if err != nil {
+		log.Printf("Error creating membership: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create membership")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, m)
 }
 
 // ActiveMembershipRow is the joined data for the active memberships view.

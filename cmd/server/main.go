@@ -140,7 +140,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
-	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db)
+	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)
 
