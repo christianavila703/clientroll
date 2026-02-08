@@ -29,7 +29,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 		       is_active, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
-		FROM membership_types WHERE tenant_id = $1
+		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY sort_order, created_at`
 
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
@@ -147,6 +147,15 @@ func (r *MembershipTypeRepo) UpdateTermOption(ctx context.Context, id, tenantID 
 		return nil, fmt.Errorf("updating term option: %w", err)
 	}
 	return &to, nil
+}
+
+// SoftDelete marks a membership type as deleted. It disappears from listings but
+// existing client memberships referencing it remain completely intact.
+// A new type with the same name/slug can be created afterwards.
+func (r *MembershipTypeRepo) SoftDelete(ctx context.Context, id, tenantID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE membership_types SET deleted_at = NOW(), is_active = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	return err
 }
 
 // Archive sets is_active = false (soft delete). Existing memberships are unaffected.

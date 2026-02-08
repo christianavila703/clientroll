@@ -118,7 +118,8 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mt)
 }
 
-// Delete hard-deletes a membership type if no memberships reference it.
+// Delete soft-deletes a membership type. It disappears from listings but
+// existing client memberships are completely unaffected.
 func (h *MembershipTypeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	mtID, err := uuid.Parse(chi.URLParam(r, "mtID"))
@@ -126,8 +127,9 @@ func (h *MembershipTypeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
-	if err := h.mtRepo.Delete(r.Context(), mtID, tenantID); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+	if err := h.mtRepo.SoftDelete(r.Context(), mtID, tenantID); err != nil {
+		log.Printf("Error soft-deleting membership type: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
