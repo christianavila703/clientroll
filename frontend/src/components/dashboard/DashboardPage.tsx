@@ -113,7 +113,9 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 className="text-lg font-semibold text-gray-900 mb-5">Overview</h1>
+      <div className="page-header">
+        <h1 className="page-title">Overview</h1>
+      </div>
 
       {/* Alert */}
       {summary && summary.failed_payments > 0 && (

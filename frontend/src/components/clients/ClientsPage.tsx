@@ -56,8 +56,7 @@ export default function ClientsPage() {
 
   return (
     <div>
-      {/* Page header — Ignition style */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+      <div className="page-header">
         <h1 className="page-title">Clients</h1>
         <div className="flex items-center gap-2">
           <button onClick={() => exportCSV(clients)} className="btn-secondary text-[12px]">
@@ -79,8 +78,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Status tabs */}
-      <div className="mb-3">
-        <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1.5">Status</p>
+      <div className="mb-4">
         <div className="flex items-center gap-1 border-b border-gray-200">
           {statusTabs.map((t) => (
             <button key={t} onClick={() => setStatusTab(t)}

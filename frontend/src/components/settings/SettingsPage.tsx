@@ -19,15 +19,15 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Manage your organisation settings
-        </p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Settings</h1>
+          <p className="text-[13px] text-gray-500 mt-0.5">Manage your organisation settings</p>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-5">
+      <div className="flex border-b border-gray-200 mb-4">
         {([
           { key: "agreement" as const, label: "Agreement Details" },
           { key: "tenant" as const, label: "Organisation" },

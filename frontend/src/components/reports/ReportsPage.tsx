@@ -148,10 +148,10 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="page-header">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Reports</h1>
-          <p className="text-[13px] text-gray-500">Financial analytics and performance insights</p>
+          <h1 className="page-title">Reports</h1>
+          <p className="text-[13px] text-gray-500 mt-0.5">Financial analytics and performance insights</p>
         </div>
       </div>
 
@@ -164,7 +164,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-5">
+      <div className="flex border-b border-gray-200 mb-4">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${

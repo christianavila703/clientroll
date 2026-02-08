@@ -82,7 +82,7 @@ export default function MembershipTypeDetail() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-5">
+      <div className="flex border-b border-gray-200 mb-4">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
