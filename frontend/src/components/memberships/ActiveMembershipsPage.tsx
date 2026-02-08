@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface Membership {
   membership_id: string;
+  client_id: string;
   client_name: string;
   client_email?: string;
   client_phone?: string;
@@ -21,6 +23,7 @@ interface Membership {
 }
 
 export default function ActiveMembershipsPage() {
+  const navigate = useNavigate();
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("active");
@@ -132,7 +135,7 @@ export default function ActiveMembershipsPage() {
                     const end = daysUntilEnd(m.end_date);
                     const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
                     return (
-                      <tr key={m.membership_id}>
+                      <tr key={m.membership_id} onClick={() => navigate(`/clients/${m.client_id}`)} className="cursor-pointer hover:bg-gray-50">
                         <td>
                           <p className="font-medium text-gray-900">{m.client_name}</p>
                           <p className="text-[11px] text-gray-400">{m.client_email || m.client_phone || ""}</p>
@@ -185,7 +188,7 @@ export default function ActiveMembershipsPage() {
             {filtered.map(m => {
               const end = daysUntilEnd(m.end_date);
               return (
-                <div key={m.membership_id} className="card px-4 py-3">
+                <div key={m.membership_id} className="card px-4 py-3 cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/clients/${m.client_id}`)}>
                   <div className="flex items-start justify-between mb-2">
                     <div>
                       <p className="text-[13px] font-medium text-gray-900">{m.client_name}</p>

@@ -29,6 +29,7 @@ func (h *ActiveMembershipsHandler) RegisterRoutes(r chi.Router) {
 // ActiveMembershipRow is the joined data for the active memberships view.
 type ActiveMembershipRow struct {
 	MembershipID     string   `json:"membership_id"`
+	ClientID         string   `json:"client_id"`
 	ClientName       string   `json:"client_name"`
 	ClientEmail      *string  `json:"client_email"`
 	ClientPhone      *string  `json:"client_phone"`
@@ -58,6 +59,7 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 	query := `
 		SELECT
 			m.id::text,
+			c.id::text,
 			c.name,
 			c.email,
 			c.phone,
@@ -99,7 +101,7 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var row ActiveMembershipRow
 		if err := rows.Scan(
-			&row.MembershipID, &row.ClientName, &row.ClientEmail, &row.ClientPhone,
+			&row.MembershipID, &row.ClientID, &row.ClientName, &row.ClientEmail, &row.ClientPhone,
 			&row.MembershipType, &row.TermMonths, &row.PaymentFrequency,
 			&row.PaymentAmount, &row.Status, &row.StartDate, &row.EndDate,
 			&row.LastPaymentDate, &row.LastPaymentAmt, &row.LastPaymentStatus,

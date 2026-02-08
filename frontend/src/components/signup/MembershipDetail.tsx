@@ -30,67 +30,87 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
   }, [selectedTermIdx, currentTerm, tenantSlug, membership.slug]);
 
   return (
-    <div>
-      <button onClick={onBack} className="mb-6 text-sm text-primary-600 hover:text-primary-700 font-medium">
-        ← Back to memberships
+    <div className="max-w-6xl mx-auto">
+      <button onClick={onBack} className="mb-6 text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+        Back to memberships
       </button>
 
-      {/* Hero */}
+      {/* Hero image - full width, prominent */}
       {membership.top_image_url && (
-        <img
-          src={membership.top_image_url}
-          alt={membership.title}
-          className="w-full h-56 sm:h-72 object-cover rounded-xl mb-8"
-        />
+        <div className="mb-8 rounded-2xl overflow-hidden shadow-lg">
+          <img
+            src={membership.top_image_url}
+            alt={membership.title}
+            className="w-full h-64 sm:h-80 md:h-96 object-cover"
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        {/* Main content */}
-        <div className="lg:col-span-2">
-          <h1 className="text-3xl font-bold text-gray-900 sm:text-4xl">
-            {membership.title}
-          </h1>
-
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-primary-600">
-              ${membership.total_value.toLocaleString()}
-            </span>
-            <span className="text-gray-500">total membership value</span>
+        {/* Main content - walkthrough/selling section */}
+        <div className="lg:col-span-2 space-y-8">
+          {/* Title and value */}
+          <div>
+            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-3">
+              {membership.title}
+            </h1>
+            <div className="flex items-baseline gap-2">
+              <span className="text-4xl font-bold text-primary-600 tabular-nums">
+                ${membership.total_value.toLocaleString()}
+              </span>
+              <span className="text-lg text-gray-500">total membership value</span>
+            </div>
           </div>
 
+          {/* Description - selling copy */}
           {membership.description && (
-            <div className="mt-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-2">About This Membership</h2>
-              <p className="text-gray-600 whitespace-pre-line">{membership.description}</p>
+            <div className="prose prose-lg max-w-none">
+              <h2 className="text-2xl font-bold text-gray-900 mb-3">About This Membership</h2>
+              <div className="text-gray-700 text-lg leading-relaxed whitespace-pre-line">
+                {membership.description}
+              </div>
             </div>
           )}
 
+          {/* Inclusions - what's included */}
           {membership.inclusions && (
-            <div className="mt-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-2">What's Included</h2>
-              <div className="text-gray-600 whitespace-pre-line">{membership.inclusions}</div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">What's Included</h2>
+              <div className="text-gray-700 text-lg leading-relaxed whitespace-pre-line bg-gray-50 rounded-xl p-6 border border-gray-200">
+                {membership.inclusions}
+              </div>
             </div>
           )}
 
-          {/* Bonuses section */}
+          {/* Bonuses section - visual cards */}
           {bonuses.length > 0 && (
-            <div className="mt-8">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Bonuses Included with {currentTerm?.duration_months}-Month Term
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">
+                Exclusive Bonuses with {currentTerm?.duration_months}-Month Term
               </h2>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 {bonuses.map((bonus) => (
-                  <div key={bonus.id} className="rounded-xl border border-green-200 bg-green-50 p-4">
+                  <div key={bonus.id} className="rounded-2xl border-2 border-green-300 bg-gradient-to-br from-green-50 to-green-100 p-5 shadow-md hover:shadow-lg transition-shadow">
                     {bonus.image_url && (
-                      <img src={bonus.image_url} alt={bonus.title} className="w-full h-32 object-cover rounded-lg mb-3" />
+                      <img 
+                        src={bonus.image_url} 
+                        alt={bonus.title} 
+                        className="w-full h-40 object-cover rounded-xl mb-4 shadow-sm" 
+                      />
                     )}
-                    <h3 className="font-semibold text-gray-900">{bonus.title}</h3>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">{bonus.title}</h3>
                     {bonus.description && (
-                      <p className="mt-1 text-sm text-gray-600">{bonus.description}</p>
+                      <p className="text-gray-700 mb-3 leading-relaxed">{bonus.description}</p>
                     )}
-                    <p className="mt-2 text-lg font-bold text-green-600">
-                      ${bonus.value.toLocaleString()} value
-                    </p>
+                    <div className="flex items-center justify-between pt-3 border-t border-green-200">
+                      <span className="text-sm text-gray-600">Bonus Value</span>
+                      <span className="text-2xl font-bold text-green-700 tabular-nums">
+                        ${bonus.value.toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -98,52 +118,58 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
           )}
         </div>
 
-        {/* Sidebar: term selection */}
+        {/* Sidebar: term selection - sticky for iPad */}
         <div className="lg:col-span-1">
-          <div className="sticky top-24 card">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Choose Your Term</h3>
+          <div className="sticky top-6">
+            <div className="card shadow-lg border-2 border-gray-200">
+              <h3 className="text-xl font-bold text-gray-900 mb-5">Choose Your Term</h3>
 
-            <div className="space-y-3">
-              {terms.map((term, idx) => (
+              <div className="space-y-3 mb-6">
+                {terms.map((term, idx) => (
+                  <button
+                    key={term.id}
+                    onClick={() => setSelectedTermIdx(idx)}
+                    className={`w-full text-left rounded-xl border-2 p-5 transition-all min-h-[60px] ${
+                      idx === selectedTermIdx
+                        ? "border-primary-600 bg-primary-50 shadow-md"
+                        : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-gray-900 text-lg">
+                        {term.duration_months} Months
+                      </span>
+                      {term.bonuses && term.bonuses.length > 0 && (
+                        <span className={`text-xs font-semibold rounded-full px-3 py-1 ${
+                          idx === selectedTermIdx 
+                            ? "bg-primary-200 text-primary-800" 
+                            : "bg-gray-100 text-gray-600"
+                        }`}>
+                          {term.bonuses.length} bonus{term.bonuses.length !== 1 ? "es" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-3xl font-bold text-gray-900 tabular-nums">
+                      ${term.fee_total.toLocaleString()}
+                    </div>
+                    {term.fee_monthly && (
+                      <p className="text-sm text-gray-500 mt-1">
+                        or ${term.fee_monthly.toLocaleString()}/month
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {currentTerm && (
                 <button
-                  key={term.id}
-                  onClick={() => setSelectedTermIdx(idx)}
-                  className={`w-full text-left rounded-xl border-2 p-4 transition-all min-h-[44px] ${
-                    idx === selectedTermIdx
-                      ? "border-primary-500 bg-primary-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
+                  onClick={() => onSelectTerm(currentTerm)}
+                  className="btn-primary w-full text-lg py-4 font-semibold shadow-md hover:shadow-lg transition-all"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-900">
-                      {term.duration_months} Months
-                    </span>
-                    <span className={`text-xs rounded-full px-2 py-1 ${
-                      idx === selectedTermIdx ? "bg-primary-100 text-primary-700" : "bg-gray-100 text-gray-500"
-                    }`}>
-                      {term.bonuses?.length || 0} bonus{(term.bonuses?.length || 0) !== 1 ? "es" : ""}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-2xl font-bold text-gray-900">
-                    ${term.fee_total.toLocaleString()}
-                  </div>
-                  {term.fee_monthly && (
-                    <p className="text-sm text-gray-500">
-                      or ${term.fee_monthly.toLocaleString()}/month
-                    </p>
-                  )}
+                  Continue to Signup →
                 </button>
-              ))}
+              )}
             </div>
-
-            {currentTerm && (
-              <button
-                onClick={() => onSelectTerm(currentTerm)}
-                className="btn-primary w-full mt-6 text-base py-3"
-              >
-                Continue with {currentTerm.duration_months}-Month Term
-              </button>
-            )}
           </div>
         </div>
       </div>

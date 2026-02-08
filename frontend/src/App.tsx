@@ -22,6 +22,7 @@ import TermsPage from "./components/terms/TermsPage";
 import EmailTemplatesPage from "./components/settings/EmailTemplatesPage";
 import BonusesPage from "./components/bonuses/BonusesPage";
 import PlaceholderPage from "./components/common/PlaceholderPage";
+import StaffSignupLauncher from "./components/signup/StaffSignupLauncher";
 
 function App() {
   return (
@@ -51,6 +52,7 @@ function App() {
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/staff" element={<StaffPage />} />
+          <Route path="/signup" element={<StaffSignupLauncher />} />
           <Route path="/email-templates" element={<EmailTemplatesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
 
