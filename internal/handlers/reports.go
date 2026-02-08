@@ -27,6 +27,19 @@ func (h *ReportsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/reports/revenue/monthly", h.MonthlyRevenue)
 	r.Get("/reports/memberships/breakdown", h.MembershipBreakdown)
 	r.Get("/reports/payments/status", h.PaymentStatusBreakdown)
+	r.Get("/reports/comprehensive", h.Comprehensive)
+}
+
+// Comprehensive returns all report data in one call with date range support.
+func (h *ReportsHandler) Comprehensive(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	data, err := h.reportsRepo.GetComprehensiveReport(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error getting comprehensive report: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to get report data")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
 }
 
 // Dashboard returns summary data for the dashboard.

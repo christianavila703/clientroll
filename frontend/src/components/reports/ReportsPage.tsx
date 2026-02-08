@@ -1,166 +1,62 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 
-interface MonthlyData { month: string; revenue: number; }
-interface BreakdownData { type_title: string; revenue: number; count: number; }
-interface StatusData { [key: string]: number; }
-interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; }
+interface Report {
+  active_members: number; total_clients: number;
+  month_revenue: number; prev_month_revenue: number; total_revenue: number;
+  mrr: number; arr: number; avg_revenue_per_member: number;
+  failed_payments: number; new_signups_month: number; churned_month: number;
+  collection_rate: number; avg_membership_days: number;
+  monthly_revenue: { month: string; revenue: number }[];
+  monthly_signups: { month: string; count: number }[];
+  monthly_churn: { month: string; count: number }[];
+  membership_breakdown: { type_title: string; revenue: number; count: number }[];
+  payment_statuses: Record<string, number>;
+  frequency_breakdown: { frequency: string; count: number; revenue: number }[];
+  top_clients: { client_id: string; client_name: string; total_paid: number; memberships: number }[];
+  upcoming_expirations: { client_name: string; membership_type: string; end_date: string; days_left: number }[];
+  recent_failures: { client_name: string; amount: number; failure_reason: string; due_date: string }[];
+}
 
-const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6"];
-const STATUS_COLOURS: Record<string, string> = { succeeded: "#10b981", failed: "#ef4444", pending: "#f59e0b", disputed: "#f97316", refunded: "#9ca3af" };
+const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6", "#ec4899"];
+const STATUS_COLOURS: Record<string, string> = { succeeded: "#10b981", failed: "#ef4444", pending: "#f59e0b", disputed: "#f97316" };
 
 export default function ReportsPage() {
-  const [monthly, setMonthly] = useState<MonthlyData[]>([]);
-  const [breakdown, setBreakdown] = useState<BreakdownData[]>([]);
-  const [statuses, setStatuses] = useState<StatusData>({});
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"revenue" | "memberships" | "payments">("revenue");
+  const [tab, setTab] = useState<"overview" | "revenue" | "memberships" | "payments" | "clients">("overview");
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    const h = { Authorization: `Bearer ${token}` };
-    Promise.all([
-      fetch("/api/tenant/reports/revenue/monthly", { headers: h }).then(r => r.json()),
-      fetch("/api/tenant/reports/memberships/breakdown", { headers: h }).then(r => r.json()),
-      fetch("/api/tenant/reports/payments/status", { headers: h }).then(r => r.json()),
-      fetch("/api/tenant/reports/dashboard", { headers: h }).then(r => r.json()),
-    ]).then(([m, b, s, d]) => {
-      setMonthly(m.months || []);
-      setBreakdown(b.breakdown || []);
-      setStatuses(s.statuses || {});
-      setSummary(d);
-    }).catch(() => {}).finally(() => setLoading(false));
+    fetch("/api/tenant/reports/comprehensive", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
-  const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
-  const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
-  const successRate = totalPayments > 0 ? Math.round(((statuses.succeeded || 0) / totalPayments) * 100) : 0;
+  if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
+  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">Failed to load report data</div>;
 
   const tabs = [
+    { key: "overview" as const, label: "Overview" },
     { key: "revenue" as const, label: "Revenue" },
     { key: "memberships" as const, label: "Memberships" },
     { key: "payments" as const, label: "Payments" },
+    { key: "clients" as const, label: "Clients" },
   ];
 
-  if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
-
-  /* ─── Revenue Area ─── */
-  const revenueArea = {
-    tooltip: { trigger: "axis" as const, formatter: (params: any) => `<b>${params[0].name}</b><br/>Revenue: <b>$${params[0].value.toLocaleString()}</b>` },
-    grid: { left: 55, right: 20, top: 30, bottom: 30 },
-    xAxis: { type: "category" as const, data: monthly.map(m => m.month), axisLine: { lineStyle: { color: "#e5e7eb" } }, axisLabel: { color: "#9ca3af", fontSize: 11 } },
-    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(1)}k` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
-    series: [{
-      data: monthly.map(m => m.revenue), type: "line" as const, smooth: true, symbol: "circle", symbolSize: 6,
-      lineStyle: { width: 3, color: "#6366f1" }, itemStyle: { color: "#6366f1" },
-      areaStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
-        colorStops: [{ offset: 0, color: "rgba(99,102,241,0.35)" }, { offset: 1, color: "rgba(99,102,241,0.02)" }]
-      }},
-    }],
-  };
-
-  /* ─── Revenue Bar ─── */
-  const revenueBar = {
-    tooltip: { trigger: "axis" as const },
-    grid: { left: 55, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: "category" as const, data: monthly.map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
-    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
-    series: [{
-      type: "bar" as const, data: monthly.map(m => m.revenue), barWidth: 20,
-      itemStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
-        colorStops: [{ offset: 0, color: "#818cf8" }, { offset: 1, color: "#6366f1" }]
-      }, borderRadius: [4, 4, 0, 0] },
-    }],
-  };
-
-  /* ─── Revenue by Type Horizontal Bar ─── */
-  const revenueByType = {
-    tooltip: { trigger: "axis" as const },
-    grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
-    xAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
-    yAxis: { type: "category" as const, data: breakdown.map(b => b.type_title), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#374151", fontSize: 12 } },
-    series: [{
-      type: "bar" as const, barWidth: 24,
-      data: breakdown.map((b, i) => ({ value: b.revenue, itemStyle: { color: COLOURS[i % COLOURS.length], borderRadius: [0, 4, 4, 0] } })),
-    }],
-  };
-
-  /* ─── Membership Pie ─── */
-  const membershipPie = {
-    tooltip: { trigger: "item" as const, formatter: "{b}<br/>{c} members ({d}%)" },
-    legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
-    series: [{
-      type: "pie" as const, radius: "65%", center: ["50%", "42%"],
-      itemStyle: { borderRadius: 4, borderColor: "#fff", borderWidth: 2 },
-      label: { formatter: "{b}\n{d}%", fontSize: 11, color: "#374151" },
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.15)" } },
-      data: breakdown.map((b, i) => ({ value: b.count, name: b.type_title, itemStyle: { color: COLOURS[i % COLOURS.length] } })),
-    }],
-  };
-
-  /* ─── Membership Revenue Donut ─── */
-  const membershipRevDonut = {
-    tooltip: { trigger: "item" as const, formatter: "{b}<br/>${c} ({d}%)" },
-    legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
-    series: [{
-      type: "pie" as const, radius: ["40%", "65%"], center: ["50%", "42%"],
-      itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 },
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 13, fontWeight: "bold" } },
-      data: breakdown.map((b, i) => ({ value: b.revenue, name: b.type_title, itemStyle: { color: COLOURS[i % COLOURS.length] } })),
-    }],
-  };
-
-  /* ─── Payment Status Donut ─── */
-  const paymentDonut = {
-    tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
-    legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
-    series: [{
-      type: "pie" as const, radius: ["42%", "68%"], center: ["50%", "40%"],
-      itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 },
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
-      data: Object.entries(statuses).map(([name, value]) => ({
-        value, name: name.charAt(0).toUpperCase() + name.slice(1),
-        itemStyle: { color: STATUS_COLOURS[name] || "#9ca3af" },
-      })),
-    }],
-  };
-
-  /* ─── Payment Funnel ─── */
-  const paymentFunnel = {
-    tooltip: { trigger: "item" as const, formatter: "{b}: {c}" },
-    series: [{
-      type: "funnel" as const,
-      left: "10%", width: "80%", top: 10, bottom: 10,
-      sort: "descending" as const,
-      gap: 4,
-      label: { show: true, position: "inside", formatter: "{b}\n{c}", fontSize: 12 },
-      data: [
-        { value: totalPayments, name: "Total", itemStyle: { color: "#6366f1" } },
-        { value: statuses.succeeded || 0, name: "Succeeded", itemStyle: { color: "#10b981" } },
-        { value: statuses.failed || 0, name: "Failed", itemStyle: { color: "#ef4444" } },
-        { value: statuses.pending || 0, name: "Pending", itemStyle: { color: "#f59e0b" } },
-      ].filter(d => d.value > 0),
-    }],
-  };
+  const totalPayments = Object.values(data.payment_statuses).reduce((a, b) => a + b, 0);
+  const successRate = totalPayments > 0 ? Math.round(((data.payment_statuses.succeeded || 0) / totalPayments) * 100) : 0;
+  const revDelta = data.prev_month_revenue > 0 ? Math.round(((data.month_revenue - data.prev_month_revenue) / data.prev_month_revenue) * 100) : 0;
+  const churnRate = data.active_members > 0 ? ((data.churned_month / data.active_members) * 100).toFixed(1) : "0";
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Reports</h1>
-          <p className="text-[13px] text-gray-500 mt-0.5">Financial analytics and performance insights</p>
+          <p className="text-[13px] text-gray-500 mt-0.5">Business analytics and performance insights</p>
         </div>
-      </div>
-
-      {/* KPI Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Total Revenue" value={`$${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} sub={`${monthly.length} months tracked`} />
-        <KpiCard label="Active Members" value={summary?.active_members || 0} sub={`${summary?.new_signups || 0} new this month`} />
-        <KpiCard label="Success Rate" value={`${successRate}%`} sub={`${totalPayments} total payments`} />
-        <KpiCard label="Avg Revenue / Month" value={`$${monthly.length > 0 ? (totalRevenue / monthly.length).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "0.00"}`} />
       </div>
 
       {/* Tabs */}
@@ -173,98 +69,364 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* Revenue Tab */}
-      {tab === "revenue" && (
-        <div className="space-y-5">
-          <div className="card overflow-hidden">
-            <div className="card-header"><h3>Monthly Revenue Trend</h3></div>
-            <div className="px-5 py-4">
-              {monthly.length > 0 ? <ReactECharts option={revenueArea} style={{ height: 340 }} /> : <Empty />}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="card overflow-hidden">
-              <div className="card-header"><h3>Revenue by Month</h3></div>
-              <div className="px-5 py-4">
-                {monthly.length > 0 ? <ReactECharts option={revenueBar} style={{ height: 280 }} /> : <Empty />}
-              </div>
-            </div>
-            <div className="card overflow-hidden">
-              <div className="card-header"><h3>Revenue by Membership Type</h3></div>
-              <div className="px-5 py-4">
-                {breakdown.length > 0 ? <ReactECharts option={revenueByType} style={{ height: Math.max(150, breakdown.length * 50) }} /> : <Empty />}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Memberships Tab */}
-      {tab === "memberships" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="card overflow-hidden">
-            <div className="card-header"><h3>Membership Distribution</h3></div>
-            <div className="px-5 py-4">
-              {breakdown.length > 0 ? <ReactECharts option={membershipPie} style={{ height: 340 }} /> : <Empty />}
-            </div>
-          </div>
-          <div className="card overflow-hidden">
-            <div className="card-header"><h3>Revenue per Membership</h3></div>
-            <div className="px-5 py-4">
-              {breakdown.length > 0 ? <ReactECharts option={membershipRevDonut} style={{ height: 340 }} /> : <Empty />}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payments Tab */}
-      {tab === "payments" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="card overflow-hidden">
-            <div className="card-header"><h3>Payment Status Breakdown</h3></div>
-            <div className="px-5 py-4">
-              {totalPayments > 0 ? <ReactECharts option={paymentDonut} style={{ height: 340 }} /> : <Empty />}
-            </div>
-          </div>
-          <div className="card overflow-hidden">
-            <div className="card-header"><h3>Payment Funnel</h3></div>
-            <div className="px-5 py-4">
-              {totalPayments > 0 ? <ReactECharts option={paymentFunnel} style={{ height: 340 }} /> : <Empty />}
-            </div>
-          </div>
-          <div className="card overflow-hidden lg:col-span-2">
-            <div className="card-header"><h3>Payment Metrics</h3></div>
-            <div className="px-5 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-                <MetricBox label="Total" value={totalPayments} />
-                <MetricBox label="Succeeded" value={statuses.succeeded || 0} colour="text-emerald-600" />
-                <MetricBox label="Failed" value={statuses.failed || 0} colour="text-red-600" />
-                <MetricBox label="Disputed" value={statuses.disputed || 0} colour="text-amber-600" />
-                <MetricBox label="Success Rate" value={`${successRate}%`} />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {tab === "overview" && <OverviewTab data={data} revDelta={revDelta} successRate={successRate} churnRate={churnRate} />}
+      {tab === "revenue" && <RevenueTab data={data} />}
+      {tab === "memberships" && <MembershipsTab data={data} />}
+      {tab === "payments" && <PaymentsTab data={data} totalPayments={totalPayments} successRate={successRate} />}
+      {tab === "clients" && <ClientsTab data={data} fmtDate={fmtDate} />}
     </div>
   );
 }
 
-function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+/* ─── KPI Card ─── */
+function Kpi({ label, value, sub, delta, alert }: { label: string; value: string | number; sub?: string; delta?: number; alert?: boolean }) {
   return (
     <div className="card px-4 py-3">
       <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">{label}</p>
-      <p className="text-2xl font-bold text-gray-900 mt-1 tabular-nums">{value}</p>
+      <div className="flex items-end gap-2 mt-1">
+        <p className={`text-xl font-bold tabular-nums ${alert ? "text-red-600" : "text-gray-900"}`}>{value}</p>
+        {delta !== undefined && delta !== 0 && (
+          <span className={`text-[11px] font-semibold rounded-full px-1.5 py-0.5 mb-0.5 ${delta > 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+            {delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%
+          </span>
+        )}
+      </div>
       {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
     </div>
   );
 }
 
-function MetricBox({ label, value, colour }: { label: string; value: string | number; colour?: string }) {
+/* ─── Overview Tab ─── */
+function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report; revDelta: number; successRate: number; churnRate: string }) {
+  const revenueChart = {
+    tooltip: { trigger: "axis" as const },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
+    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(0)}k` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    series: [{
+      data: data.monthly_revenue.map(m => m.revenue), type: "line" as const, smooth: true, symbolSize: 6,
+      lineStyle: { width: 3, color: "#6366f1" }, itemStyle: { color: "#6366f1" },
+      areaStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(99,102,241,0.3)" }, { offset: 1, color: "rgba(99,102,241,0.02)" }] } },
+    }],
+  };
+
   return (
-    <div className="rounded-lg bg-gray-50 px-4 py-3 text-center">
-      <p className="text-[11px] text-gray-400 uppercase tracking-wider font-medium">{label}</p>
-      <p className={`text-xl font-bold mt-1 tabular-nums ${colour || "text-gray-900"}`}>{value}</p>
+    <div className="space-y-5">
+      {/* KPI row 1 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="Monthly Revenue" value={`$${data.month_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} delta={revDelta} />
+        <Kpi label="MRR" value={`$${data.mrr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Monthly Recurring Revenue" />
+        <Kpi label="ARR" value={`$${data.arr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Annual Recurring Revenue" />
+        <Kpi label="Total Revenue" value={`$${data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} sub="All time" />
+      </div>
+
+      {/* KPI row 2 */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <Kpi label="Active Members" value={data.active_members} sub={`${data.new_signups_month} new this month`} />
+        <Kpi label="Collection Rate" value={`${data.collection_rate.toFixed(1)}%`} />
+        <Kpi label="Success Rate" value={`${successRate}%`} />
+        <Kpi label="Churn Rate" value={`${churnRate}%`} sub={`${data.churned_month} this month`} />
+        <Kpi label="Failed Payments" value={data.failed_payments} alert={data.failed_payments > 0} />
+      </div>
+
+      {/* Revenue trend */}
+      <div className="card overflow-hidden">
+        <div className="card-header"><h3>Revenue Trend</h3></div>
+        <div className="px-5 py-4">
+          {data.monthly_revenue.length > 0 ? <ReactECharts option={revenueChart} style={{ height: 280 }} /> : <Empty />}
+        </div>
+      </div>
+
+      {/* Alerts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Upcoming expirations */}
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Expiring Soon</h3><span className="text-[12px] text-gray-400">Next 60 days</span></div>
+          {(data.upcoming_expirations || []).length === 0 ? (
+            <div className="px-5 py-6 text-center text-[13px] text-gray-400">No upcoming expirations</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {data.upcoming_expirations.map((ue, i) => (
+                <div key={i} className="px-5 py-2.5 flex items-center justify-between">
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-900">{ue.client_name}</p>
+                    <p className="text-[11px] text-gray-400">{ue.membership_type}</p>
+                  </div>
+                  <span className={`text-[12px] font-medium tabular-nums ${ue.days_left <= 14 ? "text-red-600" : ue.days_left <= 30 ? "text-amber-600" : "text-gray-500"}`}>{ue.days_left}d left</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recent failures */}
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Recent Failed Payments</h3></div>
+          {(data.recent_failures || []).length === 0 ? (
+            <div className="px-5 py-6 text-center text-[13px] text-gray-400">No failed payments</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {data.recent_failures.map((rf, i) => (
+                <div key={i} className="px-5 py-2.5 flex items-center justify-between">
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-900">{rf.client_name}</p>
+                    <p className="text-[11px] text-red-500">{rf.failure_reason}</p>
+                  </div>
+                  <span className="text-[13px] font-semibold text-red-600 tabular-nums">${rf.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Revenue Tab ─── */
+function RevenueTab({ data }: { data: Report }) {
+  const areaChart = {
+    tooltip: { trigger: "axis" as const, formatter: (p: any) => `<b>${p[0].name}</b><br/>Revenue: <b>$${p[0].value.toLocaleString()}</b>` },
+    grid: { left: 55, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
+    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(1)}k` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    series: [{
+      data: data.monthly_revenue.map(m => m.revenue), type: "line" as const, smooth: true, symbolSize: 6,
+      lineStyle: { width: 3, color: "#6366f1" }, itemStyle: { color: "#6366f1" },
+      areaStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(99,102,241,0.35)" }, { offset: 1, color: "rgba(99,102,241,0.02)" }] } },
+    }],
+  };
+
+  const barChart = {
+    tooltip: { trigger: "axis" as const },
+    grid: { left: 55, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
+    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    series: [{ type: "bar" as const, data: data.monthly_revenue.map(m => m.revenue), barWidth: 20,
+      itemStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "#818cf8" }, { offset: 1, color: "#6366f1" }] }, borderRadius: [4, 4, 0, 0] } }],
+  };
+
+  const typeBar = {
+    tooltip: { trigger: "axis" as const },
+    grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+    xAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    yAxis: { type: "category" as const, data: data.membership_breakdown.map(b => b.type_title), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#374151", fontSize: 12 } },
+    series: [{ type: "bar" as const, barWidth: 24,
+      data: data.membership_breakdown.map((b, i) => ({ value: b.revenue, itemStyle: { color: COLOURS[i % COLOURS.length], borderRadius: [0, 4, 4, 0] } })) }],
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="MRR" value={`$${data.mrr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
+        <Kpi label="ARR" value={`$${data.arr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
+        <Kpi label="Avg / Member" value={`$${data.avg_revenue_per_member.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Lifetime" />
+        <Kpi label="Total Revenue" value={`$${data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
+      </div>
+      <div className="card overflow-hidden"><div className="card-header"><h3>Monthly Revenue Trend</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={areaChart} style={{ height: 320 }} /> : <Empty />}</div></div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card overflow-hidden"><div className="card-header"><h3>Revenue by Month</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={barChart} style={{ height: 280 }} /> : <Empty />}</div></div>
+        <div className="card overflow-hidden"><div className="card-header"><h3>Revenue by Membership Type</h3></div><div className="px-5 py-4">{data.membership_breakdown.length > 0 ? <ReactECharts option={typeBar} style={{ height: Math.max(150, data.membership_breakdown.length * 50) }} /> : <Empty />}</div></div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Memberships Tab ─── */
+function MembershipsTab({ data }: { data: Report }) {
+  const pie = {
+    tooltip: { trigger: "item" as const, formatter: "{b}<br/>{c} members ({d}%)" },
+    legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
+    series: [{ type: "pie" as const, radius: ["40%", "65%"], center: ["50%", "40%"],
+      itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 }, label: { show: false },
+      emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
+      data: data.membership_breakdown.map((b, i) => ({ value: b.count, name: b.type_title, itemStyle: { color: COLOURS[i % COLOURS.length] } })) }],
+  };
+
+  const signupsChart = {
+    tooltip: { trigger: "axis" as const },
+    grid: { left: 40, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: "category" as const, data: (data.monthly_signups || []).map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
+    yAxis: { type: "value" as const, minInterval: 1, axisLabel: { color: "#9ca3af", fontSize: 11 }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    series: [
+      { name: "Signups", type: "bar" as const, data: (data.monthly_signups || []).map(m => m.count), barWidth: 16, itemStyle: { color: "#10b981", borderRadius: [4, 4, 0, 0] } },
+      { name: "Churn", type: "bar" as const, data: (data.monthly_churn || []).map(m => m.count), barWidth: 16, itemStyle: { color: "#ef4444", borderRadius: [4, 4, 0, 0] } },
+    ],
+    legend: { top: 0, textStyle: { fontSize: 11 } },
+  };
+
+  const freqPie = {
+    tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
+    series: [{ type: "pie" as const, radius: "65%", center: ["50%", "50%"],
+      itemStyle: { borderRadius: 4, borderColor: "#fff", borderWidth: 2 },
+      label: { formatter: "{b}\n{d}%", fontSize: 11 },
+      data: (data.frequency_breakdown || []).map((f, i) => ({ value: f.count, name: f.frequency.charAt(0).toUpperCase() + f.frequency.slice(1), itemStyle: { color: COLOURS[i % COLOURS.length] } })) }],
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="Active Members" value={data.active_members} />
+        <Kpi label="New This Month" value={data.new_signups_month} />
+        <Kpi label="Churned This Month" value={data.churned_month} />
+        <Kpi label="Avg Duration" value={`${data.avg_membership_days}d`} sub={`~${Math.round(data.avg_membership_days / 30)} months`} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card overflow-hidden"><div className="card-header"><h3>Membership Distribution</h3></div><div className="px-5 py-4">{data.membership_breakdown.length > 0 ? <ReactECharts option={pie} style={{ height: 300 }} /> : <Empty />}</div></div>
+        <div className="card overflow-hidden"><div className="card-header"><h3>Signups vs Churn</h3></div><div className="px-5 py-4">{(data.monthly_signups || []).length > 0 ? <ReactECharts option={signupsChart} style={{ height: 300 }} /> : <Empty />}</div></div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card overflow-hidden"><div className="card-header"><h3>Payment Frequency</h3></div><div className="px-5 py-4">{(data.frequency_breakdown || []).length > 0 ? <ReactECharts option={freqPie} style={{ height: 280 }} /> : <Empty />}</div></div>
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Membership Breakdown</h3></div>
+          <div className="divide-y divide-gray-100">
+            {data.membership_breakdown.map((b, i) => (
+              <div key={i} className="px-5 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ background: COLOURS[i % COLOURS.length] }} />
+                  <span className="text-[13px] text-gray-900">{b.type_title}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{b.count} members</span>
+                  <span className="text-[12px] text-gray-400 tabular-nums">${b.revenue.toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Payments Tab ─── */
+function PaymentsTab({ data, totalPayments, successRate }: { data: Report; totalPayments: number; successRate: number }) {
+  const donut = {
+    tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
+    legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
+    series: [{ type: "pie" as const, radius: ["42%", "68%"], center: ["50%", "40%"],
+      itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 }, label: { show: false },
+      emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
+      data: Object.entries(data.payment_statuses).map(([name, value]) => ({ value, name: name.charAt(0).toUpperCase() + name.slice(1), itemStyle: { color: STATUS_COLOURS[name] || "#9ca3af" } })) }],
+  };
+
+  const gauge = {
+    series: [{ type: "gauge" as const, startAngle: 200, endAngle: -20, min: 0, max: 100,
+      pointer: { show: false },
+      progress: { show: true, overlap: false, roundCap: true, clip: false, itemStyle: { color: successRate >= 90 ? "#10b981" : successRate >= 70 ? "#f59e0b" : "#ef4444" } },
+      axisLine: { lineStyle: { width: 18, color: [[1, "#f3f4f6"]] } },
+      axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+      detail: { valueAnimation: true, fontSize: 28, fontWeight: 700, color: "#111827", formatter: "{value}%", offsetCenter: [0, "0%"] },
+      title: { fontSize: 12, color: "#9ca3af", offsetCenter: [0, "30%"] },
+      data: [{ value: successRate, name: "Success Rate" }] }],
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <Kpi label="Total Payments" value={totalPayments} />
+        <Kpi label="Succeeded" value={data.payment_statuses.succeeded || 0} />
+        <Kpi label="Failed" value={data.payment_statuses.failed || 0} alert={(data.payment_statuses.failed || 0) > 0} />
+        <Kpi label="Collection Rate" value={`${data.collection_rate.toFixed(1)}%`} />
+        <Kpi label="Success Rate" value={`${successRate}%`} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card overflow-hidden"><div className="card-header"><h3>Payment Status</h3></div><div className="px-5 py-4">{totalPayments > 0 ? <ReactECharts option={donut} style={{ height: 320 }} /> : <Empty />}</div></div>
+        <div className="card overflow-hidden"><div className="card-header"><h3>Success Rate Gauge</h3></div><div className="px-5 py-4">{totalPayments > 0 ? <ReactECharts option={gauge} style={{ height: 220 }} /> :  <Empty />}
+          <div className="space-y-2 mt-4">
+            {Object.entries(data.payment_statuses).map(([name, value]) => (
+              <div key={name} className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ background: STATUS_COLOURS[name] || "#9ca3af" }} />
+                <span className="text-[13px] text-gray-600 flex-1 capitalize">{name}</span>
+                <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{value}</span>
+              </div>
+            ))}
+          </div>
+        </div></div>
+      </div>
+      {/* Recent failures */}
+      <div className="card overflow-hidden">
+        <div className="card-header"><h3>Recent Failed Payments</h3><Link to="/payments" className="text-[12px] text-indigo-600 font-medium">View all →</Link></div>
+        {(data.recent_failures || []).length === 0 ? (
+          <div className="px-5 py-6 text-center text-[13px] text-gray-400">No failed payments — nice!</div>
+        ) : (
+          <table className="data-table">
+            <thead><tr><th>Client</th><th>Amount</th><th>Reason</th><th>Due Date</th></tr></thead>
+            <tbody>
+              {data.recent_failures.map((rf, i) => (
+                <tr key={i}><td className="font-medium text-gray-900">{rf.client_name}</td><td className="tabular-nums text-red-600">${rf.amount.toFixed(2)}</td><td className="text-[12px] text-gray-500">{rf.failure_reason}</td><td className="text-[12px] text-gray-500">{rf.due_date}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Clients Tab ─── */
+function ClientsTab({ data, fmtDate }: { data: Report; fmtDate: (d: string) => string }) {
+  const clientBar = {
+    tooltip: { trigger: "axis" as const },
+    grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+    xAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
+    yAxis: { type: "category" as const, data: (data.top_clients || []).map(c => c.client_name), inverse: true, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#374151", fontSize: 12 } },
+    series: [{ type: "bar" as const, barWidth: 20,
+      data: (data.top_clients || []).map((c, i) => ({ value: c.total_paid, itemStyle: { color: COLOURS[i % COLOURS.length], borderRadius: [0, 4, 4, 0] } })) }],
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="Total Clients" value={data.total_clients} />
+        <Kpi label="Active Members" value={data.active_members} />
+        <Kpi label="New This Month" value={data.new_signups_month} />
+        <Kpi label="Avg Lifetime Value" value={`$${data.avg_revenue_per_member.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Top Clients by Revenue</h3></div>
+          <div className="px-5 py-4">{(data.top_clients || []).length > 0 ? <ReactECharts option={clientBar} style={{ height: Math.max(200, (data.top_clients || []).length * 40) }} /> : <Empty />}</div>
+        </div>
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Top 10 Clients</h3></div>
+          <div className="divide-y divide-gray-100">
+            {(data.top_clients || []).map((c, i) => (
+              <Link key={i} to={`/clients/${c.client_id}`} className="px-5 py-2.5 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-[11px] font-bold text-gray-500">{i + 1}</span>
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-900">{c.client_name}</p>
+                    <p className="text-[11px] text-gray-400">{c.memberships} membership{c.memberships !== 1 ? "s" : ""}</p>
+                  </div>
+                </div>
+                <span className="text-[13px] font-semibold text-gray-900 tabular-nums">${c.total_paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Upcoming expirations */}
+      <div className="card overflow-hidden">
+        <div className="card-header"><h3>Upcoming Expirations</h3><span className="text-[12px] text-gray-400">Next 60 days</span></div>
+        {(data.upcoming_expirations || []).length === 0 ? (
+          <div className="px-5 py-6 text-center text-[13px] text-gray-400">No memberships expiring in the next 60 days</div>
+        ) : (
+          <table className="data-table">
+            <thead><tr><th>Client</th><th>Membership</th><th>Expires</th><th>Days Left</th></tr></thead>
+            <tbody>
+              {data.upcoming_expirations.map((ue, i) => (
+                <tr key={i}>
+                  <td className="font-medium text-gray-900">{ue.client_name}</td>
+                  <td className="text-gray-600">{ue.membership_type}</td>
+                  <td className="text-[12px] text-gray-500">{fmtDate(ue.end_date)}</td>
+                  <td><span className={`text-[12px] font-medium ${ue.days_left <= 14 ? "text-red-600" : ue.days_left <= 30 ? "text-amber-600" : "text-gray-500"}`}>{ue.days_left} days</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
