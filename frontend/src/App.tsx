@@ -23,6 +23,7 @@ import EmailTemplatesPage from "./components/settings/EmailTemplatesPage";
 import BonusesPage from "./components/bonuses/BonusesPage";
 import PlaceholderPage from "./components/common/PlaceholderPage";
 import StaffSignupLauncher from "./components/signup/StaffSignupLauncher";
+import ServicesPage from "./components/services/ServicesPage";
 
 function App() {
   return (
@@ -48,6 +49,7 @@ function App() {
           <Route path="/memberships" element={<MembershipTypesPage />} />
           <Route path="/memberships/:mtId" element={<MembershipTypeDetail />} />
           <Route path="/bonuses" element={<BonusesPage />} />
+          <Route path="/services" element={<ServicesPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />

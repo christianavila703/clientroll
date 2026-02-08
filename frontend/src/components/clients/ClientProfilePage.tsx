@@ -50,6 +50,7 @@ export default function ClientProfilePage() {
   const [tab, setTab] = useState<"summary" | "memberships" | "billing" | "payments">("summary");
   const [showEdit, setShowEdit] = useState(false);
   const [showSetupMembership, setShowSetupMembership] = useState(false);
+  const [showTakePayment, setShowTakePayment] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
@@ -112,7 +113,7 @@ export default function ClientProfilePage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <MoreActionsMenu clientId={client.id} clientName={client.name} onSetupMembership={() => setShowSetupMembership(true)} />
+          <MoreActionsMenu clientId={client.id} clientName={client.name} onSetupMembership={() => setShowSetupMembership(true)} onTakePayment={() => setShowTakePayment(true)} />
           <button onClick={() => setShowEdit(true)} className="btn-secondary text-[12px]">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
             Edit client
@@ -294,6 +295,16 @@ export default function ClientProfilePage() {
           client={client}
           onClose={() => setShowEdit(false)}
           onSaved={() => { setShowEdit(false); loadAll(); }}
+        />
+      )}
+
+      {/* Take Payment modal */}
+      {showTakePayment && (
+        <TakePaymentModal
+          clientId={client.id}
+          clientName={client.name}
+          onClose={() => setShowTakePayment(false)}
+          onCharged={() => { setShowTakePayment(false); loadAll(); }}
         />
       )}
 
@@ -697,7 +708,7 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
 }
 
 /* ─── More Actions Dropdown ─── */
-function MoreActionsMenu({ clientId, clientName, onSetupMembership }: { clientId: string; clientName: string; onSetupMembership: () => void }) {
+function MoreActionsMenu({ clientId, clientName, onSetupMembership, onTakePayment }: { clientId: string; clientName: string; onSetupMembership: () => void; onTakePayment: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -718,6 +729,10 @@ function MoreActionsMenu({ clientId, clientName, onSetupMembership }: { clientId
           <button onClick={() => { setOpen(false); onSetupMembership(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-indigo-700 hover:bg-indigo-50 font-medium">
             <svg className="h-3.5 w-3.5 text-indigo-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
             Set up membership
+          </button>
+          <button onClick={() => { setOpen(false); onTakePayment(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-emerald-700 hover:bg-emerald-50 font-medium">
+            <svg className="h-3.5 w-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+            Take payment
           </button>
           <div className="my-1 border-t border-gray-100" />
           <button onClick={() => setOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
@@ -1090,6 +1105,150 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Take Payment Modal ─── */
+function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
+  clientId: string; clientName: string; onClose: () => void; onCharged: () => void;
+}) {
+  const [services, setServices] = useState<{ id: string; name: string; price: number; tax_rate: number; description?: string }[]>([]);
+  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState(0);
+  const [taxAmount, setTaxAmount] = useState(0);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    fetch("/api/tenant/services", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setServices((d.services || []).filter((s: any) => s.is_active)));
+  }, []);
+
+  const handleServiceSelect = (serviceId: string) => {
+    setSelectedServiceId(serviceId);
+    const svc = services.find(s => s.id === serviceId);
+    if (svc) {
+      setDescription(svc.name);
+      setAmount(svc.price);
+      setTaxAmount(svc.tax_rate > 0 ? Math.round(svc.price * svc.tax_rate) / 100 : 0);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!description || amount <= 0) { setError("Description and amount are required"); return; }
+    setSaving(true); setError("");
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch("/api/tenant/services/charge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          client_id: clientId,
+          service_id: selectedServiceId || null,
+          description,
+          amount,
+          tax_amount: taxAmount,
+          notes: notes || null,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      onCharged();
+    } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
+        <div className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-[15px] font-bold text-gray-900">Take Payment</h2>
+              <p className="text-[12px] text-gray-500">Charge {clientName} for a service</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+
+          <div className="px-6 py-5 space-y-5">
+            {/* Service selection */}
+            <div>
+              <label className="block text-[13px] font-semibold text-gray-700 mb-2">Select a service</label>
+              <div className="space-y-2">
+                {services.map(s => (
+                  <label key={s.id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
+                    selectedServiceId === s.id ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
+                  }`}>
+                    <input type="radio" name="service" value={s.id} checked={selectedServiceId === s.id}
+                      onChange={() => handleServiceSelect(s.id)} className="h-4 w-4 text-indigo-600" />
+                    <div className="flex-1">
+                      <p className="text-[13px] font-medium text-gray-900">{s.name}</p>
+                      {s.description && <p className="text-[11px] text-gray-400">{s.description}</p>}
+                    </div>
+                    <span className="text-[14px] font-bold text-gray-900 tabular-nums">${s.price.toFixed(2)}</span>
+                  </label>
+                ))}
+                {services.length === 0 && (
+                  <p className="text-[13px] text-gray-400 text-center py-4">No services defined. <a href="/services" className="text-indigo-600 hover:text-indigo-700">Create one first</a></p>
+                )}
+                <label className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
+                  selectedServiceId === "__custom" ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
+                }`}>
+                  <input type="radio" name="service" value="__custom" checked={selectedServiceId === "__custom"}
+                    onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(0); setTaxAmount(0); }} className="h-4 w-4 text-indigo-600" />
+                  <span className="text-[13px] font-medium text-gray-700">Custom charge</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Amount details */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
+                <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" placeholder="What is this charge for?" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Amount ($)</label>
+                <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax ($)</label>
+                <input type="number" value={taxAmount} onChange={e => setTaxAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Total</label>
+                <p className="input-field bg-gray-50 flex items-center text-[14px] font-bold text-gray-900 tabular-nums">
+                  ${(amount + taxAmount).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                rows={2} placeholder="Internal notes about this charge" />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
+              <button onClick={handleSubmit} disabled={saving || amount <= 0} className="btn-primary text-[12px]">
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+                {saving ? "Processing..." : `Charge $${(amount + taxAmount).toFixed(2)}`}
+              </button>
+            </div>
           </div>
         </div>
       </div>
