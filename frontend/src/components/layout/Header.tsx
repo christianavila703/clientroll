@@ -50,7 +50,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
         (clientsRes.clients || []).slice(0, 5).forEach((c: { id: string; name: string; email?: string }) => {
           if (c.name.toLowerCase().includes(q.toLowerCase()) || c.email?.toLowerCase().includes(q.toLowerCase())) {
-            items.push({ type: "client", id: c.id, title: c.name, subtitle: c.email, url: "/clients" });
+            items.push({ type: "client", id: c.id, title: c.name, subtitle: c.email, url: `/clients/${c.id}` });
           }
         });
 
