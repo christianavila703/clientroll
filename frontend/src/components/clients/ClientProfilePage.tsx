@@ -761,7 +761,21 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      await api.updateClient(client.id, form);
+      // Convert empty strings to null for optional fields
+      const payload = {
+        ...form,
+        birth_date: form.birth_date || null,
+        address: form.address || null,
+        suburb: form.suburb || null,
+        state: form.state || null,
+        postcode: form.postcode || null,
+        email: form.email || null,
+        phone: form.phone || null,
+        gender: form.gender || null,
+        emergency_contact_name: form.emergency_contact_name || null,
+        emergency_contact_phone: form.emergency_contact_phone || null,
+      };
+      await api.updateClient(client.id, payload);
       onSaved();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }

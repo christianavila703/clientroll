@@ -265,8 +265,15 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      if (editing) { await api.updateClient(editing.id, form); }
-      else { await api.createClient(form); }
+      const payload = {
+        ...form,
+        birth_date: form.birth_date || null,
+        gender: form.gender || null,
+        emergency_contact_name: form.emergency_contact_name || null,
+        emergency_contact_phone: form.emergency_contact_phone || null,
+      };
+      if (editing) { await api.updateClient(editing.id, payload); }
+      else { await api.createClient(payload); }
       onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
