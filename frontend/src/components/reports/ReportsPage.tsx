@@ -186,15 +186,32 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
 /* ─── Revenue Tab ─── */
 function RevenueTab({ data }: { data: Report }) {
   const areaChart = {
-    tooltip: { trigger: "axis" as const, formatter: (p: any) => `<b>${p[0].name}</b><br/>Revenue: <b>$${p[0].value.toLocaleString()}</b>` },
-    grid: { left: 55, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month), axisLabel: { color: "#9ca3af", fontSize: 11 } },
-    yAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(1)}k` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
-    series: [{
-      data: data.monthly_revenue.map(m => m.revenue), type: "line" as const, smooth: true, symbolSize: 6,
-      lineStyle: { width: 3, color: "#6366f1" }, itemStyle: { color: "#6366f1" },
-      areaStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(99,102,241,0.35)" }, { offset: 1, color: "rgba(99,102,241,0.02)" }] } },
-    }],
+    tooltip: { trigger: "axis" as const, formatter: (params: any) => {
+      const bar = params.find((p: any) => p.seriesType === "bar");
+      return `<b>${bar?.name || params[0]?.name}</b><br/>Revenue: <b>$${(bar?.value || params[0]?.value || 0).toLocaleString()}</b>`;
+    }},
+    grid: { left: 55, right: 20, top: 20, bottom: 55 },
+    xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month),
+      axisLine: { lineStyle: { color: "#f3f4f6" } }, axisTick: { show: false },
+      axisLabel: { color: "#9ca3af", fontSize: 11, interval: 0 } },
+    yAxis: [
+      { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${(v/1000).toFixed(1)}k` },
+        splitLine: { lineStyle: { color: "#f9fafb", type: "dashed" as const } }, axisLine: { show: false }, axisTick: { show: false } },
+      { type: "value" as const, show: false },
+    ],
+    series: [
+      { name: "Revenue", type: "bar" as const, data: data.monthly_revenue.map(m => m.revenue), barWidth: "60%",
+        itemStyle: { borderRadius: [4, 4, 0, 0],
+          color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: "#a78bfa" }, { offset: 0.5, color: "#c4b5fd" }, { offset: 1, color: "#ede9fe" }] } },
+        emphasis: { itemStyle: { color: { type: "linear" as const, x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: "#7c3aed" }, { offset: 0.5, color: "#a78bfa" }, { offset: 1, color: "#ddd6fe" }] } } },
+      },
+      { name: "Trend", type: "line" as const, yAxisIndex: 1, data: data.monthly_revenue.map(m => m.revenue),
+        smooth: true, symbol: "circle", symbolSize: 5,
+        lineStyle: { width: 2, color: "#8b5cf6", type: "dashed" as const },
+        itemStyle: { color: "#8b5cf6", borderWidth: 2, borderColor: "#fff" }, z: 10 },
+    ],
   };
 
   const barChart = {
