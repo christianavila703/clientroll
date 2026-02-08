@@ -1,6 +1,24 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import api from "../../api/client";
 import RichTextEditor from "../common/RichTextEditor";
+
+const TC_VARIABLES = [
+  { key: "client_name", label: "Client Name", desc: "Full name of the member" },
+  { key: "client_email", label: "Client Email", desc: "Member's email address" },
+  { key: "client_phone", label: "Client Phone", desc: "Member's phone number" },
+  { key: "client_address", label: "Client Address", desc: "Member's full address" },
+  { key: "membership_title", label: "Membership Title", desc: "Name of the membership type" },
+  { key: "term_months", label: "Term (Months)", desc: "Duration of the agreement" },
+  { key: "total_fee", label: "Total Fee", desc: "Total contract value" },
+  { key: "payment_amount", label: "Payment Amount", desc: "Per-period payment amount" },
+  { key: "payment_frequency", label: "Payment Frequency", desc: "Weekly, fortnightly, or monthly" },
+  { key: "start_date", label: "Start Date", desc: "When the membership begins" },
+  { key: "end_date", label: "End Date", desc: "When the minimum term ends" },
+  { key: "company_name", label: "Company Name", desc: "Your business name" },
+  { key: "company_address", label: "Company Address", desc: "Your business address" },
+  { key: "company_phone", label: "Company Phone", desc: "Your business phone" },
+  { key: "today_date", label: "Today's Date", desc: "Date the agreement is signed" },
+];
 
 interface Terms {
   id: string;
@@ -168,9 +186,39 @@ function TermsForm({ initial, onSaved, onCancel }: {
           <label className="block text-[13px] font-medium text-gray-700 mb-1">Title *</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className="input-field" required placeholder="e.g. Standard Membership Agreement" />
         </div>
+
+        {/* Variables panel */}
+        <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+            <p className="text-[12px] font-semibold text-indigo-800">Variables</p>
+            <span className="text-[11px] text-indigo-500">— Click to insert into content</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {TC_VARIABLES.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => {
+                  const tag = `{{${v.key}}}`;
+                  navigator.clipboard.writeText(tag);
+                  setContent(prev => prev ? prev.replace(/<\/p>$/, ` ${tag}</p>`) : `<p>${tag}</p>`);
+                }}
+                className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 text-[11px] font-mono text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 transition-colors shadow-sm cursor-pointer"
+                title={v.desc}
+              >
+                {"{{"}
+                {v.key}
+                {"}}"}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-indigo-400 mt-2">These will be replaced with actual values when the T&C is shown to a client during signup.</p>
+        </div>
+
         <div>
           <label className="block text-[13px] font-medium text-gray-700 mb-1">Content *</label>
-          <p className="text-[11px] text-gray-400 mb-1.5">Full terms and conditions text. Clients will be shown this during signup.</p>
+          <p className="text-[11px] text-gray-400 mb-1.5">Full terms and conditions text. Use the variables above to personalise the document.</p>
           <RichTextEditor
             content={content}
             onChange={setContent}
