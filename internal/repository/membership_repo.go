@@ -61,7 +61,7 @@ func (r *MembershipRepo) Create(
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $11, $12, $13, $14)
 		RETURNING id, tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, payment_amount,
-		    status, member_signature_data, member_signed_at,
+		    status, gocardless_mandate_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at`
 
 	var m models.Membership
@@ -72,7 +72,7 @@ func (r *MembershipRepo) Create(
 	).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
 		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency,
-		&m.PaymentAmount, &m.Status, &m.MemberSignature, &m.MemberSignedAt,
+		&m.PaymentAmount, &m.Status, &m.GoCardlessMandateID, &m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -86,7 +86,7 @@ func (r *MembershipRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, payment_amount,
-		    status, member_signature_data, member_signed_at,
+		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE id = $1 AND tenant_id = $2`
 
@@ -94,7 +94,8 @@ func (r *MembershipRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
 		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency,
-		&m.PaymentAmount, &m.Status, &m.MemberSignature, &m.MemberSignedAt,
+		&m.PaymentAmount, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+		&m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -106,12 +107,70 @@ func (r *MembershipRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (
 	return &m, nil
 }
 
+// SetGoCardlessMandateID stores the GoCardless mandate ID for a membership.
+func (r *MembershipRepo) SetGoCardlessMandateID(ctx context.Context, membershipID, tenantID uuid.UUID, mandateID string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE memberships SET gocardless_mandate_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+		membershipID, tenantID, mandateID)
+	return err
+}
+
+// ClearGoCardlessMandateByProviderID clears gocardless_mandate_id for all memberships with the given provider mandate ID (e.g. after mandate.cancelled webhook).
+func (r *MembershipRepo) ClearGoCardlessMandateByProviderID(ctx context.Context, tenantID uuid.UUID, providerMandateID string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE memberships SET gocardless_mandate_id = NULL, gocardless_subscription_id = NULL, updated_at = NOW() WHERE tenant_id = $1 AND gocardless_mandate_id = $2",
+		tenantID, providerMandateID)
+	return err
+}
+
+// SetGoCardlessSubscriptionID stores the GoCardless subscription ID for a membership.
+func (r *MembershipRepo) SetGoCardlessSubscriptionID(ctx context.Context, membershipID, tenantID uuid.UUID, subscriptionID string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE memberships SET gocardless_subscription_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+		membershipID, tenantID, subscriptionID)
+	return err
+}
+
+// UpdateStatus updates the status of a membership.
+func (r *MembershipRepo) UpdateStatus(ctx context.Context, membershipID, tenantID uuid.UUID, status string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE memberships SET status = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+		membershipID, tenantID, status)
+	return err
+}
+
+// FindBySubscriptionID finds a membership by its GoCardless subscription ID.
+func (r *MembershipRepo) FindBySubscriptionID(ctx context.Context, tenantID uuid.UUID, subscriptionID string) (*models.Membership, error) {
+	query := `
+		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
+		    start_date, min_term_end_date, payment_method, payment_frequency, payment_amount,
+		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
+		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
+		FROM memberships WHERE tenant_id = $1 AND gocardless_subscription_id = $2`
+
+	var m models.Membership
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, subscriptionID).Scan(
+		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency,
+		&m.PaymentAmount, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+		&m.MemberSignature, &m.MemberSignedAt,
+		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
 // ListByTenant returns all memberships for a tenant.
 func (r *MembershipRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, payment_amount,
-		    status, member_signature_data, member_signed_at,
+		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE tenant_id = $1`
 	args := []interface{}{tenantID}
@@ -134,7 +193,8 @@ func (r *MembershipRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, s
 		if err := rows.Scan(
 			&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
 			&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency,
-			&m.PaymentAmount, &m.Status, &m.MemberSignature, &m.MemberSignedAt,
+			&m.PaymentAmount, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+			&m.MemberSignature, &m.MemberSignedAt,
 			&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, err

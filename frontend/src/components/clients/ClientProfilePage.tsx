@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
 
 /* ─── Types ─── */
@@ -25,6 +25,8 @@ interface Membership {
   payment_frequency?: string;
   payment_amount?: number;
   status: string;
+  mandate_id?: string;
+  subscription_id?: string;
   total_paid: number;
   total_expected: number;
   failed_count: number;
@@ -33,16 +35,21 @@ interface Membership {
 }
 
 interface Payment {
+  id?: string;
   amount: number;
   status: string;
   due_date: string;
   paid_date?: string;
+  provider_reference?: string;
+  failure_reason?: string;
+  retry_count?: number;
 }
 
 /* ─── Main Component ─── */
 export default function ClientProfilePage() {
   const { clientId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [client, setClient] = useState<Client | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -51,11 +58,71 @@ export default function ClientProfilePage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showSetupMembership, setShowSetupMembership] = useState(false);
   const [showTakePayment, setShowTakePayment] = useState(false);
+  const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
 
   useEffect(() => {
     if (!clientId) return;
     loadAll();
   }, [clientId]);
+
+  // Fetch GoCardless subscription details for memberships that have subscription_id (for billing tab)
+  useEffect(() => {
+    const active = memberships.filter(m => m.status === "active" && m.subscription_id);
+    if (active.length === 0) {
+      setSubscriptionDetails({});
+      return;
+    }
+    const token = localStorage.getItem("access_token");
+    const h = { Authorization: `Bearer ${token}` };
+    Promise.all(
+      active.map(m =>
+        fetch(`/api/tenant/gocardless/subscriptions/${m.subscription_id}`, { headers: h })
+          .then(r => (r.ok ? r.json() : null) as Promise<{ NextChargeDate?: string; Amount?: number; Status?: string } | null>)
+          .then(data => (data?.NextChargeDate ? { membership_id: m.membership_id, ...data } : null))
+      )
+    ).then(results => {
+      const next: Record<string, { next_charge_date: string; amount: number; status: string }> = {};
+      results.forEach(r => {
+        if (r?.membership_id && r.NextChargeDate) {
+          next[r.membership_id] = {
+            next_charge_date: r.NextChargeDate,
+            amount: (r.Amount ?? 0) / 100,
+            status: r.Status ?? "",
+          };
+        }
+      });
+      setSubscriptionDetails(next);
+    });
+  }, [memberships]);
+
+  // Auto-complete redirect flow when returning from GoCardless (redirect_flow_id + session_token in URL)
+  useEffect(() => {
+    if (!clientId) return;
+    const flowId = searchParams.get("redirect_flow_id");
+    const sessionToken = searchParams.get("session_token");
+    if (!flowId || !sessionToken) return;
+
+    const token = localStorage.getItem("access_token");
+    fetch(`/api/tenant/clients/${clientId}/complete-mandate-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ flow_id: flowId, session_token: sessionToken }),
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          setMandateCompleteMessage({ type: "success", text: "Direct debit set up successfully." });
+          loadAll();
+        } else {
+          const d = await res.json().catch(() => ({}));
+          setMandateCompleteMessage({ type: "error", text: d.error || "Failed to link mandate." });
+        }
+      })
+      .catch(() => setMandateCompleteMessage({ type: "error", text: "Failed to link mandate." }))
+      .finally(() => {
+        setSearchParams({}, { replace: true });
+      });
+  }, [clientId, searchParams]);
 
   const loadAll = async () => {
     const token = localStorage.getItem("access_token");
@@ -121,6 +188,12 @@ export default function ClientProfilePage() {
         </div>
       </div>
 
+      {mandateCompleteMessage && (
+        <div className={`mb-4 rounded-md px-4 py-3 text-[13px] ${mandateCompleteMessage.type === "success" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-700"}`}>
+          {mandateCompleteMessage.text}
+        </div>
+      )}
+
       {/* ─── Tabs ─── */}
       <div className="flex border-b border-gray-200 mb-4">
         {tabs.map(t => (
@@ -144,10 +217,10 @@ export default function ClientProfilePage() {
             />
           )}
           {tab === "memberships" && (
-            <MembershipsTab memberships={memberships} fmtShort={fmtShort} />
+            <MembershipsTab memberships={memberships} fmtShort={fmtShort} onRefresh={loadAll} />
           )}
           {tab === "billing" && (
-            <BillingScheduleTab memberships={activeMemberships} fmtDate={fmtDate} />
+            <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} />
           )}
           {tab === "payments" && (
             <PaymentsTab payments={payments} fmtShort={fmtShort} />
@@ -461,9 +534,22 @@ function MembershipSummaryRow({ m, fmtShort }: { m: Membership; fmtShort: (d: st
 }
 
 /* ─── Memberships Tab (detailed cards) ─── */
-function MembershipsTab({ memberships, fmtShort }: { memberships: Membership[]; fmtShort: (d: string) => string }) {
+function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Membership[]; fmtShort: (d: string) => string; onRefresh: () => void }) {
   const active = memberships.filter(m => m.status === "active");
   const inactive = memberships.filter(m => m.status !== "active");
+
+  const handleCancel = async (membershipId: string) => {
+    if (!confirm("Cancel this membership? This will also cancel any GoCardless subscription and mandate.")) return;
+    const token = localStorage.getItem("access_token");
+    try {
+      const res = await fetch(`/api/tenant/memberships/${membershipId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to cancel"); return; }
+      onRefresh();
+    } catch { alert("Failed to cancel membership"); }
+  };
 
   if (memberships.length === 0) {
     return (
@@ -476,12 +562,11 @@ function MembershipsTab({ memberships, fmtShort }: { memberships: Membership[]; 
 
   return (
     <div className="space-y-5">
-      {/* Toggle for inactive */}
       {active.length > 0 && (
         <div>
           <h2 className="text-[13px] font-semibold text-gray-700 mb-3">Active ({active.length})</h2>
           <div className="space-y-4">
-            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} />)}
+            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} onCancel={() => handleCancel(m.membership_id)} />)}
           </div>
         </div>
       )}
@@ -497,7 +582,7 @@ function MembershipsTab({ memberships, fmtShort }: { memberships: Membership[]; 
   );
 }
 
-function MembershipCard({ m, fmtShort }: { m: Membership; fmtShort: (d: string) => string }) {
+function MembershipCard({ m, fmtShort, onCancel }: { m: Membership; fmtShort: (d: string) => string; onCancel?: () => void }) {
   const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
@@ -512,11 +597,27 @@ function MembershipCard({ m, fmtShort }: { m: Membership; fmtShort: (d: string) 
               MEM-{m.membership_id.slice(0, 4).toUpperCase()} · {fmtShort(m.start_date)} — {fmtShort(m.end_date)}
             </p>
             <p className="text-[16px] font-bold text-gray-900">{m.membership_type}</p>
-            <p className="text-[13px] text-gray-500 mt-0.5">{m.term_months}-month term</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-[13px] text-gray-500">{m.term_months}-month term</p>
+              {m.subscription_id && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 rounded px-1.5 py-0.5">
+                  <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>
+                  Auto DD
+                </span>
+              )}
+              {m.mandate_id && !m.subscription_id && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-700 bg-indigo-50 rounded px-1.5 py-0.5">
+                  Mandate active
+                </span>
+              )}
+            </div>
           </div>
           <div className="text-right">
             <p className="text-[20px] font-bold text-gray-900 tabular-nums">${m.payment_amount?.toFixed(2) || "0.00"}</p>
             <p className="text-[12px] text-gray-400 capitalize">{m.payment_frequency || "—"}</p>
+            {m.status === "active" && onCancel && (
+              <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700 mt-1">Cancel</button>
+            )}
           </div>
         </div>
 
@@ -576,10 +677,26 @@ function MembershipCard({ m, fmtShort }: { m: Membership; fmtShort: (d: string) 
 }
 
 /* ─── Billing Schedule Tab ─── */
-function BillingScheduleTab({ memberships, fmtDate }: { memberships: Membership[]; fmtDate: (d: string) => string }) {
-  const upcoming: { date: Date; membership: Membership }[] = [];
+function BillingScheduleTab({
+  memberships,
+  subscriptionDetails,
+  fmtDate,
+}: {
+  memberships: Membership[];
+  subscriptionDetails: Record<string, { next_charge_date: string; amount: number; status: string }>;
+  fmtDate: (d: string) => string;
+}) {
+  const upcoming: { date: Date; membership: Membership; fromGoCardless?: boolean }[] = [];
 
   memberships.forEach(m => {
+    const subDetail = m.membership_id ? subscriptionDetails[m.membership_id] : undefined;
+    if (subDetail?.next_charge_date) {
+      const nextDate = new Date(subDetail.next_charge_date);
+      if (!isNaN(nextDate.getTime())) {
+        upcoming.push({ date: nextDate, membership: m, fromGoCardless: true });
+      }
+      return;
+    }
     if (!m.payment_amount || !m.payment_frequency) return;
     const end = new Date(m.end_date);
     const now = new Date();
@@ -633,9 +750,14 @@ function BillingScheduleTab({ memberships, fmtDate }: { memberships: Membership[
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[13px] font-medium text-gray-900">{item.membership.membership_type}</p>
-                    <p className="text-[12px] text-gray-500 capitalize">{item.membership.payment_frequency} · Due {item.date.toLocaleDateString("en-AU", { day: "numeric", month: "long" })}</p>
+                    <p className="text-[12px] text-gray-500 capitalize">
+                      {item.membership.payment_frequency} · Due {item.date.toLocaleDateString("en-AU", { day: "numeric", month: "long" })}
+                      {item.fromGoCardless && <span className="ml-1.5 text-indigo-600">(DD)</span>}
+                    </p>
                   </div>
-                  <p className="text-[15px] font-semibold text-gray-900 tabular-nums">${item.membership.payment_amount?.toFixed(2)}</p>
+                  <p className="text-[15px] font-semibold text-gray-900 tabular-nums">
+                    ${(subscriptionDetails[item.membership.membership_id]?.amount ?? item.membership.payment_amount)?.toFixed(2)}
+                  </p>
                 </div>
               </div>
             ))}
@@ -682,20 +804,48 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-medium text-gray-900">{fmtShort(p.due_date)}</span>
-                    <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
-                      {p.status === "succeeded" ? "Paid" : p.status}
+                    <span className={`badge ${
+                      p.status === "succeeded" ? "badge-green" :
+                      p.status === "confirmed" ? "badge-green" :
+                      p.status === "submitted" ? "badge-yellow" :
+                      p.status === "pending" ? "badge-yellow" :
+                      p.status === "failed" ? "badge-red" :
+                      p.status === "cancelled" ? "badge-gray" :
+                      "badge-yellow"
+                    }`}>
+                      {p.status === "succeeded" ? "Paid" : p.status === "confirmed" ? "Confirmed" : p.status}
                     </span>
+                    {p.provider_reference && (
+                      <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">GoCardless</span>
+                    )}
                   </div>
                   <span className="text-[15px] font-semibold text-gray-900 tabular-nums">${p.amount.toFixed(2)}</span>
                 </div>
-                {p.paid_date && p.status === "succeeded" && (
+                {p.paid_date && (p.status === "succeeded" || p.status === "confirmed") && (
                   <p className="text-[11px] text-emerald-600">
-                    ✓ Payment completed ({fmtShort(p.paid_date)})
+                    Payment completed ({fmtShort(p.paid_date)})
+                    {p.provider_reference && <span className="text-gray-400 ml-1">Ref: {p.provider_reference}</span>}
+                  </p>
+                )}
+                {p.status === "submitted" && (
+                  <p className="text-[11px] text-amber-600">
+                    Payment submitted to bank — awaiting confirmation
+                  </p>
+                )}
+                {p.status === "pending" && (
+                  <p className="text-[11px] text-amber-600">
+                    Payment pending submission
                   </p>
                 )}
                 {p.status === "failed" && (
                   <p className="text-[11px] text-red-500">
-                    ✗ Payment failed
+                    Payment failed{p.failure_reason ? `: ${p.failure_reason}` : ""}
+                    {p.retry_count && p.retry_count > 0 ? ` (${p.retry_count} retries)` : ""}
+                  </p>
+                )}
+                {p.status === "cancelled" && (
+                  <p className="text-[11px] text-gray-500">
+                    Payment cancelled
                   </p>
                 )}
               </div>
@@ -921,6 +1071,9 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [selectedTerm, setSelectedTerm] = useState<any>(null);
   const [frequency, setFrequency] = useState("monthly");
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bsb, setBsb] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountHolderName, setAccountHolderName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -948,18 +1101,24 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
     try {
       const token = localStorage.getItem("access_token");
       const paymentAmount = selectedTerm[`fee_${frequency}`] || selectedTerm.fee_total;
+      const body: Record<string, unknown> = {
+        client_id: clientId,
+        membership_type_id: selectedType.id,
+        term_option_id: selectedTerm.id,
+        start_date: startDate,
+        payment_method: "direct_debit",
+        payment_frequency: frequency === "upfront" ? "monthly" : frequency,
+        payment_amount: paymentAmount,
+      };
+      if (frequency !== "upfront" && bsb.trim() && accountNumber.trim()) {
+        body.bsb = bsb.trim();
+        body.account_number = accountNumber.trim();
+        if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
+      }
       const res = await fetch("/api/tenant/memberships", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          client_id: clientId,
-          membership_type_id: selectedType.id,
-          term_option_id: selectedTerm.id,
-          start_date: startDate,
-          payment_method: "direct_debit",
-          payment_frequency: frequency === "upfront" ? "monthly" : frequency,
-          payment_amount: paymentAmount,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
       onCreated();
@@ -1095,6 +1254,27 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                       </div>
                     </div>
                   )}
+
+                  {frequency !== "upfront" && (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
+                      <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
+                      <p className="text-[12px] text-gray-500 mb-3">Enter bank details to set up automatic payments now. Leave blank to set up later via a link sent to the client.</p>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[12px] font-medium text-gray-600 mb-1">Account holder name</label>
+                          <input type="text" value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} placeholder={clientName} className="input-field max-w-md text-[13px]" />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-medium text-gray-600 mb-1">BSB</label>
+                          <input type="text" value={bsb} onChange={e => setBsb(e.target.value)} placeholder="000-000" className="input-field max-w-[8rem] font-mono text-[13px]" maxLength={9} />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-medium text-gray-600 mb-1">Account number</label>
+                          <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="12345678" className="input-field max-w-[12rem] font-mono text-[13px]" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-6 flex justify-between">
@@ -1124,13 +1304,36 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  // Mandate status
+  const [mandateLoading, setMandateLoading] = useState(true);
+  const [hasMandate, setHasMandate] = useState(false);
+  const [clientEmail, setClientEmail] = useState<string | null>(null);
+
+  // Bank details (Option A: staff enters bank details)
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [bsb, setBsb] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountHolderName, setAccountHolderName] = useState(clientName);
+
+  // Send link (Option B)
+  const [sendingLink, setSendingLink] = useState(false);
+  const [mandateLink, setMandateLink] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    fetch("/api/tenant/services", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setServices((d.services || []).filter((s: any) => s.is_active)));
-  }, []);
+    // Load services and mandate status in parallel
+    Promise.all([
+      fetch("/api/tenant/services", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch(`/api/tenant/clients/${clientId}/mandate-status`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+    ]).then(([svcData, mandateData]) => {
+      setServices((svcData.services || []).filter((s: any) => s.is_active));
+      setHasMandate(mandateData.has_mandate || false);
+      setClientEmail(mandateData.client_email || null);
+      setMandateLoading(false);
+    }).catch(() => setMandateLoading(false));
+  }, [clientId]);
 
   const handleServiceSelect = (serviceId: string) => {
     setSelectedServiceId(serviceId);
@@ -1142,38 +1345,92 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     }
   };
 
-  const handleSubmit = async () => {
+  // Submit: charge with existing mandate
+  const handleChargeWithMandate = async () => {
     if (!description || amount <= 0) { setError("Description and amount are required"); return; }
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setSuccess("");
     try {
       const token = localStorage.getItem("access_token");
       const res = await fetch("/api/tenant/services/charge", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ client_id: clientId, service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null, description, amount, tax_amount: taxAmount, notes: notes || null }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      const data = await res.json();
+      if (data.gocardless_payment_id) {
+        setSuccess(`Direct debit submitted via GoCardless (${data.gocardless_payment_id})`);
+      } else {
+        setSuccess("Charge recorded via GoCardless.");
+      }
+      setTimeout(() => onCharged(), 2000);
+    } catch (err: any) { setError(err.message || "Failed"); }
+    finally { setSaving(false); }
+  };
+
+  // Submit: create mandate from bank details + charge
+  const handleChargeWithBankDetails = async () => {
+    if (!description || amount <= 0) { setError("Description and amount are required"); return; }
+    if (!bsb || !accountNumber) { setError("BSB and account number are required"); return; }
+    setSaving(true); setError(""); setSuccess("");
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch("/api/tenant/services/charge-with-bank-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           client_id: clientId,
-          service_id: selectedServiceId || null,
-          description,
-          amount,
-          tax_amount: taxAmount,
-          notes: notes || null,
+          service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
+          description, amount, tax_amount: taxAmount, notes: notes || null,
+          account_holder_name: accountHolderName, account_number: accountNumber, bsb,
         }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
-      onCharged();
-    } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
+      const data = await res.json();
+      if (data.warning) {
+        setSuccess(`Mandate created (${data.gocardless_mandate_id}). Warning: ${data.warning}`);
+      } else {
+        setSuccess(`Mandate created and payment submitted via GoCardless (${data.gocardless_payment_id})`);
+      }
+      setTimeout(() => onCharged(), 2500);
+    } catch (err: any) { setError(err.message || "Failed"); }
     finally { setSaving(false); }
   };
+
+  // Send mandate link to client
+  const handleSendMandateLink = async () => {
+    setSendingLink(true); setError("");
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`/api/tenant/clients/${clientId}/send-mandate-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      const data = await res.json();
+      setMandateLink(data.redirect_url || "");
+      if (data.email_sent) {
+        setSuccess(`Mandate setup link sent to ${clientEmail}. You can also copy the link below.`);
+      } else {
+        setSuccess("Mandate link created. Copy it below and share with the client.");
+      }
+    } catch (err: any) { setError(err.message || "Failed to create mandate link"); }
+    finally { setSendingLink(false); }
+  };
+
+  const total = amount + taxAmount;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
         <div className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl">
+          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <div>
               <h2 className="text-[15px] font-bold text-gray-900">Take Payment</h2>
-              <p className="text-[12px] text-gray-500">Charge {clientName} for a service</p>
+              <p className="text-[12px] text-gray-500">Charge {clientName}</p>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1181,75 +1438,160 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
           </div>
 
           {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+          {success && <div className="mx-6 mt-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[13px] text-green-700">{success}</div>}
 
-          <div className="px-6 py-5 space-y-5">
-            {/* Service selection */}
-            <div>
-              <label className="block text-[13px] font-semibold text-gray-700 mb-2">Select a service</label>
-              <div className="space-y-2">
-                {services.map(s => (
-                  <label key={s.id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
-                    selectedServiceId === s.id ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
-                  }`}>
-                    <input type="radio" name="service" value={s.id} checked={selectedServiceId === s.id}
-                      onChange={() => handleServiceSelect(s.id)} className="h-4 w-4 text-indigo-600" />
-                    <div className="flex-1">
-                      <p className="text-[13px] font-medium text-gray-900">{s.name}</p>
-                      {s.description && <p className="text-[11px] text-gray-400">{s.description}</p>}
+          {mandateLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+            </div>
+          ) : (
+            <div className="px-6 py-5 space-y-5">
+
+              {/* Mandate status banner */}
+              {hasMandate ? (
+                <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-2">
+                  <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <p className="text-[13px] text-green-800 font-medium">Direct debit mandate active. Payment will be charged via GoCardless.</p>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="h-4 w-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                    <p className="text-[13px] text-amber-800 font-semibold">No direct debit mandate set up</p>
+                  </div>
+                  <p className="text-[12px] text-amber-700 mb-3">Choose how to collect payment from this client:</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowBankForm(!showBankForm)}
+                      className={`flex-1 rounded-lg border-2 px-3 py-2.5 text-[12px] font-semibold transition-all ${
+                        showBankForm ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <svg className="h-4 w-4 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                      Enter bank details now
+                    </button>
+                    <button
+                      onClick={handleSendMandateLink}
+                      disabled={sendingLink}
+                      className="flex-1 rounded-lg border-2 border-gray-200 bg-white px-3 py-2.5 text-[12px] font-semibold text-gray-700 hover:border-gray-300 transition-all"
+                    >
+                      <svg className="h-4 w-4 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+                      {sendingLink ? "Sending..." : "Send mandate link"}
+                    </button>
+                  </div>
+                  {mandateLink && (
+                    <div className="mt-3 rounded-md bg-white border border-gray-200 px-3 py-2">
+                      <p className="text-[11px] text-gray-500 mb-1">Share this link with the client:</p>
+                      <div className="flex gap-2 items-center">
+                        <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
+                        <button onClick={() => { navigator.clipboard.writeText(mandateLink); }} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
+                      </div>
                     </div>
-                    <span className="text-[14px] font-bold text-gray-900 tabular-nums">${s.price.toFixed(2)}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Bank details form (Option A) */}
+              {!hasMandate && showBankForm && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 px-4 py-4 space-y-3">
+                  <h3 className="text-[13px] font-bold text-gray-900">Bank Details</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-1">BSB</label>
+                      <input value={bsb} onChange={e => setBsb(e.target.value)} className="input-field" placeholder="000-000" maxLength={7} />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-1">Account Number</label>
+                      <input value={accountNumber} onChange={e => setAccountNumber(e.target.value)} className="input-field" placeholder="12345678" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-1">Account Holder Name</label>
+                    <input value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} className="input-field" />
+                  </div>
+                </div>
+              )}
+
+              {/* Service selection */}
+              <div>
+                <label className="block text-[13px] font-semibold text-gray-700 mb-2">Select a service</label>
+                <div className="space-y-2">
+                  {services.map(s => (
+                    <label key={s.id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
+                      selectedServiceId === s.id ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
+                    }`}>
+                      <input type="radio" name="service" value={s.id} checked={selectedServiceId === s.id}
+                        onChange={() => handleServiceSelect(s.id)} className="h-4 w-4 text-indigo-600" />
+                      <div className="flex-1">
+                        <p className="text-[13px] font-medium text-gray-900">{s.name}</p>
+                        {s.description && <p className="text-[11px] text-gray-400">{s.description}</p>}
+                      </div>
+                      <span className="text-[14px] font-bold text-gray-900 tabular-nums">${s.price.toFixed(2)}</span>
+                    </label>
+                  ))}
+                  {services.length === 0 && (
+                    <p className="text-[13px] text-gray-400 text-center py-4">No services defined. <a href="/services" className="text-indigo-600 hover:text-indigo-700">Create one first</a></p>
+                  )}
+                  <label className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
+                    selectedServiceId === "__custom" ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
+                  }`}>
+                    <input type="radio" name="service" value="__custom" checked={selectedServiceId === "__custom"}
+                      onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(0); setTaxAmount(0); }} className="h-4 w-4 text-indigo-600" />
+                    <span className="text-[13px] font-medium text-gray-700">Custom charge</span>
                   </label>
-                ))}
-                {services.length === 0 && (
-                  <p className="text-[13px] text-gray-400 text-center py-4">No services defined. <a href="/services" className="text-indigo-600 hover:text-indigo-700">Create one first</a></p>
+                </div>
+              </div>
+
+              {/* Amount details */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
+                  <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" placeholder="What is this charge for?" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Amount ($)</label>
+                  <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax ($)</label>
+                  <input type="number" value={taxAmount} onChange={e => setTaxAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Total</label>
+                  <p className="input-field bg-gray-50 flex items-center text-[14px] font-bold text-gray-900 tabular-nums">
+                    ${total.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                  rows={2} placeholder="Internal notes about this charge" />
+              </div>
+
+              {/* Submit */}
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
+                {hasMandate ? (
+                  <button onClick={handleChargeWithMandate} disabled={saving || amount <= 0} className="btn-primary text-[12px]">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+                    {saving ? "Processing..." : `Charge $${total.toFixed(2)} via Direct Debit`}
+                  </button>
+                ) : showBankForm ? (
+                  <button onClick={handleChargeWithBankDetails} disabled={saving || amount <= 0 || !bsb || !accountNumber} className="btn-primary text-[12px]">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+                    {saving ? "Setting up..." : `Set up mandate & charge $${total.toFixed(2)}`}
+                  </button>
+                ) : (
+                  <button disabled className="btn-primary text-[12px] opacity-50 cursor-not-allowed">
+                    Select a payment method above
+                  </button>
                 )}
-                <label className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer transition-all ${
-                  selectedServiceId === "__custom" ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
-                }`}>
-                  <input type="radio" name="service" value="__custom" checked={selectedServiceId === "__custom"}
-                    onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(0); setTaxAmount(0); }} className="h-4 w-4 text-indigo-600" />
-                  <span className="text-[13px] font-medium text-gray-700">Custom charge</span>
-                </label>
               </div>
             </div>
-
-            {/* Amount details */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
-                <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" placeholder="What is this charge for?" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-1">Amount ($)</label>
-                <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax ($)</label>
-                <input type="number" value={taxAmount} onChange={e => setTaxAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-1">Total</label>
-                <p className="input-field bg-gray-50 flex items-center text-[14px] font-bold text-gray-900 tabular-nums">
-                  ${(amount + taxAmount).toFixed(2)}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Notes (optional)</label>
-              <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
-                rows={2} placeholder="Internal notes about this charge" />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
-              <button onClick={handleSubmit} disabled={saving || amount <= 0} className="btn-primary text-[12px]">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
-                {saving ? "Processing..." : `Charge $${(amount + taxAmount).toFixed(2)}`}
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext";
+import { brand } from "../../assets/brand";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -96,10 +97,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[220px] flex-col bg-white border-r border-gray-200 transition-transform duration-200 lg:translate-x-0 lg:static lg:z-auto ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Brand */}
         <div className="flex h-14 items-center gap-2.5 px-4 border-b border-gray-100">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-[11px] font-bold text-white shadow-sm">
-            C
-          </div>
-          <span className="text-[15px] font-bold text-gray-900 tracking-tight">ClientRoll</span>
+          <img src={brand.logo} alt="" className="h-8 w-auto max-w-[140px] object-contain" />
         </div>
 
         {/* Create new */}

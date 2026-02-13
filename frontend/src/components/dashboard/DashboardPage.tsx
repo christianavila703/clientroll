@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 
-interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; }
+interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; active_mandates: number; active_subscriptions: number; pending_payments: number; }
 interface MonthlyData { month: string; revenue: number; }
 interface BreakdownData { type_title: string; revenue: number; count: number; }
 interface StatusData { [key: string]: number; }
@@ -160,10 +160,11 @@ export default function DashboardPage() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <KpiCard label="Active Members" value={summary?.active_members ?? "–"} colour="indigo" />
         <KpiCard label="Revenue This Month" value={`$${curMonthRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} colour="emerald" delta={revDelta} />
         <KpiCard label="Failed Payments" value={summary?.failed_payments ?? "–"} colour="red" alert={(summary?.failed_payments || 0) > 0} />
+        <KpiCard label="Active Direct Debits" value={summary?.active_subscriptions ?? "–"} colour="violet" />
         <KpiCard label="New Signups" value={summary?.new_signups ?? "–"} colour="blue" />
       </div>
 
@@ -238,6 +239,7 @@ export default function DashboardPage() {
             <div className="card-header"><h3>Action Required</h3></div>
             <div className="divide-y divide-gray-100">
               <ActionItem label="Failed payments" count={summary?.failed_payments || 0} url="/payments" alert />
+              <ActionItem label="Pending DD payments" count={summary?.pending_payments || 0} url="/payments" />
               <ActionItem label="Open disputes" count={summary?.open_disputes || 0} url="/payments" />
             </div>
           </div>

@@ -1,10 +1,15 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
+	"clientroll/internal/database"
 	"clientroll/internal/middleware"
+	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
 	"github.com/go-chi/chi/v5"
@@ -13,10 +18,16 @@ import (
 
 type ServiceHandler struct {
 	serviceRepo *repository.ServiceRepo
+	clientRepo  *repository.ClientRepo
+	memberRepo  *repository.MembershipRepo
+	mtRepo      *repository.MembershipTypeRepo
+	paymentRepo *repository.PaymentRepo
+	credRepo    *repository.TenantCredentialRepo
+	encryptor   *database.Encryptor
 }
 
-func NewServiceHandler(sr *repository.ServiceRepo) *ServiceHandler {
-	return &ServiceHandler{serviceRepo: sr}
+func NewServiceHandler(sr *repository.ServiceRepo, cr *repository.ClientRepo, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, pr *repository.PaymentRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ServiceHandler {
+	return &ServiceHandler{serviceRepo: sr, clientRepo: cr, memberRepo: mr, mtRepo: mtRepo, paymentRepo: pr, credRepo: credR, encryptor: enc}
 }
 
 func (h *ServiceHandler) RegisterRoutes(r chi.Router) {
@@ -25,6 +36,7 @@ func (h *ServiceHandler) RegisterRoutes(r chi.Router) {
 	r.Put("/services/{serviceID}", h.Update)
 	r.Delete("/services/{serviceID}", h.Delete)
 	r.Post("/services/charge", h.TakePayment)
+	r.Post("/services/charge-with-bank-details", h.ChargeWithBankDetails)
 	r.Get("/services/charges/{clientID}", h.ListCharges)
 }
 
@@ -94,17 +106,20 @@ func (h *ServiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// TakePayment charges a client for a service (one-off payment).
+// TakePayment charges a client for a service/one-off payment.
+// If the client has an active membership with a GoCardless mandate, it also creates
+// a GoCardless payment (direct debit charge) and records it in the payments table.
 func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
 	var input struct {
-		ClientID    string   `json:"client_id"`
-		ServiceID   *string  `json:"service_id"`
-		Description string   `json:"description"`
-		Amount      float64  `json:"amount"`
-		TaxAmount   float64  `json:"tax_amount"`
-		Notes       *string  `json:"notes"`
+		ClientID     string  `json:"client_id"`
+		ServiceID    *string `json:"service_id"`
+		Description  string  `json:"description"`
+		Amount       float64 `json:"amount"`
+		TaxAmount    float64 `json:"tax_amount"`
+		Notes        *string `json:"notes"`
+		MembershipID *string `json:"membership_id,omitempty"` // optional: use this membership's mandate
 	}
 	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
 		writeError(w, http.StatusBadRequest, "Client ID and positive amount required")
@@ -116,13 +131,247 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 		sid, _ := uuid.Parse(*input.ServiceID)
 		serviceID = &sid
 	}
+
+	// Record the service charge in our DB
 	charge, err := h.serviceRepo.CreateCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, input.Notes, &userID)
 	if err != nil {
 		log.Printf("Error creating service charge: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create charge")
 		return
 	}
-	writeJSON(w, http.StatusCreated, charge)
+
+	// --- Try to charge through GoCardless if the client has a mandate ---
+	gcPaymentID := ""
+	prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
+	if provErr == nil && prov != nil {
+		mandateID := h.findMandateForClient(r.Context(), tenantID, clientID, input.MembershipID)
+		if mandateID != "" {
+			amountMinor := int64(input.Amount * 100)
+			chargeDate := time.Now().AddDate(0, 0, 3) // 3 days from now (minimum for DD)
+			ref := fmt.Sprintf("charge-%s", charge.ID)
+
+			gcID, err := prov.CreatePayment(r.Context(), payment.CreatePaymentInput{
+				MandateID:   mandateID,
+				Amount:      amountMinor,
+				Currency:    "AUD",
+				Description: input.Description,
+				ChargeDate:  chargeDate,
+				Reference:   ref,
+			})
+			if err != nil {
+				log.Printf("GoCardless CreatePayment for charge %s: %v", charge.ID, err)
+				// Don't fail the whole request — the service charge is saved
+			} else {
+				gcPaymentID = gcID
+				log.Printf("GoCardless payment %s created for charge %s (mandate %s)", gcID, charge.ID, mandateID)
+			}
+		}
+	}
+
+	resp := map[string]interface{}{"charge": charge}
+	if gcPaymentID != "" {
+		resp["gocardless_payment_id"] = gcPaymentID
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// findMandateForClient looks for a GoCardless mandate on the client's active memberships.
+func (h *ServiceHandler) findMandateForClient(ctx context.Context, tenantID, clientID uuid.UUID, membershipIDStr *string) string {
+	if h.memberRepo == nil {
+		return ""
+	}
+	// If a specific membership was provided, use that
+	if membershipIDStr != nil && *membershipIDStr != "" {
+		mid, _ := uuid.Parse(*membershipIDStr)
+		m, err := h.memberRepo.FindByID(ctx, mid, tenantID)
+		if err == nil && m != nil && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+			return *m.GoCardlessMandateID
+		}
+	}
+	// Otherwise find the client's first active membership with a mandate
+	memberships, err := h.clientRepo.GetMemberships(ctx, clientID, tenantID)
+	if err != nil {
+		return ""
+	}
+	for _, m := range memberships {
+		if m.Status == "active" && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+			return *m.GoCardlessMandateID
+		}
+	}
+	return ""
+}
+
+// getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
+func (h *ServiceHandler) getGoCardlessProvider(ctx context.Context, tenantID uuid.UUID) (payment.GoCardlessExtended, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return nil, nil
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "gocardless")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return nil, err
+	}
+	apiKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil {
+		return nil, err
+	}
+	env := creds.Environment
+	if env == "" {
+		env = "sandbox"
+	}
+	return payment.NewGoCardlessProvider(apiKey, "", env), nil
+}
+
+// ChargeWithBankDetails creates a GoCardless mandate from bank details, charges, and records locally.
+// Used when staff enters bank details in the Take Payment modal for a client with no existing mandate.
+func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
+
+	var input struct {
+		ClientID          string  `json:"client_id"`
+		ServiceID         *string `json:"service_id"`
+		Description       string  `json:"description"`
+		Amount            float64 `json:"amount"`
+		TaxAmount         float64 `json:"tax_amount"`
+		Notes             *string `json:"notes"`
+		AccountHolderName string  `json:"account_holder_name"`
+		AccountNumber     string  `json:"account_number"`
+		BSB               string  `json:"bsb"`
+	}
+	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
+		writeError(w, http.StatusBadRequest, "Client ID, amount, and bank details required")
+		return
+	}
+	if input.BSB == "" || input.AccountNumber == "" {
+		writeError(w, http.StatusBadRequest, "BSB and account number required")
+		return
+	}
+
+	clientID, _ := uuid.Parse(input.ClientID)
+
+	prov, err := h.getGoCardlessProvider(r.Context(), tenantID)
+	if err != nil || prov == nil {
+		writeError(w, http.StatusBadRequest, "GoCardless not configured")
+		return
+	}
+
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+
+	// 1. Create or reuse GoCardless customer
+	gcCustomerID := ""
+	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
+		gcCustomerID = *client.GoCardlessCustomerID
+	} else {
+		clientEmail := ""
+		if client.Email != nil {
+			clientEmail = *client.Email
+		}
+		clientPhone := ""
+		if client.Phone != nil {
+			clientPhone = *client.Phone
+		}
+		cid, err := prov.CreateCustomer(r.Context(), payment.CreateCustomerInput{
+			Email:     clientEmail,
+			Name:      client.Name,
+			Phone:     clientPhone,
+			Reference: client.ID.String(),
+		})
+		if err != nil {
+			log.Printf("GoCardless CreateCustomer: %v", err)
+			writeProviderError(w, err)
+			return
+		}
+		gcCustomerID = cid
+		_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), client.ID, tenantID, cid)
+	}
+
+	// 2. Create mandate via direct debit setup
+	holderName := input.AccountHolderName
+	if holderName == "" {
+		holderName = client.Name
+	}
+	mandateID, err := prov.SetupDirectDebit(r.Context(), payment.SetupDirectDebitInput{
+		CustomerID:        gcCustomerID,
+		AccountHolderName: holderName,
+		AccountNumber:     input.AccountNumber,
+		BSB:               input.BSB,
+		Reference:         clientID.String(),
+	})
+	if err != nil {
+		log.Printf("GoCardless SetupDirectDebit: %v", err)
+		writeProviderError(w, err)
+		return
+	}
+
+	// 3. Store mandate on client's active membership (if any) + create subscription
+	memberships, _ := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
+	for _, m := range memberships {
+		if m.Status == "active" && (m.GoCardlessMandateID == nil || *m.GoCardlessMandateID == "") {
+			_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, mandateID)
+			// Create subscription for recurring payments (pass num_payments from term option if set)
+			if m.PaymentFrequency != nil && *m.PaymentFrequency != "upfront" && m.PaymentAmount != nil {
+				var numPay *int
+				if h.mtRepo != nil {
+					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil && to.NumPayments != nil {
+						numPay = to.NumPayments
+					}
+				}
+				createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, "Membership", m.MinTermEndDate, numPay)
+			}
+			break
+		}
+	}
+
+	// 4. Create GoCardless payment
+	amountMinor := int64(input.Amount * 100)
+	chargeDate := time.Now().AddDate(0, 0, 3)
+
+	var serviceID *uuid.UUID
+	if input.ServiceID != nil && *input.ServiceID != "" {
+		sid, _ := uuid.Parse(*input.ServiceID)
+		serviceID = &sid
+	}
+
+	// Record locally first
+	charge, err := h.serviceRepo.CreateCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, input.Notes, &userID)
+	if err != nil {
+		log.Printf("Error creating service charge: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create charge")
+		return
+	}
+
+	ref := fmt.Sprintf("charge-%s", charge.ID)
+	gcPaymentID, err := prov.CreatePayment(r.Context(), payment.CreatePaymentInput{
+		MandateID:   mandateID,
+		Amount:      amountMinor,
+		Currency:    "AUD",
+		Description: input.Description,
+		ChargeDate:  chargeDate,
+		Reference:   ref,
+	})
+	if err != nil {
+		log.Printf("GoCardless CreatePayment: %v", err)
+		// Mandate was created but payment failed — still return success with warning
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"charge":                 charge,
+			"gocardless_mandate_id":  mandateID,
+			"gocardless_payment_id":  nil,
+			"warning":                "Mandate created but payment submission failed: " + err.Error(),
+		})
+		return
+	}
+
+	log.Printf("GoCardless mandate %s + payment %s created for client %s", mandateID, gcPaymentID, clientID)
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"charge":                 charge,
+		"gocardless_mandate_id":  mandateID,
+		"gocardless_payment_id":  gcPaymentID,
+	})
 }
 
 func (h *ServiceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {

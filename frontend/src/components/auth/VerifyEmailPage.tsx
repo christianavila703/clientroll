@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { brand } from "../../assets/brand";
 
 export default function VerifyEmailPage() {
   const [params] = useSearchParams();
@@ -37,7 +38,7 @@ export default function VerifyEmailPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white text-sm font-bold shadow-sm">C</div>
+          <img src={brand.logo} alt={brand.appName} className="mb-4 h-9 w-auto object-contain" />
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white px-6 py-6 shadow-sm text-center">

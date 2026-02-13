@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext";
 import { ApiError } from "../../api/client";
+import { brand } from "../../assets/brand";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -71,9 +72,8 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           {/* Logo */}
           <div className="mb-10">
-            <div className="flex items-center gap-2 mb-8">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white text-xs font-bold">C</div>
-              <span className="text-lg font-semibold text-gray-900">ClientRoll</span>
+            <div className="mb-8">
+              <img src={brand.logo} alt={brand.appName} className="h-9 w-auto object-contain" />
             </div>
             <h1 className="text-[32px] font-bold text-gray-900 leading-tight tracking-tight">
               Log in to your account

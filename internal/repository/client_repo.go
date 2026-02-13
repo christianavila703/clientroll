@@ -28,7 +28,7 @@ func (r *ClientRepo) DB() *database.Postgres {
 
 const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
-	emergency_contact_phone, created_at, updated_at`
+	emergency_contact_phone, gocardless_customer_id, created_at, updated_at`
 
 // List returns all clients for a tenant with optional search and status filter.
 // status: "active" = has active membership, "inactive" = no active membership, "" = all
@@ -111,12 +111,21 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 	return &out, nil
 }
 
+// SetGoCardlessCustomerID stores the GoCardless customer ID for a client.
+func (r *ClientRepo) SetGoCardlessCustomerID(ctx context.Context, clientID, tenantID uuid.UUID, customerID string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE clients SET gocardless_customer_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+		clientID, tenantID, customerID)
+	return err
+}
+
 // GetMemberships returns all memberships for a client.
 func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid.UUID) ([]models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
 		       start_date, min_term_end_date, payment_method, payment_frequency,
-		       payment_amount, status, member_signature_data, member_signed_at,
+		       payment_amount, status, gocardless_mandate_id, gocardless_subscription_id,
+		       member_signature_data, member_signed_at,
 		       staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE client_id = $1 AND tenant_id = $2
 		ORDER BY created_at DESC`
@@ -132,8 +141,9 @@ func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid
 		var m models.Membership
 		if err := rows.Scan(&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID,
 			&m.TermOptionID, &m.StartDate, &m.MinTermEndDate, &m.PaymentMethod,
-			&m.PaymentFrequency, &m.PaymentAmount, &m.Status, &m.MemberSignature,
-			&m.MemberSignedAt, &m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt,
+			&m.PaymentFrequency, &m.PaymentAmount, &m.Status,
+			&m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+			&m.MemberSignature, &m.MemberSignedAt, &m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt,
 			&m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -146,7 +156,7 @@ func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
 		&c.ID, &c.TenantID, &c.Name, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
-		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.CreatedAt, &c.UpdatedAt,
+		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.CreatedAt, &c.UpdatedAt,
 	}
 }
 

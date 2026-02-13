@@ -15,6 +15,8 @@ interface Payment {
   paid_date?: string;
   failure_reason?: string;
   retry_count: number;
+  provider_reference?: string;
+  payment_method?: string;
   total_paid: number;
   total_expected: number;
   membership_end: string;
@@ -163,9 +165,12 @@ export default function PaymentsPage() {
                         </td>
                         <td className="tabular-nums font-medium text-gray-900">${p.amount.toFixed(2)}</td>
                         <td>
-                          <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" ? "badge-yellow" : "badge-gray"}`}>
-                            {p.status}
+                          <span className={`badge ${p.status === "succeeded" || p.status === "confirmed" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" || p.status === "submitted" ? "badge-yellow" : "badge-gray"}`}>
+                            {p.status === "succeeded" ? "paid" : p.status}
                           </span>
+                          {p.provider_reference && (
+                            <span className="ml-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1 py-0.5">DD</span>
+                          )}
                           {p.retry_count > 0 && (
                             <span className="ml-1 text-[10px] text-red-500">{p.retry_count} retries</span>
                           )}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import MembershipSelect from "./MembershipSelect";
 import MembershipDetail from "./MembershipDetail";
 import AgreementForm from "./AgreementForm";
@@ -48,6 +48,7 @@ type Step = "select" | "detail" | "form" | "thankyou";
 
 export default function SignupPage() {
   const { tenantSlug, membershipSlug } = useParams();
+  const navigate = useNavigate();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [memberships, setMemberships] = useState<MembershipType[]>([]);
   const [selected, setSelected] = useState<MembershipType | null>(null);
@@ -138,7 +139,15 @@ export default function SignupPage() {
             membership={selected}
             tenantSlug={tenantSlug || ""}
             onSelectTerm={(term) => { setSelectedTerm(term); setStep("form"); }}
-            onBack={() => setStep("select")}
+            onBack={() => {
+              if (membershipSlug) {
+                // Came via direct link (/:tenantSlug/:membershipSlug) — navigate to browse page
+                navigate(`/join/${tenantSlug}`);
+              } else {
+                // Already on browse route, just switch step
+                setStep("select");
+              }
+            }}
           />
         )}
         {step === "form" && selected && selectedTerm && tenant && (

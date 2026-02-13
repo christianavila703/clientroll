@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../../api/client";
+import { brand } from "../../assets/brand";
 
 export default function RegisterPage() {
   const [step, setStep] = useState<1 | 2 | "verify">(1);
@@ -66,7 +67,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white text-sm font-bold shadow-sm">C</div>
+          <img src={brand.logo} alt={brand.appName} className="mb-4 h-9 w-auto object-contain" />
           <h1 className="text-lg font-semibold text-gray-900">Create your account</h1>
           <p className="mt-1 text-[13px] text-gray-500">Start managing memberships in minutes</p>
         </div>

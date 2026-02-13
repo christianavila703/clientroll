@@ -203,6 +203,8 @@ export const api = {
     request(`/tenant/integrations/${provider}`, { method: "PUT", body: data }),
   deleteIntegration: (provider: string) =>
     request(`/tenant/integrations/${provider}`, { method: "DELETE" }),
+  getGoCardlessConnectUrl: (environment: "sandbox" | "live") =>
+    request(`/tenant/gocardless/connect?environment=${environment}`) as Promise<{ redirect_url: string }>,
 
   // Platform admin
   listTenants: () => request("/platform/tenants"),

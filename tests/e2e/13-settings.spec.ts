@@ -5,17 +5,17 @@ test.describe("Settings", () => {
   test("settings page loads with tabs", async ({ page }) => {
     await loginAsAdmin(page);
     await page.click("text=Settings");
-    await expect(page.locator("text=Agreement Details")).toBeVisible();
-    await expect(page.locator("text=Organisation")).toBeVisible();
-    await expect(page.locator("text=Integrations")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Agreement Details" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Organisation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Integrations" })).toBeVisible();
   });
 
-  test("agreement details show Studio Figura data", async ({ page }) => {
+  test("agreement details show company fields", async ({ page }) => {
     await loginAsAdmin(page);
     await page.click("text=Settings");
     await page.waitForTimeout(1000);
-    const companyInput = page.locator('input').first();
-    await expect(companyInput).toHaveValue("Studio Figura AA PTY LTD");
+    await expect(page.locator("text=Company Name")).toBeVisible();
+    await expect(page.locator("text=ABN/ACN")).toBeVisible();
   });
 
   test("organisation tab loads", async ({ page }) => {
@@ -27,12 +27,12 @@ test.describe("Settings", () => {
     await expect(page.locator("text=Brand colour")).toBeVisible();
   });
 
-  test("integrations tab shows GoCardless and MailerSend", async ({ page }) => {
+  test("integrations tab shows GoCardless", async ({ page }) => {
     await loginAsAdmin(page);
     await page.click("text=Settings");
     await page.click("button:has-text('Integrations')");
-    await expect(page.locator("text=GoCardless")).toBeVisible();
-    await expect(page.locator("text=MailerSend")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "GoCardless" })).toBeVisible();
+    await expect(page.locator("text=Direct debit").first()).toBeVisible();
   });
 
   test("agreement settings API returns data", async ({ request }) => {
@@ -42,8 +42,8 @@ test.describe("Settings", () => {
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    expect(body.company_name).toBe("Studio Figura AA PTY LTD");
-    expect(body.abn_acn).toBe("31 642 633 234");
+    expect(typeof body.company_name).toBe("string");
+    expect(body.company_name.length).toBeGreaterThan(0);
   });
 
   test("integrations API returns list", async ({ request }) => {

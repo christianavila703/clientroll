@@ -60,7 +60,7 @@ func (h *IntegrationsHandler) List(w http.ResponseWriter, r *http.Request) {
 				keyHint = "..." + decrypted[len(decrypted)-4:]
 			}
 		}
-		safe[i] = SafeCred{
+		sc := SafeCred{
 			Provider:    c.ProviderName,
 			Environment: c.Environment,
 			IsActive:    c.IsActive,
@@ -68,6 +68,7 @@ func (h *IntegrationsHandler) List(w http.ResponseWriter, r *http.Request) {
 			HasSecret:   c.APISecretEncrypted != "",
 			KeyHint:     keyHint,
 		}
+		safe[i] = sc
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"integrations": safe})
@@ -111,6 +112,31 @@ func (h *IntegrationsHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Encryption error")
 			return
 		}
+	}
+
+	// GoCardless: API key only. Allow empty api_key on update (keep existing).
+	if provider == "gocardless" {
+		env := input.Environment
+		if env != "live" && env != "sandbox" {
+			env = "sandbox"
+		}
+		if input.APIKey == "" {
+			existing, _ := h.credRepo.GetByProvider(r.Context(), tenantID, provider)
+			if existing != nil && existing.APIKeyEncrypted != "" {
+				encKey = existing.APIKeyEncrypted
+			} else {
+				writeError(w, http.StatusBadRequest, "API key is required for GoCardless")
+				return
+			}
+		}
+		err = h.credRepo.Upsert(r.Context(), tenantID, provider, encKey, "", env, input.IsActive)
+		if err != nil {
+			log.Printf("Error saving GoCardless API key: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to save integration")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Integration saved"})
+		return
 	}
 
 	err = h.credRepo.Upsert(r.Context(), tenantID, provider, encKey, encSecret, input.Environment, input.IsActive)

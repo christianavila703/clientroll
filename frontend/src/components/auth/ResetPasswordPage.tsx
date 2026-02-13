@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { brand } from "../../assets/brand";
 
 export default function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -43,7 +44,7 @@ export default function ResetPasswordPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white text-sm font-bold shadow-sm">C</div>
+          <img src={brand.logo} alt={brand.appName} className="mb-4 h-9 w-auto object-contain" />
           <p className="text-sm text-gray-500">Set new password</p>
         </div>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import api from "../../api/client";
+import api, { ApiError } from "../../api/client";
 import ImageUpload from "../common/ImageUpload";
 
 interface AgreementData {
@@ -229,17 +229,22 @@ function TenantSettings() {
 function IntegrationsSettings() {
   const [integrations, setIntegrations] = useState<{ provider: string; environment: string; is_active: boolean; has_key: boolean; has_secret: boolean; key_hint: string }[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
+  const refreshIntegrations = () => {
     api.listIntegrations().then((data) => {
       setIntegrations((data as { integrations: typeof integrations }).integrations || []);
     }).catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshIntegrations();
   }, []);
 
   const providers = [
-    { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for client memberships", hasSecret: true,
-      fields: { key: "Access Token", secret: "Webhook Secret" } },
+    { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for your members. Add your API key from the GoCardless developer dashboard.", hasSecret: false,
+      fields: { key: "API key", secret: "" } },
   ];
 
   const handleSave = async (providerId: string, data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => {
@@ -247,12 +252,24 @@ function IntegrationsSettings() {
     try {
       await api.saveIntegration(providerId, data);
       setMessage(`${providerId} saved`);
-      // Reload
-      const res = (await api.listIntegrations()) as { integrations: typeof integrations };
-      setIntegrations(res.integrations || []);
+      refreshIntegrations();
     } catch { setMessage("Failed to save"); }
     finally { setSaving(null); }
   };
+
+  const handleDisconnectGoCardless = async () => {
+    if (!window.confirm("Remove GoCardless? You can reconnect later.")) return;
+    setDisconnecting(true); setMessage("");
+    try {
+      await api.deleteIntegration("gocardless");
+      setMessage("GoCardless disconnected");
+      refreshIntegrations();
+    } catch { setMessage("Failed to disconnect"); }
+    finally { setDisconnecting(false); }
+  };
+
+  const gocardlessExisting = integrations.find(i => i.provider === "gocardless");
+  const gocardlessConnected = !!gocardlessExisting?.has_key;
 
   return (
     <div className="space-y-5">
@@ -260,7 +277,29 @@ function IntegrationsSettings() {
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("Failed") ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
       )}
 
-      {providers.map((provider) => {
+      {/* GoCardless: API key only */}
+      <div className="space-y-2">
+        <IntegrationCard
+          provider={providers[0]}
+          existing={gocardlessExisting || null}
+          saving={saving === "gocardless"}
+          onSave={(data) => handleSave("gocardless", data)}
+        />
+        {gocardlessConnected && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleDisconnectGoCardless}
+              disabled={disconnecting}
+              className="text-[12px] text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
+            >
+              {disconnecting ? "Disconnecting..." : "Disconnect GoCardless"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {providers.filter(p => p.id !== "gocardless").map((provider) => {
         const existing = integrations.find(i => i.provider === provider.id);
         return (
           <IntegrationCard
@@ -276,17 +315,18 @@ function IntegrationsSettings() {
   );
 }
 
-function IntegrationCard({ provider, existing, saving, onSave }: {
+function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefault }: {
   provider: { id: string; name: string; desc: string; hasSecret: boolean; fields: { key: string; secret: string } };
   existing: { environment: string; is_active: boolean; has_key: boolean; key_hint: string } | null;
   saving: boolean;
   onSave: (data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => void;
+  collapsedByDefault?: boolean;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [environment, setEnvironment] = useState(existing?.environment || "sandbox");
   const [isActive, setIsActive] = useState(existing?.is_active ?? true);
-  const [expanded, setExpanded] = useState(!existing?.has_key);
+  const [expanded, setExpanded] = useState(!existing?.has_key && !collapsedByDefault);
 
   return (
     <div className="card overflow-hidden">

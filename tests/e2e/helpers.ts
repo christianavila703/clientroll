@@ -1,7 +1,7 @@
 import { Page, APIRequestContext } from "@playwright/test";
 
 const TEST_EMAIL = "ben@businessnet.com.au";
-const TEST_PASS = "Clientroll1Test!";
+const TEST_PASS = "Clientroll1!";
 
 export async function loginAsAdmin(page: Page) {
   await page.goto("/login");
@@ -13,9 +13,10 @@ export async function loginAsAdmin(page: Page) {
 
 export async function getAuthToken(request: APIRequestContext): Promise<string> {
   const res = await request.post("/api/auth/login", {
-    data: { email: TEST_EMAIL, password: TEST_PASS },
+    headers: { "Content-Type": "application/json" },
+    data: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS }),
   });
   const body = await res.json();
-  if (!body.tokens) throw new Error(`Login failed: ${JSON.stringify(body)}`);
+  if (!body.tokens) throw new Error(`Login failed: ${res.status()} ${JSON.stringify(body)}`);
   return body.tokens.access_token;
 }

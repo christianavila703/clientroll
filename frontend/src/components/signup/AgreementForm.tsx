@@ -61,7 +61,11 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      onComplete(data.thankyou || {});
+      const tyData = data.thankyou || {};
+      if (data.gocardless_error) {
+        tyData.gocardless_error = data.gocardless_error;
+      }
+      onComplete(tyData);
     } catch (err) { setError(err instanceof Error ? err.message : "Submission failed"); }
     finally { setSubmitting(false); }
   };

@@ -1,11 +1,17 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
+	"clientroll/internal/database"
+	"clientroll/internal/email"
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
+	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
 	"github.com/go-chi/chi/v5"
@@ -14,12 +20,18 @@ import (
 
 // ClientHandler handles client CRUD endpoints.
 type ClientHandler struct {
-	clientRepo *repository.ClientRepo
+	clientRepo       *repository.ClientRepo
+	memberRepo       *repository.MembershipRepo
+	mtRepo           *repository.MembershipTypeRepo
+	credRepo         *repository.TenantCredentialRepo
+	redirectFlowRepo *repository.RedirectFlowSessionRepo
+	encryptor        *database.Encryptor
+	emailSvc         email.Provider
 }
 
 // NewClientHandler creates a new client handler.
-func NewClientHandler(cr *repository.ClientRepo) *ClientHandler {
-	return &ClientHandler{clientRepo: cr}
+func NewClientHandler(cr *repository.ClientRepo, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, credR *repository.TenantCredentialRepo, rfr *repository.RedirectFlowSessionRepo, enc *database.Encryptor, es email.Provider) *ClientHandler {
+	return &ClientHandler{clientRepo: cr, memberRepo: mr, mtRepo: mtRepo, credRepo: credR, redirectFlowRepo: rfr, encryptor: enc, emailSvc: es}
 }
 
 // RegisterRoutes registers client routes.
@@ -29,6 +41,9 @@ func (h *ClientHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/clients/{clientID}", h.Get)
 	r.Put("/clients/{clientID}", h.Update)
 	r.Get("/clients/{clientID}/memberships", h.GetMemberships)
+	r.Get("/clients/{clientID}/mandate-status", h.GetMandateStatus)
+	r.Post("/clients/{clientID}/send-mandate-link", h.SendMandateLink)
+	r.Post("/clients/{clientID}/complete-mandate-link", h.CompleteMandateLink)
 }
 
 // List returns all clients with optional search and status filter.
@@ -103,21 +118,23 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ClientMembershipRow is the enriched membership data for the client profile.
 type ClientMembershipRow struct {
-	MembershipID     string   `json:"membership_id"`
-	MembershipType   string   `json:"membership_type"`
-	MembershipTypeID string   `json:"membership_type_id"`
-	TermMonths       int      `json:"term_months"`
+	MembershipID      string   `json:"membership_id"`
+	MembershipType    string   `json:"membership_type"`
+	MembershipTypeID  string   `json:"membership_type_id"`
+	TermMonths        int      `json:"term_months"`
 	StartDate        string   `json:"start_date"`
 	EndDate          string   `json:"end_date"`
 	PaymentMethod    *string  `json:"payment_method"`
 	PaymentFrequency *string  `json:"payment_frequency"`
 	PaymentAmount    *float64 `json:"payment_amount"`
-	Status           string   `json:"status"`
-	TotalPaid        float64  `json:"total_paid"`
-	TotalExpected    float64  `json:"total_expected"`
-	FailedCount      int      `json:"failed_count"`
-	LastPaymentDate  *string  `json:"last_payment_date"`
-	LastPaymentStatus *string `json:"last_payment_status"`
+	Status            string   `json:"status"`
+	MandateID         *string  `json:"mandate_id"`
+	SubscriptionID    *string  `json:"subscription_id"`
+	TotalPaid         float64  `json:"total_paid"`
+	TotalExpected     float64  `json:"total_expected"`
+	FailedCount       int      `json:"failed_count"`
+	LastPaymentDate   *string  `json:"last_payment_date"`
+	LastPaymentStatus *string  `json:"last_payment_status"`
 }
 
 // GetMemberships returns all memberships for a client with enriched data.
@@ -137,6 +154,8 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			m.payment_frequency,
 			m.payment_amount,
 			m.status,
+			m.gocardless_mandate_id,
+			m.gocardless_subscription_id,
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
 			COALESCE(m.payment_amount, 0) * mto.duration_months,
 			(SELECT COUNT(*) FROM payments p WHERE p.membership_id = m.id AND p.status = 'failed'),
@@ -163,7 +182,8 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			&row.MembershipID, &row.MembershipType, &row.MembershipTypeID,
 			&row.TermMonths, &row.StartDate, &row.EndDate,
 			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentAmount,
-			&row.Status, &row.TotalPaid, &row.TotalExpected,
+			&row.Status, &row.MandateID, &row.SubscriptionID,
+			&row.TotalPaid, &row.TotalExpected,
 			&row.FailedCount, &row.LastPaymentDate, &row.LastPaymentStatus,
 		); err != nil {
 			log.Printf("Error scanning client membership: %v", err)
@@ -173,4 +193,232 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"memberships": results, "count": len(results)})
+}
+
+// GetMandateStatus checks whether a client has a GoCardless mandate on any active membership.
+func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+
+	result := map[string]interface{}{
+		"has_mandate":            false,
+		"mandate_id":             nil,
+		"membership_id":          nil,
+		"gocardless_customer_id": nil,
+		"client_email":           nil,
+	}
+
+	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
+		result["gocardless_customer_id"] = *client.GoCardlessCustomerID
+	}
+	if client.Email != nil && *client.Email != "" {
+		result["client_email"] = *client.Email
+	}
+
+	// Check memberships for an active mandate
+	memberships, err := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
+	if err == nil {
+		for _, m := range memberships {
+			if m.Status == "active" && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+				result["has_mandate"] = true
+				result["mandate_id"] = *m.GoCardlessMandateID
+				result["membership_id"] = m.ID.String()
+				break
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SendMandateLink creates a GoCardless redirect flow and emails the link to the client.
+func (h *ClientHandler) SendMandateLink(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+
+	var input struct {
+		RedirectURI string `json:"redirect_uri"`
+	}
+	_ = decodeJSON(r, &input) // optional body
+	if input.RedirectURI == "" {
+		input.RedirectURI = r.Header.Get("Origin")
+		if input.RedirectURI == "" {
+			input.RedirectURI = "https://app.clientroll.com"
+		}
+		input.RedirectURI += "/clients/" + clientID.String()
+	}
+
+	prov, err := h.getGoCardlessProvider(r.Context(), tenantID)
+	if err != nil || prov == nil {
+		writeError(w, http.StatusBadRequest, "GoCardless not configured for this tenant")
+		return
+	}
+
+	sessionToken := fmt.Sprintf("mandate-%s-%s", clientID, uuid.New().String()[:8])
+	// Append session_token so when GoCardless redirects back (with redirect_flow_id), the client profile has both params to call complete-mandate-link.
+	if strings.Contains(input.RedirectURI, "?") {
+		input.RedirectURI += "&session_token=" + sessionToken
+	} else {
+		input.RedirectURI += "?session_token=" + sessionToken
+	}
+	redirectURL, flowID, err := prov.CreateRedirectFlow(r.Context(), input.RedirectURI, "Set up Direct Debit for "+client.Name, sessionToken)
+	if err != nil {
+		log.Printf("GoCardless CreateRedirectFlow for client %s: %v", clientID, err)
+		writeProviderError(w, err)
+		return
+	}
+
+	// Email the link to the client
+	emailSent := false
+	if client.Email != nil && *client.Email != "" && h.emailSvc != nil {
+		html := fmt.Sprintf(`
+			<h2 style="font-size:18px;font-weight:600;color:#111827;margin:0 0 12px;">Set Up Direct Debit</h2>
+			<p style="font-size:14px;color:#6b7280;line-height:1.6;">Hi %s,</p>
+			<p style="font-size:14px;color:#6b7280;line-height:1.6;">Please click the link below to securely set up your direct debit mandate:</p>
+			<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background-color:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">Set Up Direct Debit</a></p>
+			<p style="font-size:12px;color:#9ca3af;">This link will take you to GoCardless to securely enter your bank details.</p>
+		`, client.Name, redirectURL)
+		_, sendErr := h.emailSvc.Send(context.Background(), email.SendInput{
+			To:      *client.Email,
+			Subject: "Set Up Your Direct Debit",
+			HTML:    html,
+		})
+		if sendErr != nil {
+			log.Printf("Error sending mandate link email to %s: %v", *client.Email, sendErr)
+		} else {
+			emailSent = true
+		}
+	}
+
+	// Store session for completion callback
+	if h.redirectFlowRepo != nil {
+		_ = h.redirectFlowRepo.Create(r.Context(), tenantID, clientID, sessionToken, flowID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"redirect_url":  redirectURL,
+		"flow_id":       flowID,
+		"session_token": sessionToken,
+		"email_sent":    emailSent,
+	})
+}
+
+// CompleteMandateLink completes a redirect flow after the client returns from GoCardless.
+// Links the resulting mandate to the client's active membership and creates a subscription.
+func (h *ClientHandler) CompleteMandateLink(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+
+	var input struct {
+		FlowID       string `json:"flow_id"`
+		SessionToken string `json:"session_token"`
+	}
+	if err := decodeJSON(r, &input); err != nil || input.FlowID == "" || input.SessionToken == "" {
+		writeError(w, http.StatusBadRequest, "flow_id and session_token required")
+		return
+	}
+
+	prov, err := h.getGoCardlessProvider(r.Context(), tenantID)
+	if err != nil || prov == nil {
+		writeError(w, http.StatusBadRequest, "GoCardless not configured")
+		return
+	}
+
+	// Complete the redirect flow with GoCardless
+	mandateID, customerID, err := prov.CompleteRedirectFlow(r.Context(), input.FlowID, input.SessionToken)
+	if err != nil {
+		log.Printf("GoCardless CompleteRedirectFlow for client %s: %v", clientID, err)
+		writeProviderError(w, err)
+		return
+	}
+
+	// Store customer ID on client
+	_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), clientID, tenantID, customerID)
+
+	// Find active membership and link mandate
+	memberships, _ := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
+	var linkedMembershipID string
+	var subscriptionID string
+	for _, m := range memberships {
+		if m.Status == "active" && (m.GoCardlessMandateID == nil || *m.GoCardlessMandateID == "") {
+			_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, mandateID)
+			linkedMembershipID = m.ID.String()
+
+			// Create subscription for recurring payments (pass num_payments from term option if set)
+			if m.PaymentFrequency != nil && *m.PaymentFrequency != "upfront" && m.PaymentAmount != nil {
+				var numPay *int
+				if h.mtRepo != nil {
+					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil && to.NumPayments != nil {
+						numPay = to.NumPayments
+					}
+				}
+				subID, _ := createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, "Membership", m.MinTermEndDate, numPay)
+				subscriptionID = subID
+			}
+			break
+		}
+	}
+
+	// Clean up the session
+	if h.redirectFlowRepo != nil {
+		session, _ := h.redirectFlowRepo.FindBySessionToken(r.Context(), input.SessionToken)
+		if session != nil {
+			_ = h.redirectFlowRepo.Delete(r.Context(), session.ID)
+		}
+	}
+
+	log.Printf("Redirect flow completed: client=%s mandate=%s customer=%s membership=%s subscription=%s",
+		clientID, mandateID, customerID, linkedMembershipID, subscriptionID)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"mandate_id":      mandateID,
+		"customer_id":     customerID,
+		"membership_id":   linkedMembershipID,
+		"subscription_id": subscriptionID,
+	})
+}
+
+// getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
+func (h *ClientHandler) getGoCardlessProvider(ctx context.Context, tenantID uuid.UUID) (payment.GoCardlessExtended, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return nil, nil
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "gocardless")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return nil, err
+	}
+	apiKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil {
+		return nil, err
+	}
+	env := creds.Environment
+	if env == "" {
+		env = "sandbox"
+	}
+	return payment.NewGoCardlessProvider(apiKey, "", env), nil
 }

@@ -29,6 +29,9 @@ type DashboardSummary struct {
 	FailedPayments   int     `json:"failed_payments"`
 	NewSignups       int     `json:"new_signups"`
 	OpenDisputes     int     `json:"open_disputes"`
+	ActiveMandates   int     `json:"active_mandates"`
+	ActiveSubscriptions int  `json:"active_subscriptions"`
+	PendingPayments  int     `json:"pending_payments"`
 }
 
 // ReportsRepo handles aggregated reporting queries.
@@ -71,6 +74,19 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 	r.db.Pool.QueryRow(ctx,
 		"SELECT COUNT(*) FROM payment_disputes WHERE tenant_id=$1 AND status IN ('open', 'under_review')",
 		tenantID).Scan(&s.OpenDisputes)
+
+	// Direct debit stats
+	r.db.Pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND gocardless_mandate_id IS NOT NULL AND status='active'",
+		tenantID).Scan(&s.ActiveMandates)
+
+	r.db.Pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND gocardless_subscription_id IS NOT NULL AND status='active'",
+		tenantID).Scan(&s.ActiveSubscriptions)
+
+	r.db.Pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM payments WHERE tenant_id=$1 AND status IN ('pending', 'submitted')",
+		tenantID).Scan(&s.PendingPayments)
 
 	return &s, nil
 }

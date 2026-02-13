@@ -200,6 +200,23 @@ func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID 
 	return err
 }
 
+// GetTermOption returns a single term option by ID.
+func (r *MembershipTypeRepo) GetTermOption(ctx context.Context, termOptionID, tenantID uuid.UUID) (*models.TermOption, error) {
+	query := `
+		SELECT id, tenant_id, membership_type_id, duration_months,
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments
+		FROM membership_term_options
+		WHERE id = $1 AND tenant_id = $2`
+	var to models.TermOption
+	err := r.db.Pool.QueryRow(ctx, query, termOptionID, tenantID).Scan(
+		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments)
+	if err != nil {
+		return nil, err
+	}
+	return &to, nil
+}
+
 func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeID, tenantID uuid.UUID) ([]models.TermOption, error) {
 	query := `
 		SELECT id, tenant_id, membership_type_id, duration_months,

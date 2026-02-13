@@ -131,8 +131,11 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	bonusHandler := handlers.NewBonusHandler(bonusRepo)
 	mtHandler := handlers.NewMembershipTypeHandler(mtRepo, termsRepo)
 	termsHandler := handlers.NewTermsHandler(termsRepo)
-	clientHandler := handlers.NewClientHandler(clientRepo)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, emailSvc)
+	redirectFlowRepo := repository.NewRedirectFlowSessionRepo(db)
+	bankDetailsRepo := repository.NewBankDetailsRepo(db)
+	_ = bankDetailsRepo // used later
+	clientHandler := handlers.NewClientHandler(clientRepo, memberRepo, mtRepo, credRepo, redirectFlowRepo, enc, emailSvc)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, bankDetailsRepo, enc, emailSvc)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
 	passwordResetHandler := handlers.NewPasswordResetHandler(userRepo, db, emailSvc, cfg.AppURL)
@@ -140,9 +143,10 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
-	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo)
+	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, paymentRepo, memberRepo, clientRepo, enc, emailSvc)
+	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
-	serviceHandler := handlers.NewServiceHandler(serviceRepo)
+	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)
 
@@ -166,6 +170,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 		// Public signup flow (no auth required)
 		signupHandler.RegisterPublicRoutes(r)
+
+		// GoCardless OAuth callback and webhook (no auth)
+		gocardlessHandler.RegisterPublicRoutes(r)
 
 		// Public slug check (no rate limit — read-only)
 		r.Get("/register/check-slug/{slug}", registrationHandler.CheckSlug)
@@ -222,6 +229,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 				// Integrations (GoCardless, MailerSend keys)
 				integrationsHandler.RegisterRoutes(r)
+				// GoCardless Connect (OAuth start URL)
+				gocardlessHandler.RegisterTenantRoutes(r)
 
 				// Webhook management (Phase 7)
 				webhookHandler.RegisterRoutes(r)

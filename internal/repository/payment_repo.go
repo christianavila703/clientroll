@@ -91,6 +91,34 @@ func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, client
 	return &p, nil
 }
 
+// GetByID returns a payment by ID and tenant.
+func (r *PaymentRepo) GetByID(ctx context.Context, id, tenantID uuid.UUID) (*Payment, error) {
+	query := `SELECT ` + paymentFields + ` FROM payments WHERE id = $1 AND tenant_id = $2`
+	var p Payment
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(r.scanFields(&p)...)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding payment by id: %w", err)
+	}
+	return &p, nil
+}
+
+// GetByProviderReference returns a payment by tenant and GoCardless payment ID (provider_reference).
+func (r *PaymentRepo) GetByProviderReference(ctx context.Context, tenantID uuid.UUID, providerRef string) (*Payment, error) {
+	query := `SELECT ` + paymentFields + ` FROM payments WHERE tenant_id = $1 AND provider_reference = $2`
+	var p Payment
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, providerRef).Scan(r.scanFields(&p)...)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding payment by provider reference: %w", err)
+	}
+	return &p, nil
+}
+
 // UpdateStatus updates a payment's status.
 func (r *PaymentRepo) UpdateStatus(ctx context.Context, id, tenantID uuid.UUID, status string, paidDate *time.Time, failureReason, failureCode *string) error {
 	query := `UPDATE payments SET status=$3, paid_date=$4, failure_reason=$5, failure_code=$6,

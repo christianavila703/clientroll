@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"time"
 
+	"clientroll/internal/database"
 	"clientroll/internal/email"
 	"clientroll/internal/models"
+	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
 	"github.com/go-chi/chi/v5"
@@ -17,14 +20,17 @@ import (
 // SignupHandler handles the public membership signup flow.
 // These endpoints are accessible without authentication (resolved via tenant slug).
 type SignupHandler struct {
-	tenantRepo   *repository.TenantRepo
-	mtRepo       *repository.MembershipTypeRepo
-	bonusRepo    *repository.BonusRepo
-	termsRepo    *repository.TermsRepo
-	clientRepo   *repository.ClientRepo
-	memberRepo   *repository.MembershipRepo
-	settingsRepo *repository.SettingsRepo
-	emailSvc     email.Provider
+	tenantRepo      *repository.TenantRepo
+	mtRepo          *repository.MembershipTypeRepo
+	bonusRepo       *repository.BonusRepo
+	termsRepo       *repository.TermsRepo
+	clientRepo      *repository.ClientRepo
+	memberRepo      *repository.MembershipRepo
+	settingsRepo    *repository.SettingsRepo
+	credRepo        *repository.TenantCredentialRepo
+	bankDetailsRepo *repository.BankDetailsRepo
+	encryptor       *database.Encryptor
+	emailSvc        email.Provider
 }
 
 // NewSignupHandler creates a new signup handler.
@@ -36,11 +42,15 @@ func NewSignupHandler(
 	cr *repository.ClientRepo,
 	mr *repository.MembershipRepo,
 	sr *repository.SettingsRepo,
+	credR *repository.TenantCredentialRepo,
+	bdr *repository.BankDetailsRepo,
+	enc *database.Encryptor,
 	es email.Provider,
 ) *SignupHandler {
 	return &SignupHandler{
 		tenantRepo: tr, mtRepo: mt, bonusRepo: br, termsRepo: terms,
-		clientRepo: cr, memberRepo: mr, settingsRepo: sr, emailSvc: es,
+		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
+		credRepo: credR, bankDetailsRepo: bdr, encryptor: enc, emailSvc: es,
 	}
 }
 
@@ -193,6 +203,93 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- GoCardless: create customer + mandate if bank details provided and GC is configured ---
+	gcMandateID := ""
+	gcError := ""
+	if input.BSB != "" && input.AccountNumber != "" {
+		prov, provErr := h.getGoCardlessProvider(r.Context(), tenant.ID)
+		if provErr == nil && prov != nil {
+			// Create or reuse GoCardless customer
+			gcCustomerID := ""
+			if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
+				gcCustomerID = *client.GoCardlessCustomerID
+			} else {
+				clientEmail := ""
+				if client.Email != nil {
+					clientEmail = *client.Email
+				}
+				clientPhone := ""
+				if client.Phone != nil {
+					clientPhone = *client.Phone
+				}
+				cid, err := prov.CreateCustomer(r.Context(), payment.CreateCustomerInput{
+					Email:     clientEmail,
+					Name:      client.Name,
+					Phone:     clientPhone,
+					Reference: client.ID.String(),
+				})
+				if err != nil {
+					var gce *payment.GCError
+					if errors.As(err, &gce) {
+						log.Printf("GoCardless CreateCustomer during signup: %s (raw: %s)", gce.Message, gce.Raw)
+					} else {
+						log.Printf("GoCardless CreateCustomer during signup: %v", err)
+					}
+					gcError = "Direct debit setup failed. Please contact us to set up your payments."
+				} else {
+					gcCustomerID = cid
+					_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), client.ID, tenant.ID, cid)
+				}
+			}
+
+			// Create mandate via direct debit setup
+			if gcCustomerID != "" {
+				holderName := input.AccountHolderName
+				if holderName == "" {
+					holderName = client.Name
+				}
+				mandateID, err := prov.SetupDirectDebit(r.Context(), payment.SetupDirectDebitInput{
+					CustomerID:        gcCustomerID,
+					AccountHolderName: holderName,
+					AccountNumber:     input.AccountNumber,
+					BSB:               input.BSB,
+					Reference:         membership.ID.String(),
+				})
+				if err != nil {
+					log.Printf("GoCardless SetupDirectDebit during signup: %v", err)
+					gcError = "Direct debit setup failed. Please contact us to set up your payments."
+				} else {
+					gcMandateID = mandateID
+					_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), membership.ID, tenant.ID, mandateID)
+					log.Printf("GoCardless mandate %s created for membership %s (client %s)", mandateID, membership.ID, client.ID)
+
+					// Store bank details (last 4 digits only)
+					if h.bankDetailsRepo != nil {
+						last4 := input.AccountNumber
+						if len(last4) > 4 {
+							last4 = last4[len(last4)-4:]
+						}
+						_ = h.bankDetailsRepo.Create(r.Context(), tenant.ID, client.ID,
+							input.AccountHolderName, input.BSB, last4, input.InstitutionName, "")
+					}
+
+					// Create GoCardless subscription for recurring payments (pass num_payments from term option if set)
+					mtForSub, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+					subName := "Membership"
+					if mtForSub != nil {
+						subName = mtForSub.Title
+					}
+					var numPay *int
+					if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
+						numPay = to.NumPayments
+					}
+					createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, membership,
+						tenant.ID, input.PaymentFrequency, input.PaymentAmount, subName, membership.MinTermEndDate, numPay)
+				}
+			}
+		}
+	}
+
 	// Determine thank you page
 	mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
 	thankyou := buildThankyouResponse(tenant, mt)
@@ -209,11 +306,18 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	resp := map[string]interface{}{
 		"membership": membership,
 		"client":     client,
 		"thankyou":   thankyou,
-	})
+	}
+	if gcMandateID != "" {
+		resp["gocardless_mandate_id"] = gcMandateID
+	}
+	if gcError != "" {
+		resp["gocardless_error"] = gcError
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // SignupSubmission is the full signup form data.
@@ -267,6 +371,26 @@ func buildThankyouResponse(tenant *models.Tenant, mt *models.MembershipType) map
 	result["image_url"] = tenant.DefaultThankyouImageURL
 	result["redirect_url"] = tenant.DefaultThankyouRedirectURL
 	return result
+}
+
+// getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
+func (h *SignupHandler) getGoCardlessProvider(ctx context.Context, tenantID uuid.UUID) (payment.GoCardlessExtended, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return nil, nil
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "gocardless")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return nil, err
+	}
+	apiKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil {
+		return nil, err
+	}
+	env := creds.Environment
+	if env == "" {
+		env = "sandbox"
+	}
+	return payment.NewGoCardlessProvider(apiKey, "", env), nil
 }
 
 func parseOptionalUUID(s string) *uuid.UUID {
