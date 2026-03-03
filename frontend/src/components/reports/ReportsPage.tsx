@@ -65,6 +65,7 @@ export default function ReportsPage() {
 
   if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
   if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">Failed to load report data</div>;
+  const safeData = normalizeReport(data);
 
   const tabs = [
     { key: "overview" as const, label: "Overview" },
@@ -74,10 +75,10 @@ export default function ReportsPage() {
     { key: "clients" as const, label: "Clients" },
   ];
 
-  const totalPayments = Object.values(data.payment_statuses).reduce((a, b) => a + b, 0);
-  const successRate = totalPayments > 0 ? Math.round(((data.payment_statuses.succeeded || 0) / totalPayments) * 100) : 0;
-  const revDelta = data.prev_month_revenue > 0 ? Math.round(((data.month_revenue - data.prev_month_revenue) / data.prev_month_revenue) * 100) : 0;
-  const churnRate = data.active_members > 0 ? ((data.churned_month / data.active_members) * 100).toFixed(1) : "0";
+  const totalPayments = Object.values(safeData.payment_statuses).reduce((a, b) => a + b, 0);
+  const successRate = totalPayments > 0 ? Math.round(((safeData.payment_statuses.succeeded || 0) / totalPayments) * 100) : 0;
+  const revDelta = safeData.prev_month_revenue > 0 ? Math.round(((safeData.month_revenue - safeData.prev_month_revenue) / safeData.prev_month_revenue) * 100) : 0;
+  const churnRate = safeData.active_members > 0 ? ((safeData.churned_month / safeData.active_members) * 100).toFixed(1) : "0";
   const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 
   return (
@@ -99,11 +100,11 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab data={data} revDelta={revDelta} successRate={successRate} churnRate={churnRate} />}
-      {tab === "revenue" && <RevenueTab data={data} />}
-      {tab === "memberships" && <MembershipsTab data={data} />}
-      {tab === "payments" && <PaymentsTab data={data} totalPayments={totalPayments} successRate={successRate} />}
-      {tab === "clients" && <ClientsTab data={data} fmtDate={fmtDate} />}
+      {tab === "overview" && <OverviewTab data={safeData} revDelta={revDelta} successRate={successRate} churnRate={churnRate} />}
+      {tab === "revenue" && <RevenueTab data={safeData} />}
+      {tab === "memberships" && <MembershipsTab data={safeData} />}
+      {tab === "payments" && <PaymentsTab data={safeData} totalPayments={totalPayments} successRate={successRate} />}
+      {tab === "clients" && <ClientsTab data={safeData} fmtDate={fmtDate} />}
     </div>
   );
 }
