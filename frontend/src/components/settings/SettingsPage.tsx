@@ -245,6 +245,8 @@ function IntegrationsSettings() {
   const providers = [
     { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for your members. Add your API key from the GoCardless developer dashboard.", hasSecret: false,
       fields: { key: "API key", secret: "" } },
+    { id: "stripe", name: "Stripe", desc: "Card payments and billing. Add your Stripe secret key and webhook signing secret per tenant.", hasSecret: true,
+      fields: { key: "Secret key", secret: "Webhook signing secret" } },
   ];
 
   const handleSave = async (providerId: string, data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => {
