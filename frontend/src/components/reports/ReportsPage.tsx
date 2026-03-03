@@ -129,6 +129,7 @@ function Kpi({ label, value, sub, delta, alert }: { label: string; value: string
 
 /* ─── Overview Tab ─── */
 function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report; revDelta: number; successRate: number; churnRate: string }) {
+  data = normalizeReport(data as any);
   const revenueChart = {
     tooltip: { trigger: "axis" as const },
     grid: { left: 50, right: 20, top: 20, bottom: 30 },
@@ -216,6 +217,7 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
 
 /* ─── Revenue Tab ─── */
 function RevenueTab({ data }: { data: Report }) {
+  data = normalizeReport(data as any);
   const areaChart = {
     tooltip: { trigger: "axis" as const, formatter: (params: any) => {
       const bar = params.find((p: any) => p.seriesType === "bar");
@@ -282,6 +284,7 @@ function RevenueTab({ data }: { data: Report }) {
 
 /* ─── Memberships Tab ─── */
 function MembershipsTab({ data }: { data: Report }) {
+  data = normalizeReport(data as any);
   const pie = {
     tooltip: { trigger: "item" as const, formatter: "{b}<br/>{c} members ({d}%)" },
     legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
@@ -349,6 +352,7 @@ function MembershipsTab({ data }: { data: Report }) {
 
 /* ─── Payments Tab ─── */
 function PaymentsTab({ data, totalPayments, successRate }: { data: Report; totalPayments: number; successRate: number }) {
+  data = normalizeReport(data as any);
   const donut = {
     tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
     legend: { bottom: 0, textStyle: { color: "#6b7280", fontSize: 11 } },
@@ -414,6 +418,7 @@ function PaymentsTab({ data, totalPayments, successRate }: { data: Report; total
 
 /* ─── Clients Tab ─── */
 function ClientsTab({ data, fmtDate }: { data: Report; fmtDate: (d: string) => string }) {
+  data = normalizeReport(data as any);
   const clientBar = {
     tooltip: { trigger: "axis" as const },
     grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
