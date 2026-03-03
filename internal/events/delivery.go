@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"clientroll/internal/database"
@@ -46,6 +47,7 @@ func (w *Worker) Start(ctx context.Context) {
 			return
 		default:
 			w.processNext(ctx)
+			w.requeueDueRetries(ctx)
 		}
 	}
 }
@@ -80,7 +82,12 @@ func (w *Worker) deliver(ctx context.Context, job DeliveryJob) {
 	}
 
 	// Compute HMAC signature
-	signature := SignPayload([]byte(job.Payload), secret)
+	ts := job.Timestamp
+	if ts == "" {
+		ts = time.Now().UTC().Format(time.RFC3339)
+	}
+	signedPayload := append([]byte(ts+"."), []byte(job.Payload)...)
+	signature := SignPayload(signedPayload, secret)
 
 	// Make the HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", job.URL, bytes.NewReader([]byte(job.Payload)))
@@ -92,6 +99,8 @@ func (w *Worker) deliver(ctx context.Context, job DeliveryJob) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Webhook-Signature", signature)
 	req.Header.Set("X-Webhook-Event", job.EventType)
+	req.Header.Set("X-Webhook-Event-Id", job.EventID)
+	req.Header.Set("X-Webhook-Timestamp", ts)
 	req.Header.Set("User-Agent", "ClientRoll-Webhook/1.0")
 
 	resp, err := w.client.Do(req)
@@ -168,4 +177,31 @@ func (w *Worker) recordFailure(ctx context.Context, job DeliveryJob, httpStatus 
 
 	log.Printf("webhook.worker delivery_failed_permanently endpoint=%s tenant=%s event=%s attempt_count=%d reason=%s",
 		job.EndpointID, job.TenantID, job.EventType, job.AttemptCount, reason)
+}
+
+func (w *Worker) requeueDueRetries(ctx context.Context) {
+	now := strconv.FormatInt(time.Now().Unix(), 10)
+	due, err := w.redis.Client.ZRangeByScore(ctx, w.redis.Key("webhook:retry"), &redis.ZRangeBy{
+		Min:    "-inf",
+		Max:    now,
+		Offset: 0,
+		Count:  50,
+	}).Result()
+	if err != nil || len(due) == 0 {
+		return
+	}
+
+	for _, item := range due {
+		removed, err := w.redis.Client.ZRem(ctx, w.redis.Key("webhook:retry"), item).Result()
+		if err != nil || removed == 0 {
+			continue
+		}
+		if err := w.redis.Client.LPush(ctx, w.redis.Key("webhook:queue"), item).Err(); err != nil {
+			// Best effort: put it back in retry set to avoid loss.
+			_, _ = w.redis.Client.ZAdd(ctx, w.redis.Key("webhook:retry"), redis.Z{
+				Score:  float64(time.Now().Unix() + 5),
+				Member: item,
+			}).Result()
+		}
+	}
 }

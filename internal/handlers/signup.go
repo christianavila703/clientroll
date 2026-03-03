@@ -9,6 +9,7 @@ import (
 
 	"clientroll/internal/database"
 	"clientroll/internal/email"
+	"clientroll/internal/events"
 	"clientroll/internal/models"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
@@ -31,6 +32,7 @@ type SignupHandler struct {
 	bankDetailsRepo *repository.BankDetailsRepo
 	encryptor       *database.Encryptor
 	emailSvc        email.Provider
+	dispatcher      *events.Dispatcher
 }
 
 // NewSignupHandler creates a new signup handler.
@@ -52,6 +54,11 @@ func NewSignupHandler(
 		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
 		credRepo: credR, bankDetailsRepo: bdr, encryptor: enc, emailSvc: es,
 	}
+}
+
+// SetDispatcher sets optional outbound webhook event dispatcher.
+func (h *SignupHandler) SetDispatcher(dispatcher *events.Dispatcher) {
+	h.dispatcher = dispatcher
 }
 
 // RegisterPublicRoutes registers public signup routes (no auth required).
@@ -187,6 +194,15 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create client record")
 		return
 	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.ClientCreated, tenant.ID, map[string]interface{}{
+			"client_id": client.ID,
+			"name":      client.Name,
+			"email":     client.Email,
+			"phone":     client.Phone,
+			"source":    "signup",
+		}))
+	}
 
 	// Parse IDs
 	mtID, _ := uuid.Parse(input.MembershipTypeID)
@@ -201,6 +217,16 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error creating membership during signup: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership")
 		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.MembershipCreated, tenant.ID, map[string]interface{}{
+			"membership_id":      membership.ID,
+			"client_id":          membership.ClientID,
+			"membership_type_id": membership.MembershipTypeID,
+			"term_option_id":     membership.TermOptionID,
+			"status":             membership.Status,
+			"source":             "signup",
+		}))
 	}
 
 	// --- GoCardless: create customer + mandate if bank details provided and GC is configured ---

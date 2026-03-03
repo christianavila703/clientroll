@@ -126,6 +126,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsRepo := repository.NewReportsRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 	inboundWebhookEventRepo := repository.NewInboundWebhookEventRepo(db)
+	inboundWebhookKeyRepo := repository.NewInboundWebhookKeyRepo(db)
 	credRepo := repository.NewTenantCredentialRepo(db)
 
 	// Email service
@@ -150,13 +151,20 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	paymentHandler := handlers.NewPaymentHandler(paymentRepo, db)
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
+	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
 	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, memberRepo, clientRepo, enc, emailSvc)
+	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
 	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)
+	dispatcher := events.NewDispatcher(db, rdb, enc)
+	clientHandler.SetDispatcher(dispatcher)
+	signupHandler.SetDispatcher(dispatcher)
+	activeMembershipsHandler.SetDispatcher(dispatcher)
+	gocardlessHandler.SetDispatcher(dispatcher)
 
 	// Health check
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +199,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 		// GoCardless OAuth callback and webhook (no auth)
 		gocardlessHandler.RegisterPublicRoutes(r)
+		inboundWebhookHandler.RegisterPublicRoutes(r)
 
 		// Public slug check (no rate limit — read-only)
 		r.Get("/register/check-slug/{slug}", registrationHandler.CheckSlug)
@@ -262,6 +271,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 				// Webhook management (Phase 7)
 				webhookHandler.RegisterRoutes(r)
+				inboundWebhookKeyHandler.RegisterRoutes(r)
 
 				// File uploads + serving
 				fileHandler.RegisterAuthRoutes(r)

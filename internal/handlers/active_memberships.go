@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"clientroll/internal/database"
+	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
@@ -24,11 +25,17 @@ type ActiveMembershipsHandler struct {
 	clientRepo *repository.ClientRepo
 	credRepo   *repository.TenantCredentialRepo
 	encryptor  *database.Encryptor
+	dispatcher *events.Dispatcher
 }
 
 // NewActiveMembershipsHandler creates a new handler.
 func NewActiveMembershipsHandler(db *database.Postgres, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, cr *repository.ClientRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ActiveMembershipsHandler {
 	return &ActiveMembershipsHandler{db: db, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, credRepo: credR, encryptor: enc}
+}
+
+// SetDispatcher sets optional outbound webhook event dispatcher.
+func (h *ActiveMembershipsHandler) SetDispatcher(dispatcher *events.Dispatcher) {
+	h.dispatcher = dispatcher
 }
 
 // RegisterRoutes registers routes.
@@ -75,6 +82,16 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		log.Printf("Error creating membership: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership")
 		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.MembershipCreated, tenantID, map[string]interface{}{
+			"membership_id":      m.ID,
+			"client_id":          m.ClientID,
+			"membership_type_id": m.MembershipTypeID,
+			"term_option_id":     m.TermOptionID,
+			"status":             m.Status,
+			"source":             "staff",
+		}))
 	}
 
 	// --- GoCardless: create customer + mandate if bank details provided ---
@@ -195,6 +212,14 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		log.Printf("Error cancelling membership: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to cancel membership")
 		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.MembershipCancelled, tenantID, map[string]interface{}{
+			"membership_id": membershipID,
+			"client_id":     m.ClientID,
+			"status":        "cancelled",
+			"source":        "staff",
+		}))
 	}
 
 	log.Printf("membership.cancel success tenant=%s membership=%s", tenantID, membershipID)

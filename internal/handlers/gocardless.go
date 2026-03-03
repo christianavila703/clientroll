@@ -18,6 +18,7 @@ import (
 	"clientroll/internal/config"
 	"clientroll/internal/database"
 	"clientroll/internal/email"
+	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/observability"
 	"clientroll/internal/payment"
@@ -67,6 +68,7 @@ type GoCardlessHandler struct {
 	clientRepo  *repository.ClientRepo
 	encryptor   *database.Encryptor
 	emailSvc    email.Provider
+	dispatcher  *events.Dispatcher
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
@@ -81,6 +83,11 @@ func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRep
 		encryptor:   enc,
 		emailSvc:    es,
 	}
+}
+
+// SetDispatcher sets optional outbound webhook event dispatcher.
+func (h *GoCardlessHandler) SetDispatcher(dispatcher *events.Dispatcher) {
+	h.dispatcher = dispatcher
 }
 
 // RegisterTenantRoutes registers tenant-scoped routes (require auth + tenant).
@@ -537,6 +544,19 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 				}
 				_ = h.memberRepo.UpdateStatus(ctx, m.ID, tenantID, newStatus)
 				log.Printf("Membership %s set to %s (subscription %s %s)", m.ID, newStatus, subscriptionID, action)
+				if h.dispatcher != nil {
+					eventType := events.MembershipExpired
+					if newStatus == "cancelled" {
+						eventType = events.MembershipCancelled
+					}
+					h.dispatcher.Dispatch(ctx, events.NewEvent(eventType, tenantID, map[string]interface{}{
+						"membership_id":   m.ID,
+						"client_id":       m.ClientID,
+						"subscription_id": subscriptionID,
+						"status":          newStatus,
+						"source":          "gocardless_webhook",
+					}))
+				}
 			}
 		}
 	case "payment_created":
@@ -602,6 +622,25 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
 		return err
+	}
+	if h.dispatcher != nil {
+		if status == "succeeded" || status == "failed" {
+			eventType := events.PaymentFailed
+			if status == "succeeded" {
+				eventType = events.PaymentSucceeded
+			}
+			h.dispatcher.Dispatch(ctx, events.NewEvent(eventType, tenantID, map[string]interface{}{
+				"payment_id":     p.ID,
+				"membership_id":  p.MembershipID,
+				"client_id":      p.ClientID,
+				"amount":         p.Amount,
+				"status":         status,
+				"provider_ref":   gcPaymentID,
+				"failure_reason": reason,
+				"failure_code":   cause,
+				"source":         "gocardless_webhook",
+			}))
+		}
 	}
 
 	h.sendPaymentEmail(ctx, tenantID, p.ClientID, p.Amount, status, reason)

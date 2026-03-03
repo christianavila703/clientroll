@@ -9,6 +9,7 @@ import (
 
 	"clientroll/internal/database"
 	"clientroll/internal/email"
+	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
 	"clientroll/internal/payment"
@@ -27,11 +28,17 @@ type ClientHandler struct {
 	redirectFlowRepo *repository.RedirectFlowSessionRepo
 	encryptor        *database.Encryptor
 	emailSvc         email.Provider
+	dispatcher       *events.Dispatcher
 }
 
 // NewClientHandler creates a new client handler.
 func NewClientHandler(cr *repository.ClientRepo, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, credR *repository.TenantCredentialRepo, rfr *repository.RedirectFlowSessionRepo, enc *database.Encryptor, es email.Provider) *ClientHandler {
 	return &ClientHandler{clientRepo: cr, memberRepo: mr, mtRepo: mtRepo, credRepo: credR, redirectFlowRepo: rfr, encryptor: enc, emailSvc: es}
+}
+
+// SetDispatcher sets optional outbound webhook event dispatcher.
+func (h *ClientHandler) SetDispatcher(dispatcher *events.Dispatcher) {
+	h.dispatcher = dispatcher
 }
 
 // RegisterRoutes registers client routes.
@@ -74,6 +81,14 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error creating client: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create client")
 		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.ClientCreated, tenantID, map[string]interface{}{
+			"client_id": client.ID,
+			"name":      client.Name,
+			"email":     client.Email,
+			"phone":     client.Phone,
+		}))
 	}
 	writeJSON(w, http.StatusCreated, client)
 }
@@ -122,11 +137,11 @@ type ClientMembershipRow struct {
 	MembershipType    string   `json:"membership_type"`
 	MembershipTypeID  string   `json:"membership_type_id"`
 	TermMonths        int      `json:"term_months"`
-	StartDate        string   `json:"start_date"`
-	EndDate          string   `json:"end_date"`
-	PaymentMethod    *string  `json:"payment_method"`
-	PaymentFrequency *string  `json:"payment_frequency"`
-	PaymentAmount    *float64 `json:"payment_amount"`
+	StartDate         string   `json:"start_date"`
+	EndDate           string   `json:"end_date"`
+	PaymentMethod     *string  `json:"payment_method"`
+	PaymentFrequency  *string  `json:"payment_frequency"`
+	PaymentAmount     *float64 `json:"payment_amount"`
 	Status            string   `json:"status"`
 	MandateID         *string  `json:"mandate_id"`
 	SubscriptionID    *string  `json:"subscription_id"`

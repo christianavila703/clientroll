@@ -74,10 +74,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event Event) {
 		job := DeliveryJob{
 			EndpointID:      endpointID.String(),
 			TenantID:        tenantID.String(),
-			URL:              url,
+			URL:             url,
 			SecretEncrypted: secretEncrypted,
 			Payload:         string(payload),
 			EventType:       event.Type,
+			EventID:         event.ID,
+			Timestamp:       event.CreatedAt.UTC().Format(time.RFC3339),
 			AttemptCount:    0,
 		}
 		jobBytes, _ := json.Marshal(job)
@@ -93,6 +95,8 @@ type DeliveryJob struct {
 	SecretEncrypted string `json:"secret_encrypted"`
 	Payload         string `json:"payload"`
 	EventType       string `json:"event_type"`
+	EventID         string `json:"event_id"`
+	Timestamp       string `json:"timestamp"`
 	AttemptCount    int    `json:"attempt_count"`
 }
 
