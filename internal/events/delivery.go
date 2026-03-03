@@ -37,12 +37,12 @@ func NewWorker(db *database.Postgres, redis *database.Redis, enc *database.Encry
 
 // Start begins processing the webhook delivery queue.
 func (w *Worker) Start(ctx context.Context) {
-	log.Println("Webhook delivery worker started")
+	log.Println("webhook.worker started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Webhook delivery worker stopped")
+			log.Println("webhook.worker stopped")
 			return
 		default:
 			w.processNext(ctx)
@@ -63,7 +63,7 @@ func (w *Worker) processNext(ctx context.Context) {
 
 	var job DeliveryJob
 	if err := json.Unmarshal([]byte(result[1]), &job); err != nil {
-		log.Printf("Webhook worker: invalid job: %v", err)
+		log.Printf("webhook.worker invalid_job err=%v", err)
 		return
 	}
 
@@ -74,7 +74,7 @@ func (w *Worker) deliver(ctx context.Context, job DeliveryJob) {
 	// Decrypt the webhook secret
 	secret, err := w.enc.Decrypt(job.SecretEncrypted)
 	if err != nil {
-		log.Printf("Webhook worker: failed to decrypt secret for endpoint %s: %v", job.EndpointID, err)
+		log.Printf("webhook.worker decrypt_secret_failed endpoint=%s tenant=%s err=%v", job.EndpointID, job.TenantID, err)
 		w.recordFailure(ctx, job, 0, "decryption_error", "Failed to decrypt signing secret")
 		return
 	}
@@ -122,7 +122,7 @@ func (w *Worker) recordSuccess(ctx context.Context, job DeliveryJob, httpStatus 
 		ORDER BY created_at DESC LIMIT 1`,
 		httpStatus, responseBody, job.EndpointID, job.TenantID, job.EventType)
 	if err != nil {
-		log.Printf("Webhook worker: error recording success: %v", err)
+		log.Printf("webhook.worker record_success_failed endpoint=%s tenant=%s event=%s err=%v", job.EndpointID, job.TenantID, job.EventType, err)
 	}
 }
 
@@ -166,6 +166,6 @@ func (w *Worker) recordFailure(ctx context.Context, job DeliveryJob, httpStatus 
 		httpStatus, responseBody, job.AttemptCount,
 		job.EndpointID, job.TenantID, job.EventType)
 
-	log.Printf("Webhook delivery failed permanently: endpoint=%s event=%s reason=%s",
-		job.EndpointID, job.EventType, reason)
+	log.Printf("webhook.worker delivery_failed_permanently endpoint=%s tenant=%s event=%s attempt_count=%d reason=%s",
+		job.EndpointID, job.TenantID, job.EventType, job.AttemptCount, reason)
 }

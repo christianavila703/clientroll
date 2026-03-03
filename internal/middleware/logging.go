@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
 // Logger provides structured HTTP request logging.
@@ -28,12 +30,14 @@ func (l *Logger) Handler(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 		log.Printf(
-			"%s %s %d %s %s",
+			"http.request request_id=%s method=%s path=%s status=%d duration=%s remote=%s user_agent=%q",
+			chimw.GetReqID(r.Context()),
 			r.Method,
 			r.URL.Path,
 			ww.statusCode,
 			duration.String(),
 			r.RemoteAddr,
+			r.UserAgent(),
 		)
 	})
 }

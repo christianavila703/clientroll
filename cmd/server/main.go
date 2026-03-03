@@ -14,8 +14,10 @@ import (
 	"clientroll/internal/config"
 	"clientroll/internal/database"
 	"clientroll/internal/email"
+	"clientroll/internal/events"
 	"clientroll/internal/handlers"
 	"clientroll/internal/middleware"
+	"clientroll/internal/observability"
 	"clientroll/internal/repository"
 	"clientroll/internal/storage"
 
@@ -48,6 +50,10 @@ func main() {
 	}
 
 	r := setupRouter(cfg, db, rdb, enc)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	go events.NewWorker(db, rdb, enc).Start(workerCtx)
+	go observability.StartAlertsMonitor(workerCtx, db, 2*time.Minute)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -69,6 +75,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	workerCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -118,6 +125,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	paymentRepo := repository.NewPaymentRepo(db)
 	reportsRepo := repository.NewReportsRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
+	inboundWebhookEventRepo := repository.NewInboundWebhookEventRepo(db)
 	credRepo := repository.NewTenantCredentialRepo(db)
 
 	// Email service
@@ -143,7 +151,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
-	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, paymentRepo, memberRepo, clientRepo, enc, emailSvc)
+	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, memberRepo, clientRepo, enc, emailSvc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
 	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc)
@@ -154,7 +162,17 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok","service":"clientroll"}`))
+		metrics := observability.PaymentLifecycleMetrics.Snapshot()
+		fmt.Fprintf(
+			w,
+			`{"status":"ok","service":"clientroll","payment_metrics":{"webhook_received":%d,"webhook_rejected":%d,"webhook_duplicate":%d,"webhook_processed":%d,"webhook_failed":%d,"payment_reconciled":%d}}`,
+			metrics.WebhookReceived,
+			metrics.WebhookRejected,
+			metrics.WebhookDuplicate,
+			metrics.WebhookProcessed,
+			metrics.WebhookFailed,
+			metrics.PaymentReconciled,
+		)
 	})
 
 	// Public routes
@@ -190,6 +208,16 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Use(authMW.RequireAuth)
 			r.Use(tenantMW.SetTenantContext)
 			r.Use(auditMW.LogWrites)
+
+			// Current user (works for both tenant and platform admin sessions)
+			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r.Context())
+				tenantID := middleware.GetTenantID(r.Context())
+				role := middleware.GetRole(r.Context())
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprintf(w, `{"user_id":"%s","tenant_id":"%s","role":"%s"}`, userID, tenantID, role)
+			})
 
 			// Tenant-scoped routes (require tenant context)
 			r.Route("/tenant", func(r chi.Router) {

@@ -212,13 +212,16 @@ func (g *GoCardlessProvider) GetPaymentStatus(ctx context.Context, paymentID str
 func mapGCPaymentStatusToOurs(gc string) string {
 	switch gc {
 	case "pending_submission", "submitted", "confirmed":
-		return gc
+		return "pending"
 	case "paid_out":
-		return "paid_out"
+		return "succeeded"
 	case "failed", "charged_back", "cancelled":
-		return gc
+		if gc == "cancelled" {
+			return "cancelled"
+		}
+		return "failed"
 	default:
-		return gc
+		return "pending"
 	}
 }
 

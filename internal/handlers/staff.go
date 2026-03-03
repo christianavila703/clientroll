@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"clientroll/internal/auth"
 	"clientroll/internal/middleware"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // StaffHandler handles tenant staff management.
@@ -152,8 +155,47 @@ func (h *StaffHandler) UpdateStaff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "Only tenant admins can update staff")
 		return
 	}
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
 
-	writeError(w, http.StatusNotImplemented, "Staff update coming soon")
+	var input struct {
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Role      string `json:"role"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	input.FirstName = strings.TrimSpace(input.FirstName)
+	input.LastName = strings.TrimSpace(input.LastName)
+	if input.FirstName == "" {
+		writeError(w, http.StatusBadRequest, "First name is required")
+		return
+	}
+	if input.Role != models.RoleTenantAdmin && input.Role != models.RoleTenantStaff {
+		input.Role = models.RoleTenantStaff
+	}
+
+	updated, err := h.userRepo.UpdateStaffProfile(r.Context(), userID, tenantID, input.FirstName, input.LastName, input.Role)
+	if err != nil {
+		log.Printf("Error updating staff %s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to update staff member")
+		return
+	}
+	if updated == nil {
+		writeError(w, http.StatusNotFound, "Staff member not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated.ToResponse())
 }
 
 // DeactivateStaff deactivates a staff member (admin only).
@@ -162,6 +204,28 @@ func (h *StaffHandler) DeactivateStaff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "Only tenant admins can deactivate staff")
 		return
 	}
-
-	writeError(w, http.StatusNotImplemented, "Staff deactivation coming soon")
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+	if middleware.GetUserID(r.Context()) == userID.String() {
+		writeError(w, http.StatusBadRequest, "You cannot deactivate your own account")
+		return
+	}
+	if err := h.userRepo.DeactivateStaff(r.Context(), userID, tenantID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "Staff member not found")
+			return
+		}
+		log.Printf("Error deactivating staff %s: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to deactivate staff member")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deactivated"})
 }

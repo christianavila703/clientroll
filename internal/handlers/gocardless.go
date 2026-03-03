@@ -19,6 +19,7 @@ import (
 	"clientroll/internal/database"
 	"clientroll/internal/email"
 	"clientroll/internal/middleware"
+	"clientroll/internal/observability"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
@@ -27,11 +28,11 @@ import (
 )
 
 const (
-	gocardlessProvider   = "gocardless"
-	connectSandboxAuth   = "https://connect-sandbox.gocardless.com/oauth/authorize"
-	connectSandboxToken  = "https://connect-sandbox.gocardless.com/oauth/access_token"
-	connectLiveAuth      = "https://connect.gocardless.com/oauth/authorize"
-	connectLiveToken     = "https://connect.gocardless.com/oauth/access_token"
+	gocardlessProvider  = "gocardless"
+	connectSandboxAuth  = "https://connect-sandbox.gocardless.com/oauth/authorize"
+	connectSandboxToken = "https://connect-sandbox.gocardless.com/oauth/access_token"
+	connectLiveAuth     = "https://connect.gocardless.com/oauth/authorize"
+	connectLiveToken    = "https://connect.gocardless.com/oauth/access_token"
 )
 
 // writeProviderError writes an error response; if err is a GoCardless API error (GCError),
@@ -60,6 +61,7 @@ func writeProviderError(w http.ResponseWriter, err error) {
 type GoCardlessHandler struct {
 	cfg         *config.Config
 	credRepo    *repository.TenantCredentialRepo
+	eventRepo   *repository.InboundWebhookEventRepo
 	paymentRepo *repository.PaymentRepo
 	memberRepo  *repository.MembershipRepo
 	clientRepo  *repository.ClientRepo
@@ -68,8 +70,17 @@ type GoCardlessHandler struct {
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
-func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, paymentRepo *repository.PaymentRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
-	return &GoCardlessHandler{cfg: cfg, credRepo: cr, paymentRepo: paymentRepo, memberRepo: memberRepo, clientRepo: clientRepo, encryptor: enc, emailSvc: es}
+func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
+	return &GoCardlessHandler{
+		cfg:         cfg,
+		credRepo:    cr,
+		eventRepo:   eventRepo,
+		paymentRepo: paymentRepo,
+		memberRepo:  memberRepo,
+		clientRepo:  clientRepo,
+		encryptor:   enc,
+		emailSvc:    es,
+	}
 }
 
 // RegisterTenantRoutes registers tenant-scoped routes (require auth + tenant).
@@ -80,7 +91,7 @@ func (h *GoCardlessHandler) RegisterTenantRoutes(r chi.Router) {
 
 	// Payments
 	r.Post("/gocardless/payments", h.CreatePayment)
-	r.Get("/gocardless/payments", h.ListPayments)       // list must be before {paymentID}
+	r.Get("/gocardless/payments", h.ListPayments) // list must be before {paymentID}
 	r.Get("/gocardless/payments/{paymentID}", h.GetPaymentHandler)
 	r.Put("/gocardless/payments/{paymentID}", h.UpdatePaymentHandler)
 	r.Post("/gocardless/payments/{paymentID}/retry", h.RetryPayment)
@@ -88,12 +99,12 @@ func (h *GoCardlessHandler) RegisterTenantRoutes(r chi.Router) {
 
 	// Refunds
 	r.Post("/gocardless/refunds", h.CreateRefund)
-	r.Get("/gocardless/refunds", h.ListRefundsHandler)   // list before {refundID}
+	r.Get("/gocardless/refunds", h.ListRefundsHandler) // list before {refundID}
 	r.Get("/gocardless/refunds/{refundID}", h.GetRefund)
 	r.Put("/gocardless/refunds/{refundID}", h.UpdateRefundHandler)
 
 	// Mandates
-	r.Get("/gocardless/mandates", h.ListMandates)        // list before {mandateID}
+	r.Get("/gocardless/mandates", h.ListMandates) // list before {mandateID}
 	r.Get("/gocardless/mandates/{mandateID}", h.GetMandate)
 	r.Put("/gocardless/mandates/{mandateID}", h.UpdateMandateHandler)
 	r.Post("/gocardless/mandates/{mandateID}/reinstate", h.ReinstateMandate)
@@ -101,7 +112,7 @@ func (h *GoCardlessHandler) RegisterTenantRoutes(r chi.Router) {
 	r.Post("/gocardless/mandates/{mandateID}/pdf", h.CreateMandatePDFHandler)
 
 	// Customers
-	r.Get("/gocardless/customers", h.ListCustomers)       // list before {customerID}
+	r.Get("/gocardless/customers", h.ListCustomers) // list before {customerID}
 	r.Get("/gocardless/customers/{customerID}", h.GetCustomerHandler)
 	r.Put("/gocardless/customers/{customerID}", h.UpdateCustomerHandler)
 	r.Delete("/gocardless/customers/{customerID}", h.RemoveCustomerHandler)
@@ -267,10 +278,10 @@ func (h *GoCardlessHandler) OAuthCallback(w http.ResponseWriter, r *http.Request
 
 	redirectURI := strings.TrimSuffix(h.cfg.AppURL, "/") + "/api/gocardless/oauth/callback"
 	body := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"redirect_uri": {redirectURI},
-		"client_id":    {clientID},
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 	}.Encode()
 
@@ -298,8 +309,8 @@ func (h *GoCardlessHandler) OAuthCallback(w http.ResponseWriter, r *http.Request
 	}
 
 	var tokenResp struct {
-		AccessToken     string `json:"access_token"`
-		OrganisationID  string `json:"organisation_id"`
+		AccessToken    string `json:"access_token"`
+		OrganisationID string `json:"organisation_id"`
 	}
 	if err := json.Unmarshal(raw, &tokenResp); err != nil {
 		log.Printf("GoCardless token parse error: %v", err)
@@ -332,14 +343,17 @@ func redirectToIntegrations(appURL string, q string) string {
 // Webhook handles incoming GoCardless webhooks.
 // Uses per-tenant webhook secret when set (resolve tenant from first event's organisation); otherwise falls back to global GoCardlessWebhookSecret.
 func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
+	observability.PaymentLifecycleMetrics.IncWebhookReceived()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusBadRequest, "Invalid body")
 		return
 	}
 
 	signature := r.Header.Get("Webhook-Signature")
 	if signature == "" {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusUnauthorized, "Missing signature")
 		return
 	}
@@ -353,11 +367,13 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"events"`
 	}
 	if err := json.Unmarshal(body, &parseOrg); err != nil || len(parseOrg.Events) == 0 {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusBadRequest, "Invalid webhook payload")
 		return
 	}
 	orgID := parseOrg.Events[0].Links.Organisation
 	if orgID == "" {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusBadRequest, "Missing organisation in webhook")
 		return
 	}
@@ -369,6 +385,7 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if webhookSecret == "" {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusServiceUnavailable, "Webhooks not configured")
 		return
 	}
@@ -377,6 +394,7 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(signature), []byte(expected)) {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -402,10 +420,12 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.Unmarshal(body, &payload); err != nil {
 		log.Printf("GoCardless webhook parse error: %v", err)
-		w.WriteHeader(http.StatusOK)
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
+		writeError(w, http.StatusBadRequest, "Invalid webhook payload")
 		return
 	}
 
+	processingFailed := false
 	for _, ev := range payload.Events {
 		orgID := ev.Links.Organisation
 		if orgID == "" {
@@ -414,17 +434,40 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 		tenantID, err := h.credRepo.GetTenantIDByOrganisation(r.Context(), gocardlessProvider, orgID)
 		if err != nil {
-			log.Printf("GoCardless webhook unknown org %s: %v", orgID, err)
+			log.Printf("gocardless.webhook tenant_lookup_failed org=%s event=%s err=%v", orgID, ev.ID, err)
+			processingFailed = true
 			continue
 		}
 
+		if ev.ID != "" && h.eventRepo != nil {
+			inserted, err := h.eventRepo.RecordReceived(
+				r.Context(),
+				tenantID,
+				gocardlessProvider,
+				ev.ID,
+				ev.ResourceType,
+				webhookResourceIDFromLinks(ev.ResourceType, ev.Links.Payment, ev.Links.Mandate, ev.Links.Subscription, ev.Links.Refund, ev.ID),
+			)
+			if err != nil {
+				log.Printf("gocardless.webhook dedupe_store_failed tenant=%s event=%s err=%v", tenantID, ev.ID, err)
+				processingFailed = true
+				continue
+			}
+			if !inserted {
+				observability.PaymentLifecycleMetrics.IncWebhookDuplicate()
+				log.Printf("gocardless.webhook duplicate_event tenant=%s event=%s resource=%s", tenantID, ev.ID, ev.ResourceType)
+				continue
+			}
+		}
+
+		var processErr error
 		switch ev.ResourceType {
 		case "organisations":
 			if ev.Action == "disconnected" {
 				_ = h.credRepo.UpsertWithOrganisation(r.Context(), tenantID, gocardlessProvider, "", "", orgID, "", false)
 			}
 		case "payments":
-			h.handlePaymentEvent(r.Context(), tenantID, ev.Links.Payment, ev.Action, ev.Details.Reason, ev.Details.Cause)
+			processErr = h.handlePaymentEvent(r.Context(), tenantID, ev.Links.Payment, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		case "mandates":
 			h.handleMandateEvent(r.Context(), tenantID, ev.Links.Mandate, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		case "subscriptions":
@@ -433,10 +476,29 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 			h.handleRefundEvent(r.Context(), tenantID, ev.Links.Refund, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		default:
 			// other resource types (e.g. creditor, payout, instalment_schedule, block) — log only
-			log.Printf("GoCardless webhook %s.%s (org %s): id=%s", ev.ResourceType, ev.Action, orgID, ev.ID)
+			log.Printf("gocardless.webhook ignored_resource tenant=%s org=%s resource=%s action=%s event=%s", tenantID, orgID, ev.ResourceType, ev.Action, ev.ID)
+		}
+
+		if processErr != nil {
+			observability.PaymentLifecycleMetrics.IncWebhookFailed()
+			log.Printf("gocardless.webhook process_failed tenant=%s resource=%s action=%s event=%s err=%v", tenantID, ev.ResourceType, ev.Action, ev.ID, processErr)
+			processingFailed = true
+			continue
+		}
+		observability.PaymentLifecycleMetrics.IncWebhookProcessed()
+		if ev.ID != "" && h.eventRepo != nil {
+			if err := h.eventRepo.MarkProcessed(r.Context(), tenantID, gocardlessProvider, ev.ID); err != nil {
+				log.Printf("gocardless.webhook mark_processed_failed tenant=%s event=%s err=%v", tenantID, ev.ID, err)
+				processingFailed = true
+			}
 		}
 	}
 
+	if processingFailed {
+		observability.PaymentLifecycleMetrics.IncWebhookFailed()
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -490,37 +552,35 @@ func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid
 // handlePaymentEvent updates the payments table from a GoCardless payment webhook event.
 // If the payment doesn't exist in our system (created externally), it creates a record.
 // Sends email notifications for payment success/failure.
-func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uuid.UUID, gcPaymentID, action, reason, cause string) {
+func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uuid.UUID, gcPaymentID, action, reason, cause string) error {
 	if gcPaymentID == "" || h.paymentRepo == nil {
-		return
+		return nil
 	}
 	p, err := h.paymentRepo.GetByProviderReference(ctx, tenantID, gcPaymentID)
 	if err != nil {
-		log.Printf("GoCardless webhook get payment by reference %s: %v", gcPaymentID, err)
-		return
+		return err
 	}
 
-	// If payment not in our system, try to create a record from GoCardless data
 	if p == nil {
-		log.Printf("GoCardless webhook: payment %s not found locally, skipping (external payment)", gcPaymentID)
-		return
+		p, err = h.reconcileExternalPayment(ctx, tenantID, gcPaymentID)
+		if err != nil {
+			return err
+		}
+		if p == nil {
+			return errors.New("payment not linked to a membership")
+		}
 	}
 
 	var status string
 	var paidDate *time.Time
 	var failureReason, failureCode *string
 	switch action {
-	case "confirmed":
-		status = "confirmed"
-		now := time.Now().UTC()
-		paidDate = &now
 	case "paid_out":
 		status = "succeeded"
 		now := time.Now().UTC()
 		paidDate = &now
-	case "submitted":
-		status = "submitted"
-	case "pending_submission":
+	case "confirmed", "submitted", "pending_submission":
+		// payments table currently persists processing states as pending until settled.
 		status = "pending"
 	case "failed", "charged_back", "late_failure_settled", "chargeback_settled":
 		status = "failed"
@@ -533,19 +593,74 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 	case "cancelled":
 		status = "cancelled"
 	case "customer_approval_granted", "customer_approval_denied":
-		log.Printf("GoCardless payment.%s: payment=%s", action, gcPaymentID)
-		return
+		log.Printf("gocardless.webhook payment_approval action=%s payment=%s", action, gcPaymentID)
+		return nil
 	default:
-		log.Printf("GoCardless payment.%s: payment=%s (unhandled)", action, gcPaymentID)
-		return
+		log.Printf("gocardless.webhook payment_unhandled action=%s payment=%s", action, gcPaymentID)
+		return nil
 	}
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
-		log.Printf("GoCardless webhook update payment %s: %v", p.ID, err)
+		return err
 	}
 
-	// Send email notifications
 	h.sendPaymentEmail(ctx, tenantID, p.ClientID, p.Amount, status, reason)
+	log.Printf("gocardless.webhook payment_updated tenant=%s payment=%s provider_ref=%s status=%s", tenantID, p.ID, gcPaymentID, status)
+	return nil
+}
+
+func webhookResourceIDFromLinks(resourceType, paymentID, mandateID, subscriptionID, refundID, fallback string) string {
+	switch resourceType {
+	case "payments":
+		return paymentID
+	case "mandates":
+		return mandateID
+	case "subscriptions":
+		return subscriptionID
+	case "refunds":
+		return refundID
+	default:
+		return fallback
+	}
+}
+
+func (h *GoCardlessHandler) reconcileExternalPayment(ctx context.Context, tenantID uuid.UUID, gcPaymentID string) (*repository.Payment, error) {
+	if h.memberRepo == nil {
+		return nil, nil
+	}
+	prov, err := h.getGoCardlessProvider(ctx, tenantID)
+	if err != nil || prov == nil {
+		return nil, err
+	}
+
+	paymentInfo, err := prov.GetPayment(ctx, gcPaymentID)
+	if err != nil {
+		return nil, err
+	}
+	if paymentInfo.MandateID == "" {
+		return nil, nil
+	}
+
+	membership, err := h.memberRepo.FindByMandateID(ctx, tenantID, paymentInfo.MandateID)
+	if err != nil || membership == nil {
+		return nil, err
+	}
+
+	dueDate := time.Now().UTC()
+	if paymentInfo.ChargeDate != "" {
+		if parsed, parseErr := time.Parse("2006-01-02", paymentInfo.ChargeDate); parseErr == nil {
+			dueDate = parsed
+		}
+	}
+	amount := float64(paymentInfo.Amount) / 100.0
+
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membership.ID, membership.ClientID, amount, dueDate, gcPaymentID)
+	if err != nil {
+		return nil, err
+	}
+	observability.PaymentLifecycleMetrics.IncPaymentReconciled()
+	log.Printf("gocardless.webhook reconciled_external_payment tenant=%s membership=%s provider_ref=%s", tenantID, membership.ID, gcPaymentID)
+	return p, nil
 }
 
 // sendPaymentEmail sends payment success/failure emails to the client.
@@ -593,8 +708,8 @@ func (h *GoCardlessHandler) CreatePayment(w http.ResponseWriter, r *http.Request
 
 	var input struct {
 		MembershipID string  `json:"membership_id"`
-		Amount      float64 `json:"amount"`
-		DueDate     string  `json:"due_date"`
+		Amount       float64 `json:"amount"`
+		DueDate      string  `json:"due_date"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.MembershipID == "" || input.Amount <= 0 || input.DueDate == "" {
 		writeError(w, http.StatusBadRequest, "membership_id, amount and due_date are required")
@@ -700,11 +815,11 @@ func (h *GoCardlessHandler) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"payment_id":          pay.ID.String(),
-		"provider_reference":  gcPaymentID,
-		"status":              pay.Status,
-		"amount":              pay.Amount,
-		"due_date":            pay.DueDate.Format("2006-01-02"),
+		"payment_id":         pay.ID.String(),
+		"provider_reference": gcPaymentID,
+		"status":             pay.Status,
+		"amount":             pay.Amount,
+		"due_date":           pay.DueDate.Format("2006-01-02"),
 	})
 }
 

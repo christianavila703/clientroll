@@ -91,6 +91,23 @@ func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, client
 	return &p, nil
 }
 
+// CreateIfNotExists inserts a payment, or returns the existing payment for provider reference.
+func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, tenantID, membershipID, clientID uuid.UUID, amount float64, dueDate time.Time, providerRef string) (*Payment, bool, error) {
+	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, due_date, provider_reference)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (tenant_id, provider_reference) WHERE provider_reference IS NOT NULL
+		DO UPDATE SET updated_at = NOW()
+		RETURNING ` + paymentFields + `, (xmax = 0) AS inserted`
+
+	var p Payment
+	var inserted bool
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, dueDate, providerRef).Scan(append(r.scanFields(&p), &inserted)...)
+	if err != nil {
+		return nil, false, fmt.Errorf("create or get payment: %w", err)
+	}
+	return &p, inserted, nil
+}
+
 // GetByID returns a payment by ID and tenant.
 func (r *PaymentRepo) GetByID(ctx context.Context, id, tenantID uuid.UUID) (*Payment, error) {
 	query := `SELECT ` + paymentFields + ` FROM payments WHERE id = $1 AND tenant_id = $2`

@@ -15,11 +15,11 @@ import (
 
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
-	userRepo      *repository.UserRepo
-	adminRepo     *repository.PlatformAdminRepo
-	tenantRepo    *repository.TenantRepo
-	jwtManager    *auth.JWTManager
-	sessionMgr    *auth.SessionManager
+	userRepo   *repository.UserRepo
+	adminRepo  *repository.PlatformAdminRepo
+	tenantRepo *repository.TenantRepo
+	jwtManager *auth.JWTManager
+	sessionMgr *auth.SessionManager
 }
 
 // NewAuthHandler creates a new auth handler.
@@ -60,41 +60,48 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find user by email (across all tenants -- email is unique per tenant)
-	user, err := h.userRepo.FindByEmail(r.Context(), input.Email)
+	users, err := h.userRepo.ListActiveByEmail(r.Context(), input.Email)
 	if err != nil {
 		log.Printf("Login error: %v", err)
 		writeError(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
-	if user == nil {
+	if len(users) == 0 {
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
-	// Check if account is locked
-	if user.IsLocked() {
-		writeError(w, http.StatusTooManyRequests, "Account is temporarily locked. Try again later.")
-		return
+	// Resolve the right tenant user by password match among active tenant users.
+	// This avoids false 401s when multiple tenants use the same email address.
+	var matched *models.User
+	lockedCount := 0
+	for i := range users {
+		user := users[i]
+		if user.IsLocked() {
+			lockedCount++
+			continue
+		}
+		tenant, terr := h.tenantRepo.FindByID(r.Context(), user.TenantID)
+		if terr != nil || tenant == nil || !tenant.IsActive {
+			continue
+		}
+		if auth.CheckPassword(input.Password, user.PasswordHash) {
+			matched = &user
+			break
+		}
 	}
-
-	// Verify tenant is active
-	tenant, err := h.tenantRepo.FindByID(r.Context(), user.TenantID)
-	if err != nil || tenant == nil || !tenant.IsActive {
-		writeError(w, http.StatusUnauthorized, "Account is not available")
-		return
-	}
-
-	// Verify password
-	if !auth.CheckPassword(input.Password, user.PasswordHash) {
-		h.userRepo.RecordLoginFailure(r.Context(), user.ID)
+	if matched == nil {
+		if lockedCount == len(users) {
+			writeError(w, http.StatusTooManyRequests, "Account is temporarily locked. Try again later.")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
 	// Generate tokens
 	accessToken, refreshToken, tokenID, err := h.jwtManager.GenerateTokenPair(
-		user.ID, user.TenantID, user.Role,
+		matched.ID, matched.TenantID, matched.Role,
 	)
 	if err != nil {
 		log.Printf("Token generation error: %v", err)
@@ -103,17 +110,17 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store session in Redis
-	if err := h.sessionMgr.CreateSession(r.Context(), user.TenantID, user.ID, user.Role, tokenID); err != nil {
+	if err := h.sessionMgr.CreateSession(r.Context(), matched.TenantID, matched.ID, matched.Role, tokenID); err != nil {
 		log.Printf("Session creation error: %v", err)
 		writeError(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
 
 	// Record successful login
-	h.userRepo.RecordLoginSuccess(r.Context(), user.ID)
+	h.userRepo.RecordLoginSuccess(r.Context(), matched.ID)
 
 	writeJSON(w, http.StatusOK, models.LoginResponse{
-		User: user.ToResponse(),
+		User: matched.ToResponse(),
 		Tokens: models.AuthTokens{
 			AccessToken:  accessToken,
 			RefreshToken: refreshToken,

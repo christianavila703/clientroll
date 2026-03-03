@@ -124,7 +124,7 @@ export const api = {
   logout: () => request("/auth/logout", { method: "POST" }),
 
   // Current user
-  me: () => request("/tenant/me"),
+  me: () => request("/me"),
 
   // Settings
   getAgreementSettings: () => request("/tenant/settings/agreement"),

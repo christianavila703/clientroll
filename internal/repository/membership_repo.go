@@ -165,6 +165,32 @@ func (r *MembershipRepo) FindBySubscriptionID(ctx context.Context, tenantID uuid
 	return &m, nil
 }
 
+// FindByMandateID finds a membership by its GoCardless mandate ID.
+func (r *MembershipRepo) FindByMandateID(ctx context.Context, tenantID uuid.UUID, mandateID string) (*models.Membership, error) {
+	query := `
+		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
+		    start_date, min_term_end_date, payment_method, payment_frequency, payment_amount,
+		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
+		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
+		FROM memberships WHERE tenant_id = $1 AND gocardless_mandate_id = $2`
+
+	var m models.Membership
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, mandateID).Scan(
+		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency,
+		&m.PaymentAmount, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+		&m.MemberSignature, &m.MemberSignedAt,
+		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
 // ListByTenant returns all memberships for a tenant.
 func (r *MembershipRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]models.Membership, error) {
 	query := `

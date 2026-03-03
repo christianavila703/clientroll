@@ -54,11 +54,11 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	var input struct {
-		Name        string   `json:"name"`
-		Description *string  `json:"description"`
-		Price       float64  `json:"price"`
-		TaxRate     float64  `json:"tax_rate"`
-		SortOrder   int      `json:"sort_order"`
+		Name        string  `json:"name"`
+		Description *string `json:"description"`
+		Price       float64 `json:"price"`
+		TaxRate     float64 `json:"tax_rate"`
+		SortOrder   int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.Name == "" {
 		writeError(w, http.StatusBadRequest, "Name is required")
@@ -77,12 +77,12 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	svcID, _ := uuid.Parse(chi.URLParam(r, "serviceID"))
 	var input struct {
-		Name        string   `json:"name"`
-		Description *string  `json:"description"`
-		Price       float64  `json:"price"`
-		TaxRate     float64  `json:"tax_rate"`
-		IsActive    bool     `json:"is_active"`
-		SortOrder   int      `json:"sort_order"`
+		Name        string  `json:"name"`
+		Description *string `json:"description"`
+		Price       float64 `json:"price"`
+		TaxRate     float64 `json:"tax_rate"`
+		IsActive    bool    `json:"is_active"`
+		SortOrder   int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
@@ -142,10 +142,12 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 
 	// --- Try to charge through GoCardless if the client has a mandate ---
 	gcPaymentID := ""
+	var chargedMembershipID *uuid.UUID
 	prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
 	if provErr == nil && prov != nil {
-		mandateID := h.findMandateForClient(r.Context(), tenantID, clientID, input.MembershipID)
+		mandateID, membershipID := h.findMandateForClient(r.Context(), tenantID, clientID, input.MembershipID)
 		if mandateID != "" {
+			chargedMembershipID = membershipID
 			amountMinor := int64(input.Amount * 100)
 			chargeDate := time.Now().AddDate(0, 0, 3) // 3 days from now (minimum for DD)
 			ref := fmt.Sprintf("charge-%s", charge.ID)
@@ -164,6 +166,22 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 			} else {
 				gcPaymentID = gcID
 				log.Printf("GoCardless payment %s created for charge %s (mandate %s)", gcID, charge.ID, mandateID)
+				// Persist payment ledger row for reconciliation/reporting when we know membership context.
+				if chargedMembershipID != nil {
+					if _, _, perr := h.paymentRepo.CreateIfNotExists(
+						r.Context(),
+						tenantID,
+						*chargedMembershipID,
+						clientID,
+						input.Amount,
+						chargeDate,
+						gcID,
+					); perr != nil {
+						log.Printf("service.take_payment ledger_insert_failed tenant=%s charge=%s payment_ref=%s err=%v", tenantID, charge.ID, gcID, perr)
+					}
+				} else {
+					log.Printf("service.take_payment missing_membership_context tenant=%s charge=%s payment_ref=%s", tenantID, charge.ID, gcID)
+				}
 			}
 		}
 	}
@@ -176,29 +194,30 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 }
 
 // findMandateForClient looks for a GoCardless mandate on the client's active memberships.
-func (h *ServiceHandler) findMandateForClient(ctx context.Context, tenantID, clientID uuid.UUID, membershipIDStr *string) string {
+func (h *ServiceHandler) findMandateForClient(ctx context.Context, tenantID, clientID uuid.UUID, membershipIDStr *string) (string, *uuid.UUID) {
 	if h.memberRepo == nil {
-		return ""
+		return "", nil
 	}
 	// If a specific membership was provided, use that
 	if membershipIDStr != nil && *membershipIDStr != "" {
 		mid, _ := uuid.Parse(*membershipIDStr)
 		m, err := h.memberRepo.FindByID(ctx, mid, tenantID)
 		if err == nil && m != nil && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
-			return *m.GoCardlessMandateID
+			return *m.GoCardlessMandateID, &m.ID
 		}
 	}
 	// Otherwise find the client's first active membership with a mandate
 	memberships, err := h.clientRepo.GetMemberships(ctx, clientID, tenantID)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	for _, m := range memberships {
 		if m.Status == "active" && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
-			return *m.GoCardlessMandateID
+			id := m.ID
+			return *m.GoCardlessMandateID, &id
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
@@ -309,9 +328,11 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 
 	// 3. Store mandate on client's active membership (if any) + create subscription
 	memberships, _ := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
+	var membershipID uuid.UUID
 	for _, m := range memberships {
 		if m.Status == "active" && (m.GoCardlessMandateID == nil || *m.GoCardlessMandateID == "") {
 			_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, mandateID)
+			membershipID = m.ID
 			// Create subscription for recurring payments (pass num_payments from term option if set)
 			if m.PaymentFrequency != nil && *m.PaymentFrequency != "upfront" && m.PaymentAmount != nil {
 				var numPay *int
@@ -358,19 +379,34 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 		log.Printf("GoCardless CreatePayment: %v", err)
 		// Mandate was created but payment failed — still return success with warning
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"charge":                 charge,
-			"gocardless_mandate_id":  mandateID,
-			"gocardless_payment_id":  nil,
-			"warning":                "Mandate created but payment submission failed: " + err.Error(),
+			"charge":                charge,
+			"gocardless_mandate_id": mandateID,
+			"gocardless_payment_id": nil,
+			"warning":               "Mandate created but payment submission failed: " + err.Error(),
 		})
 		return
 	}
 
 	log.Printf("GoCardless mandate %s + payment %s created for client %s", mandateID, gcPaymentID, clientID)
+	if membershipID != uuid.Nil {
+		if _, _, perr := h.paymentRepo.CreateIfNotExists(
+			r.Context(),
+			tenantID,
+			membershipID,
+			clientID,
+			input.Amount,
+			chargeDate,
+			gcPaymentID,
+		); perr != nil {
+			log.Printf("service.charge_with_bank_details ledger_insert_failed tenant=%s client=%s payment_ref=%s err=%v", tenantID, clientID, gcPaymentID, perr)
+		}
+	} else {
+		log.Printf("service.charge_with_bank_details missing_membership_context tenant=%s client=%s payment_ref=%s", tenantID, clientID, gcPaymentID)
+	}
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"charge":                 charge,
-		"gocardless_mandate_id":  mandateID,
-		"gocardless_payment_id":  gcPaymentID,
+		"charge":                charge,
+		"gocardless_mandate_id": mandateID,
+		"gocardless_payment_id": gcPaymentID,
 	})
 }
 

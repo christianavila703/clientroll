@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -45,13 +46,13 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
 
 	var input struct {
-		ClientID          string  `json:"client_id"`
-		MembershipTypeID  string  `json:"membership_type_id"`
-		TermOptionID      string  `json:"term_option_id"`
-		StartDate         string  `json:"start_date"`
-		PaymentMethod     string  `json:"payment_method"`
-		PaymentFrequency  string  `json:"payment_frequency"`
-		PaymentAmount     float64 `json:"payment_amount"`
+		ClientID         string  `json:"client_id"`
+		MembershipTypeID string  `json:"membership_type_id"`
+		TermOptionID     string  `json:"term_option_id"`
+		StartDate        string  `json:"start_date"`
+		PaymentMethod    string  `json:"payment_method"`
+		PaymentFrequency string  `json:"payment_frequency"`
+		PaymentAmount    float64 `json:"payment_amount"`
 		// Bank details for GoCardless mandate setup
 		AccountHolderName string `json:"account_holder_name,omitempty"`
 		AccountNumber     string `json:"account_number,omitempty"`
@@ -156,23 +157,36 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		return
 	}
 
+	prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
+	if provErr != nil {
+		log.Printf("membership.cancel provider_error tenant=%s membership=%s err=%v", tenantID, membershipID, provErr)
+		writeError(w, http.StatusBadGateway, "Failed to initialise payment provider for cancellation")
+		return
+	}
+
 	// Cancel GoCardless subscription if exists
 	if m.GoCardlessSubscriptionID != nil && *m.GoCardlessSubscriptionID != "" {
-		prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
-		if provErr == nil && prov != nil {
-			if err := prov.CancelSubscription(r.Context(), *m.GoCardlessSubscriptionID); err != nil {
-				log.Printf("GoCardless CancelSubscription %s: %v", *m.GoCardlessSubscriptionID, err)
-			}
+		if prov == nil {
+			writeError(w, http.StatusBadGateway, "GoCardless is not configured for this tenant")
+			return
+		}
+		if err := prov.CancelSubscription(r.Context(), *m.GoCardlessSubscriptionID); err != nil {
+			log.Printf("membership.cancel subscription_cancel_failed tenant=%s membership=%s subscription=%s err=%v", tenantID, membershipID, *m.GoCardlessSubscriptionID, err)
+			writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless subscription")
+			return
 		}
 	}
 
 	// Cancel GoCardless mandate if exists
 	if m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
-		prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
-		if provErr == nil && prov != nil {
-			if err := prov.CancelMandate(r.Context(), *m.GoCardlessMandateID); err != nil {
-				log.Printf("GoCardless CancelMandate %s: %v", *m.GoCardlessMandateID, err)
-			}
+		if prov == nil {
+			writeError(w, http.StatusBadGateway, "GoCardless is not configured for this tenant")
+			return
+		}
+		if err := prov.CancelMandate(r.Context(), *m.GoCardlessMandateID); err != nil {
+			log.Printf("membership.cancel mandate_cancel_failed tenant=%s membership=%s mandate=%s err=%v", tenantID, membershipID, *m.GoCardlessMandateID, err)
+			writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless mandate")
+			return
 		}
 	}
 
@@ -183,6 +197,7 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		return
 	}
 
+	log.Printf("membership.cancel success tenant=%s membership=%s", tenantID, membershipID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
@@ -197,7 +212,7 @@ func (h *ActiveMembershipsHandler) getGoCardlessProvider(ctx context.Context, te
 	}
 	apiKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt gocardless key: %w", err)
 	}
 	env := creds.Environment
 	if env == "" {

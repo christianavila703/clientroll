@@ -24,14 +24,14 @@ type MembershipBreakdown struct {
 }
 
 type DashboardSummary struct {
-	ActiveMembers    int     `json:"active_members"`
-	MonthRevenue     float64 `json:"month_revenue"`
-	FailedPayments   int     `json:"failed_payments"`
-	NewSignups       int     `json:"new_signups"`
-	OpenDisputes     int     `json:"open_disputes"`
-	ActiveMandates   int     `json:"active_mandates"`
-	ActiveSubscriptions int  `json:"active_subscriptions"`
-	PendingPayments  int     `json:"pending_payments"`
+	ActiveMembers       int     `json:"active_members"`
+	MonthRevenue        float64 `json:"month_revenue"`
+	FailedPayments      int     `json:"failed_payments"`
+	NewSignups          int     `json:"new_signups"`
+	OpenDisputes        int     `json:"open_disputes"`
+	ActiveMandates      int     `json:"active_mandates"`
+	ActiveSubscriptions int     `json:"active_subscriptions"`
+	PendingPayments     int     `json:"pending_payments"`
 }
 
 // ReportsRepo handles aggregated reporting queries.
@@ -152,31 +152,31 @@ func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.
 // ComprehensiveReport holds all report data.
 type ComprehensiveReport struct {
 	// KPIs
-	ActiveMembers     int     `json:"active_members"`
-	TotalClients      int     `json:"total_clients"`
-	MonthRevenue      float64 `json:"month_revenue"`
-	PrevMonthRevenue  float64 `json:"prev_month_revenue"`
-	TotalRevenue      float64 `json:"total_revenue"`
-	MRR               float64 `json:"mrr"`
-	ARR               float64 `json:"arr"`
+	ActiveMembers       int     `json:"active_members"`
+	TotalClients        int     `json:"total_clients"`
+	MonthRevenue        float64 `json:"month_revenue"`
+	PrevMonthRevenue    float64 `json:"prev_month_revenue"`
+	TotalRevenue        float64 `json:"total_revenue"`
+	MRR                 float64 `json:"mrr"`
+	ARR                 float64 `json:"arr"`
 	AvgRevenuePerMember float64 `json:"avg_revenue_per_member"`
-	FailedPayments    int     `json:"failed_payments"`
-	NewSignupsMonth   int     `json:"new_signups_month"`
-	ChurnedMonth      int     `json:"churned_month"`
-	CollectionRate    float64 `json:"collection_rate"`
-	AvgMembershipDays int     `json:"avg_membership_days"`
+	FailedPayments      int     `json:"failed_payments"`
+	NewSignupsMonth     int     `json:"new_signups_month"`
+	ChurnedMonth        int     `json:"churned_month"`
+	CollectionRate      float64 `json:"collection_rate"`
+	AvgMembershipDays   int     `json:"avg_membership_days"`
 
 	// Time series
-	MonthlyRevenue    []MonthlyRevenue        `json:"monthly_revenue"`
-	MonthlySignups    []MonthlyCount          `json:"monthly_signups"`
-	MonthlyChurn      []MonthlyCount          `json:"monthly_churn"`
+	MonthlyRevenue []MonthlyRevenue `json:"monthly_revenue"`
+	MonthlySignups []MonthlyCount   `json:"monthly_signups"`
+	MonthlyChurn   []MonthlyCount   `json:"monthly_churn"`
 
 	// Breakdowns
 	MembershipBreakdown []MembershipBreakdown `json:"membership_breakdown"`
 	PaymentStatuses     map[string]int        `json:"payment_statuses"`
 	FrequencyBreakdown  []FrequencyBreakdown  `json:"frequency_breakdown"`
 	TopClients          []TopClient           `json:"top_clients"`
-	UpcomingExpirations []UpcomingExpiry       `json:"upcoming_expirations"`
+	UpcomingExpirations []UpcomingExpiry      `json:"upcoming_expirations"`
 	RecentFailures      []RecentFailure       `json:"recent_failures"`
 }
 
@@ -186,16 +186,16 @@ type MonthlyCount struct {
 }
 
 type FrequencyBreakdown struct {
-	Frequency string `json:"frequency"`
-	Count     int    `json:"count"`
+	Frequency string  `json:"frequency"`
+	Count     int     `json:"count"`
 	Revenue   float64 `json:"revenue"`
 }
 
 type TopClient struct {
-	ClientID   string  `json:"client_id"`
-	ClientName string  `json:"client_name"`
-	TotalPaid  float64 `json:"total_paid"`
-	Memberships int    `json:"memberships"`
+	ClientID    string  `json:"client_id"`
+	ClientName  string  `json:"client_name"`
+	TotalPaid   float64 `json:"total_paid"`
+	Memberships int     `json:"memberships"`
 }
 
 type UpcomingExpiry struct {
@@ -206,10 +206,28 @@ type UpcomingExpiry struct {
 }
 
 type RecentFailure struct {
-	ClientName     string  `json:"client_name"`
-	Amount         float64 `json:"amount"`
-	FailureReason  string  `json:"failure_reason"`
-	DueDate        string  `json:"due_date"`
+	ClientName    string  `json:"client_name"`
+	Amount        float64 `json:"amount"`
+	FailureReason string  `json:"failure_reason"`
+	DueDate       string  `json:"due_date"`
+}
+
+// PaymentConsistencyReport highlights ledger mismatches between service charges and provider payments.
+type PaymentConsistencyReport struct {
+	ServiceChargesLast24h                   int `json:"service_charges_last_24h"`
+	ServiceChargesWithProviderPayment24h    int `json:"service_charges_with_provider_payment_last_24h"`
+	ServiceChargesMissingProviderPayment24h int `json:"service_charges_missing_provider_payment_last_24h"`
+	ProviderPaymentsMissingServiceCharge24h int `json:"provider_payments_missing_service_charge_last_24h"`
+}
+
+// AlertStatus describes threshold-based operational alerts for payment/webhook flows.
+type AlertStatus struct {
+	RetryQueueDepth            int      `json:"retry_queue_depth"`
+	FailedWebhookDeliveries15m int      `json:"failed_webhook_deliveries_15m"`
+	StuckRetries               int      `json:"stuck_retries"`
+	PaymentFailureRate24h      float64  `json:"payment_failure_rate_24h"`
+	OpenFailedPayments         int      `json:"open_failed_payments"`
+	Issues                     []string `json:"issues"`
 }
 
 // GetComprehensiveReport returns all report data in one call.
@@ -263,7 +281,9 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	var totalDue, totalCollected float64
 	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1", tenantID).Scan(&totalDue)
 	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='succeeded'", tenantID).Scan(&totalCollected)
-	if totalDue > 0 { rpt.CollectionRate = (totalCollected / totalDue) * 100 }
+	if totalDue > 0 {
+		rpt.CollectionRate = (totalCollected / totalDue) * 100
+	}
 
 	// Avg membership duration
 	r.db.Pool.QueryRow(ctx, `SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (min_term_end_date - start_date)) / 86400), 0)::int FROM memberships WHERE tenant_id=$1`, tenantID).Scan(&rpt.AvgMembershipDays)
@@ -363,4 +383,139 @@ func (r *ReportsRepo) GetPaymentStatusBreakdown(ctx context.Context, tenantID uu
 		counts[status] = count
 	}
 	return counts, rows.Err()
+}
+
+// GetPaymentConsistencyReport returns consistency metrics for service charges vs provider payments.
+func (r *ReportsRepo) GetPaymentConsistencyReport(ctx context.Context, tenantID uuid.UUID) (*PaymentConsistencyReport, error) {
+	out := &PaymentConsistencyReport{}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM service_charges
+		WHERE tenant_id = $1
+		  AND created_at >= NOW() - INTERVAL '24 hours'
+	`, tenantID).Scan(&out.ServiceChargesLast24h); err != nil {
+		return nil, fmt.Errorf("count service charges: %w", err)
+	}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM service_charges sc
+		WHERE sc.tenant_id = $1
+		  AND sc.created_at >= NOW() - INTERVAL '24 hours'
+		  AND EXISTS (
+		    SELECT 1 FROM payments p
+		    WHERE p.tenant_id = sc.tenant_id
+		      AND p.provider_reference = ('charge-' || sc.id::text)
+		  )
+	`, tenantID).Scan(&out.ServiceChargesWithProviderPayment24h); err != nil {
+		return nil, fmt.Errorf("count matched service charges: %w", err)
+	}
+
+	out.ServiceChargesMissingProviderPayment24h = out.ServiceChargesLast24h - out.ServiceChargesWithProviderPayment24h
+	if out.ServiceChargesMissingProviderPayment24h < 0 {
+		out.ServiceChargesMissingProviderPayment24h = 0
+	}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM payments p
+		WHERE p.tenant_id = $1
+		  AND p.created_at >= NOW() - INTERVAL '24 hours'
+		  AND p.provider_reference LIKE 'charge-%'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM service_charges sc
+		    WHERE sc.tenant_id = p.tenant_id
+		      AND p.provider_reference = ('charge-' || sc.id::text)
+		  )
+	`, tenantID).Scan(&out.ProviderPaymentsMissingServiceCharge24h); err != nil {
+		return nil, fmt.Errorf("count orphan provider payments: %w", err)
+	}
+
+	return out, nil
+}
+
+// GetOperationalAlertStatus returns threshold-based alerts for key payment/webhook risks.
+func (r *ReportsRepo) GetOperationalAlertStatus(ctx context.Context, tenantID uuid.UUID) (*AlertStatus, error) {
+	out := &AlertStatus{Issues: []string{}}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_deliveries
+		WHERE tenant_id = $1 AND status = 'retrying'
+	`, tenantID).Scan(&out.RetryQueueDepth); err != nil {
+		return nil, fmt.Errorf("count retrying deliveries: %w", err)
+	}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_deliveries
+		WHERE tenant_id = $1
+		  AND status = 'failed'
+		  AND created_at >= NOW() - INTERVAL '15 minutes'
+	`, tenantID).Scan(&out.FailedWebhookDeliveries15m); err != nil {
+		return nil, fmt.Errorf("count failed deliveries: %w", err)
+	}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_deliveries
+		WHERE tenant_id = $1
+		  AND status = 'retrying'
+		  AND next_retry_at IS NOT NULL
+		  AND next_retry_at < NOW() - INTERVAL '10 minutes'
+	`, tenantID).Scan(&out.StuckRetries); err != nil {
+		return nil, fmt.Errorf("count stuck retries: %w", err)
+	}
+
+	var totalPayments24h int
+	var failedPayments24h int
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM payments
+		WHERE tenant_id = $1
+		  AND created_at >= NOW() - INTERVAL '24 hours'
+	`, tenantID).Scan(&totalPayments24h); err != nil {
+		return nil, fmt.Errorf("count payments 24h: %w", err)
+	}
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM payments
+		WHERE tenant_id = $1
+		  AND status = 'failed'
+		  AND created_at >= NOW() - INTERVAL '24 hours'
+	`, tenantID).Scan(&failedPayments24h); err != nil {
+		return nil, fmt.Errorf("count failed payments 24h: %w", err)
+	}
+	if totalPayments24h > 0 {
+		out.PaymentFailureRate24h = float64(failedPayments24h) / float64(totalPayments24h) * 100
+	}
+
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM payments
+		WHERE tenant_id = $1
+		  AND status = 'failed'
+	`, tenantID).Scan(&out.OpenFailedPayments); err != nil {
+		return nil, fmt.Errorf("count open failed payments: %w", err)
+	}
+
+	// Baseline thresholds; can be moved to env config later.
+	if out.RetryQueueDepth >= 25 {
+		out.Issues = append(out.Issues, "retry_queue_depth_high")
+	}
+	if out.FailedWebhookDeliveries15m >= 5 {
+		out.Issues = append(out.Issues, "failed_webhook_deliveries_spike")
+	}
+	if out.StuckRetries > 0 {
+		out.Issues = append(out.Issues, "stuck_webhook_retries")
+	}
+	if out.PaymentFailureRate24h >= 15 {
+		out.Issues = append(out.Issues, "payment_failure_rate_high")
+	}
+	if out.OpenFailedPayments >= 20 {
+		out.Issues = append(out.Issues, "open_failed_payments_high")
+	}
+
+	return out, nil
 }

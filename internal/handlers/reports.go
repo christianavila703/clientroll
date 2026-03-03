@@ -27,6 +27,8 @@ func (h *ReportsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/reports/revenue/monthly", h.MonthlyRevenue)
 	r.Get("/reports/memberships/breakdown", h.MembershipBreakdown)
 	r.Get("/reports/payments/status", h.PaymentStatusBreakdown)
+	r.Get("/reports/payments/consistency", h.PaymentConsistency)
+	r.Get("/reports/alerts/status", h.AlertStatus)
 	r.Get("/reports/comprehensive", h.Comprehensive)
 }
 
@@ -96,4 +98,28 @@ func (h *ReportsHandler) PaymentStatusBreakdown(w http.ResponseWriter, r *http.R
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"statuses": data})
+}
+
+// PaymentConsistency returns service-charge vs provider-payment reconciliation metrics.
+func (h *ReportsHandler) PaymentConsistency(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	data, err := h.reportsRepo.GetPaymentConsistencyReport(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error getting payment consistency report: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to get consistency report")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+// AlertStatus returns threshold-based payment/webhook alert signals.
+func (h *ReportsHandler) AlertStatus(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	data, err := h.reportsRepo.GetOperationalAlertStatus(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error getting alert status report: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to get alert status")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
 }

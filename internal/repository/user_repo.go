@@ -73,6 +73,39 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*models.User,
 	return &u, nil
 }
 
+// ListActiveByEmail returns all active users matching an email across tenants.
+// This is used by login to avoid false 401s when duplicate emails exist across tenants.
+func (r *UserRepo) ListActiveByEmail(ctx context.Context, email string) ([]models.User, error) {
+	query := `
+		SELECT id, tenant_id, email, password_hash, first_name, last_name, role,
+		       is_active, failed_login_attempts, locked_until, last_login_at,
+		       created_at, updated_at
+		FROM users
+		WHERE email = $1 AND is_active = true
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.Pool.Query(ctx, query, email)
+	if err != nil {
+		return nil, fmt.Errorf("listing users by email: %w", err)
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(
+			&u.ID, &u.TenantID, &u.Email, &u.PasswordHash,
+			&u.FirstName, &u.LastName, &u.Role, &u.IsActive,
+			&u.FailedLoginAttempts, &u.LockedUntil, &u.LastLoginAt,
+			&u.CreatedAt, &u.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning users by email: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 // FindByID returns a user by ID within a tenant.
 func (r *UserRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (*models.User, error) {
 	query := `
@@ -175,4 +208,46 @@ func (r *UserRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]mode
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+// UpdateStaffProfile updates editable fields for a tenant staff user.
+func (r *UserRepo) UpdateStaffProfile(ctx context.Context, userID, tenantID uuid.UUID, firstName, lastName, role string) (*models.User, error) {
+	query := `
+		UPDATE users
+		SET first_name = $3, last_name = $4, role = $5, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND role IN ('tenant_admin', 'tenant_staff')
+		RETURNING id, tenant_id, email, password_hash, first_name, last_name, role,
+		       is_active, failed_login_attempts, locked_until, last_login_at,
+		       created_at, updated_at`
+
+	var u models.User
+	err := r.db.Pool.QueryRow(ctx, query, userID, tenantID, firstName, lastName, role).Scan(
+		&u.ID, &u.TenantID, &u.Email, &u.PasswordHash,
+		&u.FirstName, &u.LastName, &u.Role, &u.IsActive,
+		&u.FailedLoginAttempts, &u.LockedUntil, &u.LastLoginAt,
+		&u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("updating staff profile: %w", err)
+	}
+	return &u, nil
+}
+
+// DeactivateStaff disables a tenant staff/admin user account.
+func (r *UserRepo) DeactivateStaff(ctx context.Context, userID, tenantID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET is_active = false, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND role IN ('tenant_admin', 'tenant_staff')`
+	tag, err := r.db.Pool.Exec(ctx, query, userID, tenantID)
+	if err != nil {
+		return fmt.Errorf("deactivating staff: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
