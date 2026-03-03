@@ -19,6 +19,33 @@ interface Report {
   recent_failures: { client_name: string; amount: number; failure_reason: string; due_date: string }[];
 }
 
+function normalizeReport(raw: any): Report {
+  return {
+    active_members: Number(raw?.active_members || 0),
+    total_clients: Number(raw?.total_clients || 0),
+    month_revenue: Number(raw?.month_revenue || 0),
+    prev_month_revenue: Number(raw?.prev_month_revenue || 0),
+    total_revenue: Number(raw?.total_revenue || 0),
+    mrr: Number(raw?.mrr || 0),
+    arr: Number(raw?.arr || 0),
+    avg_revenue_per_member: Number(raw?.avg_revenue_per_member || 0),
+    failed_payments: Number(raw?.failed_payments || 0),
+    new_signups_month: Number(raw?.new_signups_month || 0),
+    churned_month: Number(raw?.churned_month || 0),
+    collection_rate: Number(raw?.collection_rate || 0),
+    avg_membership_days: Number(raw?.avg_membership_days || 0),
+    monthly_revenue: Array.isArray(raw?.monthly_revenue) ? raw.monthly_revenue : [],
+    monthly_signups: Array.isArray(raw?.monthly_signups) ? raw.monthly_signups : [],
+    monthly_churn: Array.isArray(raw?.monthly_churn) ? raw.monthly_churn : [],
+    membership_breakdown: Array.isArray(raw?.membership_breakdown) ? raw.membership_breakdown : [],
+    payment_statuses: raw?.payment_statuses && typeof raw.payment_statuses === "object" ? raw.payment_statuses : {},
+    frequency_breakdown: Array.isArray(raw?.frequency_breakdown) ? raw.frequency_breakdown : [],
+    top_clients: Array.isArray(raw?.top_clients) ? raw.top_clients : [],
+    upcoming_expirations: Array.isArray(raw?.upcoming_expirations) ? raw.upcoming_expirations : [],
+    recent_failures: Array.isArray(raw?.recent_failures) ? raw.recent_failures : [],
+  };
+}
+
 const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6", "#ec4899"];
 const STATUS_COLOURS: Record<string, string> = { succeeded: "#10b981", failed: "#ef4444", pending: "#f59e0b", disputed: "#f97316" };
 
@@ -30,7 +57,10 @@ export default function ReportsPage() {
   useEffect(() => {
     const token = localStorage.getItem("access_token");
     fetch("/api/tenant/reports/comprehensive", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
+      .then(r => r.json())
+      .then((payload) => setData(normalizeReport(payload)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
