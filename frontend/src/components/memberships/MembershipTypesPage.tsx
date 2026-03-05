@@ -157,7 +157,7 @@ export default function MembershipTypesPage() {
           )}
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card">
           <table className="data-table">
             <thead>
               <tr>
@@ -219,7 +219,9 @@ function MtRowMenu({ mt, onArchive, onActivate, onDelete }: {
   mt: MembershipType; onArchive: () => void; onActivate: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -227,13 +229,37 @@ function MtRowMenu({ mt, onArchive, onActivate, onDelete }: {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePlacement = () => {
+      const trigger = ref.current?.getBoundingClientRect();
+      if (!trigger) return;
+      const menuHeight = menuRef.current?.offsetHeight || 180;
+      const spaceBelow = window.innerHeight - trigger.bottom;
+      const spaceAbove = trigger.top;
+      setOpenUp(spaceBelow < menuHeight && spaceAbove > spaceBelow);
+    };
+
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [open]);
+
   return (
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen(!open)} className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100" title="More">
         <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50">
+        <div
+          ref={menuRef}
+          className={`absolute right-0 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-50 ${openUp ? "bottom-full mb-1" : "top-full mt-1"}`}
+        >
           {mt.is_active ? (
             <button onClick={() => { setOpen(false); onArchive(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
               <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>
