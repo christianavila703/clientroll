@@ -151,12 +151,12 @@ export default function DashboardPage() {
     legend: { show: false },
     series: [{
       type: "pie" as const,
-      radius: ["45%", "70%"],
-      center: ["50%", "45%"],
+      radius: ["42%", "62%"],
+      center: ["50%", "36%"],
       avoidLabelOverlap: true,
       itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 },
       label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
+      emphasis: { label: { show: false } },
       data: membershipMix.map((m) => ({ value: m.count, name: m.name, itemStyle: { color: m.colour } })),
     }],
   };
@@ -244,19 +244,21 @@ export default function DashboardPage() {
             <div className="px-4 py-4">
               {membershipMix.length > 0 ? (
                 <>
-                  <ReactECharts option={membershipDonut} style={{ height: 250 }} />
-                  <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                  <ReactECharts option={membershipDonut} style={{ height: 220 }} />
+                  <div className="mt-2 border-t border-gray-100 pt-3">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {membershipMix.map((item) => {
                       const pct = totalMixMembers > 0 ? Math.round((item.count / totalMixMembers) * 100) : 0;
                       return (
-                        <div key={item.name} className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ background: item.colour }} />
-                          <span className="text-[12px] text-gray-600 truncate flex-1" title={item.name}>{item.name}</span>
+                        <div key={item.name} className="flex min-w-0 items-center gap-2 rounded-md border border-gray-100 px-2 py-1.5">
+                          <span className="h-3.5 w-3.5 rounded-md flex-shrink-0" style={{ background: item.colour }} />
+                          <span className="min-w-0 text-[12px] text-gray-600 truncate flex-1" title={item.name}>{item.name}</span>
                           <span className="text-[12px] font-medium text-gray-900 tabular-nums">{item.count}</span>
-                          <span className="text-[11px] text-gray-400 tabular-nums w-10 text-right">{pct}%</span>
+                          <span className="text-[11px] text-gray-400 tabular-nums w-9 text-right">{pct}%</span>
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 </>
               ) : (
