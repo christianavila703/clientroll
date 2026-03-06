@@ -115,6 +115,11 @@ function autoCalcFees(duration: number, total: number) {
   return { weekly: String(weekly), fortnightly: String(fortnightly), monthly: String(monthly), quarterly: quarterly ? String(quarterly) : "" };
 }
 
+function weeksToMonths(weeks: number): number {
+  // DB stores integer months; round up so short weekly plans remain valid.
+  return Math.max(1, Math.ceil(weeks / 4.345));
+}
+
 function toWholeNumber(value: string): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -128,7 +133,8 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
-    duration_months: 6,
+    duration_unit: "month" as "month" | "week",
+    duration_value: 6,
     fee_total: "" as NumericField,
     fee_weekly: "",
     fee_fortnightly: "",
@@ -146,20 +152,82 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const durationMonths = (nextForm = form) =>
+    nextForm.duration_unit === "week"
+      ? weeksToMonths(Number(nextForm.duration_value))
+      : Number(nextForm.duration_value);
+
   // Auto-calc when duration or total changes in add form
-  const updateWithCalc = (key: "duration_months" | "fee_total", value: number | NumericField) => {
+  const updateWithCalc = (key: "duration_value" | "fee_total", value: number | NumericField) => {
     const newForm = { ...form, [key]: value };
-    const dur = key === "duration_months" ? Number(value) : form.duration_months;
+    const dur = durationMonths(newForm);
     const tot = key === "fee_total" ? toNumberOrZero(value as NumericField) : toNumberOrZero(form.fee_total);
     const calc = autoCalcFees(dur, tot);
     setForm({ ...newForm, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
   };
 
+  const applyPreset = (preset: "10w" | "20w" | "2x6m" | "3x1m") => {
+    const total = toNumberOrZero(form.fee_total);
+    if (preset === "10w") {
+      setForm({
+        ...form,
+        duration_unit: "week",
+        duration_value: 10,
+        custom_schedule_enabled: true,
+        custom_schedule_label: "10 weekly payments",
+        custom_schedule_interval_unit: "week",
+        custom_schedule_interval_count: "1",
+        custom_schedule_num_payments: "10",
+        custom_schedule_amount: total > 0 ? String((total / 10).toFixed(2)) : "",
+      });
+      return;
+    }
+    if (preset === "20w") {
+      setForm({
+        ...form,
+        duration_unit: "week",
+        duration_value: 20,
+        custom_schedule_enabled: true,
+        custom_schedule_label: "20 weekly payments",
+        custom_schedule_interval_unit: "week",
+        custom_schedule_interval_count: "1",
+        custom_schedule_num_payments: "20",
+        custom_schedule_amount: total > 0 ? String((total / 20).toFixed(2)) : "",
+      });
+      return;
+    }
+    if (preset === "2x6m") {
+      setForm({
+        ...form,
+        duration_unit: "month",
+        duration_value: 12,
+        custom_schedule_enabled: true,
+        custom_schedule_label: "2 payments, 6 months apart",
+        custom_schedule_interval_unit: "month",
+        custom_schedule_interval_count: "6",
+        custom_schedule_num_payments: "2",
+        custom_schedule_amount: total > 0 ? String((total / 2).toFixed(2)) : "",
+      });
+      return;
+    }
+    setForm({
+      ...form,
+      duration_unit: "month",
+      duration_value: 3,
+      custom_schedule_enabled: true,
+      custom_schedule_label: "3 monthly payments",
+      custom_schedule_interval_unit: "month",
+      custom_schedule_interval_count: "1",
+      custom_schedule_num_payments: "3",
+      custom_schedule_amount: total > 0 ? String((total / 3).toFixed(2)) : "",
+    });
+  };
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!Number.isInteger(form.duration_months) || form.duration_months <= 0) {
-      setError("Duration must be a whole number of months.");
+    if (!Number.isInteger(Number(form.duration_value)) || Number(form.duration_value) <= 0) {
+      setError(`Duration must be a whole number of ${form.duration_unit === "week" ? "weeks" : "months"}.`);
       return;
     }
     if (form.num_payments !== "" && (!Number.isInteger(Number(form.num_payments)) || Number(form.num_payments) <= 0)) {
@@ -183,7 +251,8 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
     setSaving(true);
     try {
       await api.createTermOption(mt.id, {
-        ...form,
+        duration_months: durationMonths(),
+        allow_upfront: form.allow_upfront,
         fee_total: toNumberOrZero(form.fee_total),
         fee_weekly: form.fee_weekly ? Number(form.fee_weekly) : null,
         fee_fortnightly: form.fee_fortnightly ? Number(form.fee_fortnightly) : null,
@@ -218,9 +287,23 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
           {error && <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Duration (months) *</label>
-              <input type="number" value={form.duration_months} onChange={(e) => updateWithCalc("duration_months", toWholeNumber(e.target.value))} className="input-field" min="1" step="1" required />
-              <p className="text-[10px] text-gray-400 mt-0.5">Whole months only (e.g. 3, 6, 12).</p>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Term duration *</label>
+              <div className="flex gap-2">
+                <input type="number" value={form.duration_value} onChange={(e) => updateWithCalc("duration_value", toWholeNumber(e.target.value))} className="input-field" min="1" step="1" required />
+                <select
+                  value={form.duration_unit}
+                  onChange={(e) => {
+                    const next = { ...form, duration_unit: e.target.value as "month" | "week" };
+                    const calc = autoCalcFees(durationMonths(next), toNumberOrZero(form.fee_total));
+                    setForm({ ...next, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
+                  }}
+                  className="input-field max-w-[130px]"
+                >
+                  <option value="month">Months</option>
+                  <option value="week">Weeks</option>
+                </select>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">Stored as {durationMonths()} month{durationMonths() === 1 ? "" : "s"} for term-end rules.</p>
             </div>
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ($) *</label>
@@ -235,6 +318,15 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>
             </div>
             <div className="sm:col-span-2">
+              <div className="mb-2">
+                <p className="text-[12px] font-medium text-gray-700 mb-1">Quick flexible presets</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => applyPreset("10w")} className="btn-secondary text-[11px] px-2 py-1">10 weekly payments</button>
+                  <button type="button" onClick={() => applyPreset("20w")} className="btn-secondary text-[11px] px-2 py-1">20 weekly payments</button>
+                  <button type="button" onClick={() => applyPreset("2x6m")} className="btn-secondary text-[11px] px-2 py-1">2 payments, 6 months apart</button>
+                  <button type="button" onClick={() => applyPreset("3x1m")} className="btn-secondary text-[11px] px-2 py-1">3 monthly payments</button>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-[13px] text-gray-700 mb-2">
                 <input type="checkbox" checked={form.custom_schedule_enabled} onChange={(e) => setForm({ ...form, custom_schedule_enabled: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
                 Enable custom instalment plan
@@ -298,7 +390,8 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
-    duration_months: to.duration_months,
+    duration_unit: "month" as "month" | "week",
+    duration_value: to.duration_months,
     fee_total: to.fee_total as NumericField,
     fee_weekly: to.fee_weekly ?? "",
     fee_fortnightly: to.fee_fortnightly ?? "",
@@ -316,9 +409,14 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const updateEditCalc = (key: "duration_months" | "fee_total", value: number | NumericField) => {
+  const editDurationMonths = (nextForm = form) =>
+    nextForm.duration_unit === "week"
+      ? weeksToMonths(Number(nextForm.duration_value))
+      : Number(nextForm.duration_value);
+
+  const updateEditCalc = (key: "duration_value" | "fee_total", value: number | NumericField) => {
     const newForm = { ...form, [key]: value };
-    const dur = key === "duration_months" ? Number(value) : form.duration_months;
+    const dur = editDurationMonths(newForm);
     const tot = key === "fee_total" ? toNumberOrZero(value as NumericField) : toNumberOrZero(form.fee_total);
     const calc = autoCalcFees(dur, tot);
     setForm({ ...newForm, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
@@ -326,8 +424,8 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
 
   const handleSave = async () => {
     setError("");
-    if (!Number.isInteger(form.duration_months) || form.duration_months <= 0) {
-      setError("Duration must be a whole number of months.");
+    if (!Number.isInteger(Number(form.duration_value)) || Number(form.duration_value) <= 0) {
+      setError(`Duration must be a whole number of ${form.duration_unit === "week" ? "weeks" : "months"}.`);
       return;
     }
     if (form.num_payments !== "" && (!Number.isInteger(Number(form.num_payments)) || Number(form.num_payments) <= 0)) {
@@ -351,7 +449,8 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
     setSaving(true);
     try {
       await api.updateTermOption(mtId, to.id, {
-        ...form,
+        duration_months: editDurationMonths(),
+        allow_upfront: form.allow_upfront,
         fee_total: toNumberOrZero(form.fee_total),
         fee_weekly: form.fee_weekly !== "" ? Number(form.fee_weekly) : null,
         fee_fortnightly: form.fee_fortnightly !== "" ? Number(form.fee_fortnightly) : null,
@@ -415,9 +514,23 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
         {error && <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600 mb-3">{error}</div>}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Duration (months)</label>
-            <input type="number" value={form.duration_months} onChange={(e) => updateEditCalc("duration_months", toWholeNumber(e.target.value))} className="input-field" min="1" step="1" />
-            <p className="text-[10px] text-gray-400 mt-0.5">Whole months only.</p>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Term duration</label>
+            <div className="flex gap-2">
+              <input type="number" value={form.duration_value} onChange={(e) => updateEditCalc("duration_value", toWholeNumber(e.target.value))} className="input-field" min="1" step="1" />
+              <select
+                value={form.duration_unit}
+                onChange={(e) => {
+                  const next = { ...form, duration_unit: e.target.value as "month" | "week" };
+                  const calc = autoCalcFees(editDurationMonths(next), toNumberOrZero(form.fee_total));
+                  setForm({ ...next, fee_weekly: calc.weekly, fee_fortnightly: calc.fortnightly, fee_monthly: calc.monthly, fee_quarterly: calc.quarterly });
+                }}
+                className="input-field max-w-[120px]"
+              >
+                <option value="month">Months</option>
+                <option value="week">Weeks</option>
+              </select>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5">Stored as {editDurationMonths()} month{editDurationMonths() === 1 ? "" : "s"} for term-end rules.</p>
           </div>
           <div>
             <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ($)</label>
