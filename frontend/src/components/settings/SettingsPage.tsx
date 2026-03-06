@@ -231,6 +231,7 @@ function IntegrationsSettings() {
   const [saving, setSaving] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [message, setMessage] = useState("");
+  const [tenantSlug, setTenantSlug] = useState("");
 
   const refreshIntegrations = () => {
     api.listIntegrations().then((data) => {
@@ -240,6 +241,10 @@ function IntegrationsSettings() {
 
   useEffect(() => {
     refreshIntegrations();
+    api.getTenantSettings().then((res) => {
+      const t = res as { slug?: string };
+      setTenantSlug(t.slug || "");
+    }).catch(() => {});
   }, []);
 
   const providers = [
@@ -286,6 +291,7 @@ function IntegrationsSettings() {
           existing={gocardlessExisting || null}
           saving={saving === "gocardless"}
           onSave={(data) => handleSave("gocardless", data)}
+          tenantSlug={tenantSlug}
         />
         {gocardlessConnected && (
           <div className="flex justify-end">
@@ -310,6 +316,7 @@ function IntegrationsSettings() {
             existing={existing || null}
             saving={saving === provider.id}
             onSave={(data) => handleSave(provider.id, data)}
+            tenantSlug={tenantSlug}
           />
         );
       })}
@@ -317,18 +324,22 @@ function IntegrationsSettings() {
   );
 }
 
-function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefault }: {
+function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefault, tenantSlug }: {
   provider: { id: string; name: string; desc: string; hasSecret: boolean; fields: { key: string; secret: string } };
-  existing: { environment: string; is_active: boolean; has_key: boolean; key_hint: string } | null;
+  existing: { environment: string; is_active: boolean; has_key: boolean; has_secret?: boolean; key_hint: string } | null;
   saving: boolean;
   onSave: (data: { api_key: string; api_secret: string; environment: string; is_active: boolean }) => void;
   collapsedByDefault?: boolean;
+  tenantSlug?: string;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [environment, setEnvironment] = useState(existing?.environment || "sandbox");
   const [isActive, setIsActive] = useState(existing?.is_active ?? true);
   const [expanded, setExpanded] = useState(!existing?.has_key && !collapsedByDefault);
+  const isStripe = provider.id === "stripe";
+  const webhookUrl = tenantSlug ? `${window.location.origin}/api/webhooks/stripe/${tenantSlug}` : "";
+  const stripeReady = !!(existing?.has_key && existing?.has_secret && existing?.is_active);
 
   return (
     <div className="card overflow-hidden">
@@ -347,6 +358,35 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
       </div>
       <div className="card-body">
         <p className="text-[12px] text-gray-500 mb-3">{provider.desc}</p>
+        {isStripe && (
+          <div className="mb-3 rounded-md border border-indigo-200 bg-indigo-50 p-3">
+            <p className="text-[12px] font-semibold text-indigo-900 mb-1">Stripe setup checklist</p>
+            <div className="space-y-1 text-[12px] text-indigo-900/90">
+              <p>1. Paste Stripe secret key + webhook signing secret and click Save.</p>
+              <p>2. In Stripe dashboard, add webhook endpoint:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-white/80 px-2 py-1 font-mono text-[11px] text-indigo-900">
+                  {webhookUrl || "Loading tenant webhook URL..."}
+                </code>
+                <button
+                  type="button"
+                  disabled={!webhookUrl}
+                  onClick={() => { navigator.clipboard.writeText(webhookUrl); }}
+                  className="btn-secondary text-[11px] px-2 py-1 disabled:opacity-50"
+                >
+                  Copy
+                </button>
+              </div>
+              <p>3. Enable events for checkout + invoice payment updates.</p>
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-[11px]">
+              <span className={`rounded px-1.5 py-0.5 ${existing?.has_key ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
+              <span className={`rounded px-1.5 py-0.5 ${existing?.has_secret ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
+              <span className={`rounded px-1.5 py-0.5 ${existing?.is_active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
+              <span className={`rounded px-1.5 py-0.5 ${stripeReady ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
+            </div>
+          </div>
+        )}
         {existing?.has_key && !expanded && (
           <p className="text-[12px] text-gray-400">API key ending in <span className="font-mono">{existing.key_hint}</span> · {existing.environment}</p>
         )}
