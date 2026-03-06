@@ -77,7 +77,10 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 			p.provider_reference,
 			m.payment_method,
 			COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.membership_id = m.id AND p2.status = 'succeeded'), 0),
-			COALESCE(m.payment_amount, 0) * mto.duration_months,
+			CASE
+				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
+				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
+			END,
 			TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD'),
 			m.status,
 			m.payment_frequency

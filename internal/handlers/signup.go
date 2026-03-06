@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -16,6 +19,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v82"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 )
 
 // SignupHandler handles the public membership signup flow.
@@ -100,7 +105,8 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 			"logo_url":       tenant.LogoURL,
 			"primary_colour": tenant.PrimaryColour,
 		},
-		"memberships": active,
+		"memberships":       active,
+		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
 	})
 }
 
@@ -137,8 +143,9 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"logo_url":       tenant.LogoURL,
 			"primary_colour": tenant.PrimaryColour,
 		},
-		"membership": mt,
-		"terms":      terms,
+		"membership":        mt,
+		"terms":             terms,
+		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
 	})
 }
 
@@ -186,6 +193,34 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Client name, membership type and term option are required")
 		return
 	}
+	if input.PaymentMethod == "" {
+		input.PaymentMethod = "direct_debit"
+	}
+	if input.PaymentIntervalCount <= 0 {
+		input.PaymentIntervalCount = 1
+	}
+	if input.PaymentIntervalUnit != nil {
+		unit := strings.ToLower(strings.TrimSpace(*input.PaymentIntervalUnit))
+		if unit != "week" && unit != "month" {
+			writeError(w, http.StatusBadRequest, "payment_interval_unit must be 'week' or 'month'")
+			return
+		}
+		input.PaymentIntervalUnit = &unit
+	}
+	if input.PaymentFrequency == "custom_schedule" {
+		if input.PaymentIntervalUnit == nil || *input.PaymentIntervalUnit == "" {
+			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_unit")
+			return
+		}
+		if input.PaymentIntervalCount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_count > 0")
+			return
+		}
+		if input.NumPayments == nil || *input.NumPayments <= 0 {
+			writeError(w, http.StatusBadRequest, "custom schedule requires num_payments > 0")
+			return
+		}
+	}
 
 	// Create or find client
 	client, err := h.clientRepo.Create(r.Context(), tenant.ID, &input.Client)
@@ -212,6 +247,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// Create membership
 	membership, err := h.memberRepo.Create(r.Context(), tenant.ID, client.ID, mtID, toID,
 		input.StartDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		input.PaymentIntervalUnit, input.PaymentIntervalCount, input.NumPayments,
 		input.MemberSignature, staffID, input.StaffSignature)
 	if err != nil {
 		log.Printf("Error creating membership during signup: %v", err)
@@ -227,6 +263,25 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			"status":             membership.Status,
 			"source":             "signup",
 		}))
+	}
+
+	// --- Stripe card checkout path ---
+	if input.PaymentMethod == "card" {
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount)
+		if err != nil {
+			log.Printf("Error creating Stripe checkout session during signup: %v", err)
+			writeError(w, http.StatusBadGateway, "Card payment setup failed")
+			return
+		}
+		mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+		thankyou := buildThankyouResponse(tenant, mt)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"membership":   membership,
+			"client":       client,
+			"thankyou":     thankyou,
+			"checkout_url": checkoutURL,
+		})
+		return
 	}
 
 	// --- GoCardless: create customer + mandate if bank details provided and GC is configured ---
@@ -299,18 +354,21 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 							input.AccountHolderName, input.BSB, last4, input.InstitutionName, "")
 					}
 
-					// Create GoCardless subscription for recurring payments (pass num_payments from term option if set)
+					// Create GoCardless subscription for recurring payments.
 					mtForSub, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
 					subName := "Membership"
 					if mtForSub != nil {
 						subName = mtForSub.Title
 					}
-					var numPay *int
-					if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
-						numPay = to.NumPayments
+					numPay := membership.NumPayments
+					if numPay == nil {
+						if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
+							numPay = to.NumPayments
+						}
 					}
 					createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, membership,
-						tenant.ID, input.PaymentFrequency, input.PaymentAmount, subName, membership.MinTermEndDate, numPay)
+						tenant.ID, input.PaymentFrequency, input.PaymentAmount,
+						membership.PaymentIntervalUnit, membership.PaymentIntervalCount, subName, membership.MinTermEndDate, numPay)
 				}
 			}
 		}
@@ -354,7 +412,10 @@ type SignupSubmission struct {
 	StartDate        time.Time     `json:"start_date"`
 	PaymentMethod    string        `json:"payment_method"`
 	PaymentFrequency string        `json:"payment_frequency"`
+	PaymentIntervalUnit  *string   `json:"payment_interval_unit,omitempty"`
+	PaymentIntervalCount int       `json:"payment_interval_count,omitempty"`
 	PaymentAmount    float64       `json:"payment_amount"`
+	NumPayments      *int          `json:"num_payments,omitempty"`
 	MemberSignature  string        `json:"member_signature"`
 	StaffUserID      string        `json:"staff_user_id,omitempty"`
 	StaffSignature   string        `json:"staff_signature,omitempty"`
@@ -428,4 +489,119 @@ func parseOptionalUUID(s string) *uuid.UUID {
 		return nil
 	}
 	return &id
+}
+
+func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID uuid.UUID) []string {
+	providers := make([]string, 0, 2)
+	if gc, _ := h.credRepo.GetByProvider(ctx, tenantID, "gocardless"); gc != nil && gc.APIKeyEncrypted != "" && gc.IsActive {
+		providers = append(providers, "gocardless")
+	}
+	if stripeCreds, _ := h.credRepo.GetByProvider(ctx, tenantID, "stripe"); stripeCreds != nil && stripeCreds.APIKeyEncrypted != "" && stripeCreds.IsActive {
+		providers = append(providers, "stripe")
+	}
+	return providers
+}
+
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return "", errors.New("stripe integration unavailable")
+	}
+	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return "", errors.New("stripe not configured for tenant")
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || secretKey == "" {
+		return "", errors.New("stripe credentials invalid")
+	}
+
+	stripe.Key = secretKey
+	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
+	if origin == "" {
+		origin = "https://app.clientroll.com"
+	}
+
+	unitAmount := int64(math.Round(amount * 100))
+	if unitAmount <= 0 {
+		unitAmount = 1
+	}
+
+	mode := stripe.CheckoutSessionModePayment
+	if frequency != "upfront" {
+		mode = stripe.CheckoutSessionModeSubscription
+	}
+
+	params := &stripe.CheckoutSessionParams{
+		Mode:              stripe.String(string(mode)),
+		SuccessURL:        stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
+		CancelURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
+		ClientReferenceID: stripe.String(client.ID.String()),
+		Metadata: map[string]string{
+			"tenant_id":      tenant.ID.String(),
+			"tenant_slug":    tenant.Slug,
+			"client_id":      client.ID.String(),
+			"membership_id":  membership.ID.String(),
+			"payment_amount": strconv.FormatFloat(amount, 'f', 2, 64),
+			"payment_freq":   frequency,
+		},
+	}
+	if client.Email != nil && *client.Email != "" {
+		params.CustomerEmail = stripe.String(*client.Email)
+	}
+
+	lineItem := &stripe.CheckoutSessionLineItemParams{
+		Quantity: stripe.Int64(1),
+		PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+			Currency:   stripe.String(string(stripe.CurrencyAUD)),
+			UnitAmount: stripe.Int64(unitAmount),
+			ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+				Name: stripe.String("Membership - " + tenant.Name),
+			},
+		},
+	}
+	if mode == stripe.CheckoutSessionModeSubscription {
+		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
+		lineItem.PriceData.Recurring = &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
+			Interval:      stripe.String(interval),
+			IntervalCount: stripe.Int64(count),
+		}
+		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
+			Metadata: map[string]string{
+				"tenant_id":     tenant.ID.String(),
+				"tenant_slug":   tenant.Slug,
+				"client_id":     client.ID.String(),
+				"membership_id": membership.ID.String(),
+			},
+		}
+	}
+	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem}
+
+	sess, err := checkoutsession.New(params)
+	if err != nil {
+		return "", err
+	}
+	return sess.URL, nil
+}
+
+func stripeRecurringInterval(freq string, intervalUnit *string, intervalCount int) (string, int64) {
+	if intervalUnit != nil && *intervalUnit != "" {
+		count := int64(intervalCount)
+		if count <= 0 {
+			count = 1
+		}
+		if *intervalUnit == "week" {
+			return "week", count
+		}
+		return "month", count
+	}
+	switch freq {
+	case "weekly":
+		return "week", 1
+	case "fortnightly":
+		return "week", 2
+	case "quarterly":
+		return "month", 3
+	default:
+		return "month", 1
+	}
 }

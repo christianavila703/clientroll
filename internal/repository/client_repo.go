@@ -123,8 +123,8 @@ func (r *ClientRepo) SetGoCardlessCustomerID(ctx context.Context, clientID, tena
 func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid.UUID) ([]models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
-		       start_date, min_term_end_date, payment_method, payment_frequency,
-		       payment_amount, status, gocardless_mandate_id, gocardless_subscription_id,
+		       start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count,
+		       payment_amount, num_payments, payments_made, status, gocardless_mandate_id, gocardless_subscription_id,
 		       member_signature_data, member_signed_at,
 		       staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE client_id = $1 AND tenant_id = $2
@@ -141,7 +141,7 @@ func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid
 		var m models.Membership
 		if err := rows.Scan(&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID,
 			&m.TermOptionID, &m.StartDate, &m.MinTermEndDate, &m.PaymentMethod,
-			&m.PaymentFrequency, &m.PaymentAmount, &m.Status,
+			&m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount, &m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status,
 			&m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
 			&m.MemberSignature, &m.MemberSignedAt, &m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt,
 			&m.CreatedAt, &m.UpdatedAt); err != nil {

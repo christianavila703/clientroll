@@ -10,6 +10,7 @@ interface Tenant {
   slug: string;
   logo_url?: string;
   primary_colour: string;
+  payment_providers?: string[];
 }
 
 interface MembershipType {
@@ -33,6 +34,12 @@ interface TermOption {
   fee_quarterly?: number;
   allow_upfront: boolean;
   num_payments?: number;
+  custom_schedule_enabled?: boolean;
+  custom_schedule_label?: string;
+  custom_schedule_amount?: number;
+  custom_schedule_interval_unit?: "week" | "month";
+  custom_schedule_interval_count?: number;
+  custom_schedule_num_payments?: number;
   bonuses?: Bonus[];
 }
 
@@ -64,6 +71,8 @@ export default function SignupPage() {
 
   const loadData = async () => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const stripeState = params.get("stripe");
       if (membershipSlug) {
         // Direct link to specific membership
         const res = await fetch(`/api/signup/${tenantSlug}/${membershipSlug}`);
@@ -71,6 +80,9 @@ export default function SignupPage() {
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
         setSelected(data.membership);
+        if (data.tenant?.payment_providers) {
+          setTenant((prev) => prev ? { ...prev, payment_providers: data.tenant.payment_providers } : data.tenant);
+        }
         setStep("detail");
       } else {
         // Browse all memberships
@@ -79,6 +91,18 @@ export default function SignupPage() {
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
         setMemberships(data.memberships || []);
+        if (data.payment_providers && data.tenant) {
+          setTenant({ ...data.tenant, payment_providers: data.payment_providers });
+        }
+      }
+      if (stripeState === "success") {
+        setThankyou({
+          heading: "Payment complete",
+          body: "Your membership and card payment were processed successfully.",
+        });
+        setStep("thankyou");
+      } else if (stripeState === "cancelled") {
+        setError("Card payment was cancelled. You can try again.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -156,6 +180,7 @@ export default function SignupPage() {
             membership={selected}
             termOption={selectedTerm}
             tenantSlug={tenantSlug || ""}
+            paymentProviders={tenant.payment_providers || []}
             onComplete={(ty) => { setThankyou(ty); setStep("thankyou"); }}
             onBack={() => setStep("detail")}
           />

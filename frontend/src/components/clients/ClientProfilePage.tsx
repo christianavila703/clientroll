@@ -23,7 +23,10 @@ interface Membership {
   end_date: string;
   payment_method?: string;
   payment_frequency?: string;
+  payment_interval_unit?: string;
+  payment_interval_count?: number;
   payment_amount?: number;
+  num_payments?: number;
   status: string;
   mandate_id?: string;
   subscription_id?: string;
@@ -32,6 +35,17 @@ interface Membership {
   failed_count: number;
   last_payment_date?: string;
   last_payment_status?: string;
+}
+
+function membershipFrequencyLabel(m: Membership): string {
+  if (!m.payment_frequency) return "—";
+  if (m.payment_frequency !== "custom_schedule") return m.payment_frequency;
+  const count = m.payment_interval_count || 1;
+  const unit = (m.payment_interval_unit || "month") + (count === 1 ? "" : "s");
+  if (m.num_payments && m.num_payments > 0) {
+    return `${m.num_payments} payments every ${count} ${unit}`;
+  }
+  return `Every ${count} ${unit}`;
 }
 
 interface Payment {
@@ -494,7 +508,7 @@ function MembershipSummaryRow({ m, fmtShort }: { m: Membership; fmtShort: (d: st
           <div>
             <span className="text-gray-400">Payment</span>
             <p className="text-gray-900 font-medium tabular-nums mt-0.5">
-              ${m.payment_amount.toFixed(2)}<span className="text-gray-400 font-normal">/{m.payment_frequency?.slice(0, 2) || ""}</span>
+              ${m.payment_amount.toFixed(2)}<span className="text-gray-400 font-normal">/{membershipFrequencyLabel(m)}</span>
             </p>
           </div>
         )}
@@ -614,7 +628,7 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: Membership; fmtShort: (d
           </div>
           <div className="text-right">
             <p className="text-[20px] font-bold text-gray-900 tabular-nums">${m.payment_amount?.toFixed(2) || "0.00"}</p>
-            <p className="text-[12px] text-gray-400 capitalize">{m.payment_frequency || "—"}</p>
+            <p className="text-[12px] text-gray-400">{membershipFrequencyLabel(m)}</p>
             {m.status === "active" && onCancel && (
               <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700 mt-1">Cancel</button>
             )}
@@ -702,7 +716,16 @@ function BillingScheduleTab({
     const now = new Date();
     let next = new Date(now);
 
-    if (m.payment_frequency === "weekly") {
+    if (m.payment_frequency === "custom_schedule") {
+      const count = m.payment_interval_count || 1;
+      const maxPayments = m.num_payments && m.num_payments > 0 ? m.num_payments : 6;
+      for (let i = 0; i < maxPayments && next <= end; i++) {
+        upcoming.push({ date: new Date(next), membership: m });
+        if (m.payment_interval_unit === "week") next.setDate(next.getDate() + 7 * count);
+        else next.setMonth(next.getMonth() + count);
+      }
+      return;
+    } else if (m.payment_frequency === "weekly") {
       next.setDate(next.getDate() + (7 - next.getDay()) % 7 || 7);
     } else if (m.payment_frequency === "fortnightly") {
       next.setDate(next.getDate() + 14 - (next.getDate() % 14));
@@ -926,22 +949,24 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      // Convert empty strings to null for optional fields
-      const payload = {
-        ...form,
-        birth_date: form.birth_date || null,
-        address: form.address || null,
-        suburb: form.suburb || null,
-        state: form.state || null,
-        postcode: form.postcode || null,
-        email: form.email || null,
-        phone: form.phone || null,
-        gender: form.gender || null,
-        emergency_contact_name: form.emergency_contact_name || null,
-        emergency_contact_phone: form.emergency_contact_phone || null,
+      // Keep payload aligned with backend Client model.
+      // Unknown fields are rejected server-side (DisallowUnknownFields).
+      const payload: Record<string, string> = {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        gender: form.gender,
+        address: form.address,
+        suburb: form.suburb,
+        state: form.state,
+        postcode: form.postcode,
+        emergency_contact_name: form.emergency_contact_name,
+        emergency_contact_phone: form.emergency_contact_phone,
       };
+      if (form.birth_date) payload.birth_date = form.birth_date;
       await api.updateClient(client.id, payload);
       onSaved();
+      onClose();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   };
@@ -965,7 +990,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
             <h2 className="text-[15px] font-bold text-gray-900">Edit: {client.name}</h2>
             <div className="flex items-center gap-2">
               <button type="button" onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
-              <button type="button" onClick={() => { const f = document.getElementById("edit-client-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+              <button type="submit" form="edit-client-form" disabled={saving} className="btn-primary text-[12px]">
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -1058,6 +1083,12 @@ interface MembershipTypeOption {
     id: string; duration_months: number; fee_total: number;
     fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
     allow_upfront: boolean; num_payments?: number;
+    custom_schedule_enabled?: boolean;
+    custom_schedule_label?: string;
+    custom_schedule_amount?: number;
+    custom_schedule_interval_unit?: "week" | "month";
+    custom_schedule_interval_count?: number;
+    custom_schedule_num_payments?: number;
     bonuses?: { id: string; title: string; value: number }[];
   }[];
 }
@@ -1078,18 +1109,17 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    fetch("/api/tenant/membership-types", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+    api.listMembershipTypes()
       .then(d => {
-        const active = (d.membership_types || []).filter((mt: any) => mt.is_active);
+        const membershipData = d as any;
+        const active = (membershipData.membership_types || []).filter((mt: any) => mt.is_active);
         setTypes(active);
         // Load full details for each type
         active.forEach((mt: any) => {
-          fetch(`/api/tenant/membership-types/${mt.id}`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(r => r.json())
+          api.getMembershipType(mt.id)
             .then(full => {
-              setTypes(prev => prev.map(t => t.id === full.id ? full : t));
+              const fullType = full as any;
+              setTypes(prev => prev.map(t => t.id === fullType.id ? fullType : t));
             });
         });
       });
@@ -1099,28 +1129,28 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
     if (!selectedType || !selectedTerm) return;
     setSaving(true); setError("");
     try {
-      const token = localStorage.getItem("access_token");
-      const paymentAmount = selectedTerm[`fee_${frequency}`] || selectedTerm.fee_total;
+      const isCustomSchedule = frequency === "custom_schedule";
+      const paymentAmount = isCustomSchedule
+        ? (selectedTerm.custom_schedule_amount || selectedTerm.fee_total)
+        : (selectedTerm[`fee_${frequency}`] || selectedTerm.fee_total);
       const body: Record<string, unknown> = {
         client_id: clientId,
         membership_type_id: selectedType.id,
         term_option_id: selectedTerm.id,
         start_date: startDate,
         payment_method: "direct_debit",
-        payment_frequency: frequency === "upfront" ? "monthly" : frequency,
+        payment_frequency: frequency,
         payment_amount: paymentAmount,
+        payment_interval_unit: isCustomSchedule ? selectedTerm.custom_schedule_interval_unit : undefined,
+        payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
+        num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
       };
       if (frequency !== "upfront" && bsb.trim() && accountNumber.trim()) {
         body.bsb = bsb.trim();
         body.account_number = accountNumber.trim();
         if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
       }
-      const res = await fetch("/api/tenant/memberships", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      await api.createMembership(body);
       onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
@@ -1132,6 +1162,12 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
     { value: "fortnightly", label: "Fortnightly", amount: selectedTerm.fee_fortnightly, enabled: !!selectedTerm.fee_fortnightly },
     { value: "monthly", label: "Monthly", amount: selectedTerm.fee_monthly, enabled: !!selectedTerm.fee_monthly },
     { value: "quarterly", label: "Quarterly", amount: selectedTerm.fee_quarterly, enabled: !!selectedTerm.fee_quarterly },
+    {
+      value: "custom_schedule",
+      label: selectedTerm.custom_schedule_label || `${selectedTerm.custom_schedule_num_payments || 0} payments every ${selectedTerm.custom_schedule_interval_count || 1} ${selectedTerm.custom_schedule_interval_unit || "month"}${(selectedTerm.custom_schedule_interval_count || 1) === 1 ? "" : "s"}`,
+      amount: selectedTerm.custom_schedule_amount,
+      enabled: !!selectedTerm.custom_schedule_enabled && !!selectedTerm.custom_schedule_amount && !!selectedTerm.custom_schedule_num_payments && !!selectedTerm.custom_schedule_interval_count,
+    },
   ].filter(f => f.enabled) : [];
 
   return (
@@ -1296,11 +1332,14 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
 function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   clientId: string; clientName: string; onClose: () => void; onCharged: () => void;
 }) {
+  type NumericField = number | "";
+  const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+
   const [services, setServices] = useState<{ id: string; name: string; price: number; tax_rate: number; description?: string }[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [taxAmount, setTaxAmount] = useState(0);
+  const [amount, setAmount] = useState<NumericField>("");
+  const [taxAmount, setTaxAmount] = useState<NumericField>("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1322,15 +1361,16 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [mandateLink, setMandateLink] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
     // Load services and mandate status in parallel
     Promise.all([
-      fetch("/api/tenant/services", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-      fetch(`/api/tenant/clients/${clientId}/mandate-status`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      api.listServices(),
+      api.getClientMandateStatus(clientId),
     ]).then(([svcData, mandateData]) => {
-      setServices((svcData.services || []).filter((s: any) => s.is_active));
-      setHasMandate(mandateData.has_mandate || false);
-      setClientEmail(mandateData.client_email || null);
+      const servicesData = svcData as any;
+      const mandate = mandateData as any;
+      setServices((servicesData.services || []).filter((s: any) => s.is_active));
+      setHasMandate(mandate.has_mandate || false);
+      setClientEmail(mandate.client_email || null);
       setMandateLoading(false);
     }).catch(() => setMandateLoading(false));
   }, [clientId]);
@@ -1347,17 +1387,19 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
 
   // Submit: charge with existing mandate
   const handleChargeWithMandate = async () => {
-    if (!description || amount <= 0) { setError("Description and amount are required"); return; }
+    const parsedAmount = toNumberOrZero(amount);
+    const parsedTax = toNumberOrZero(taxAmount);
+    if (!description || parsedAmount <= 0) { setError("Description and amount are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      const token = localStorage.getItem("access_token");
-      const res = await fetch("/api/tenant/services/charge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ client_id: clientId, service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null, description, amount, tax_amount: taxAmount, notes: notes || null }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
-      const data = await res.json();
+      const data = await api.chargeService({
+        client_id: clientId,
+        service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
+        description,
+        amount: parsedAmount,
+        tax_amount: parsedTax,
+        notes: notes || null,
+      }) as any;
       if (data.gocardless_payment_id) {
         setSuccess(`Direct debit submitted via GoCardless (${data.gocardless_payment_id})`);
       } else {
@@ -1370,23 +1412,23 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
 
   // Submit: create mandate from bank details + charge
   const handleChargeWithBankDetails = async () => {
-    if (!description || amount <= 0) { setError("Description and amount are required"); return; }
+    const parsedAmount = toNumberOrZero(amount);
+    const parsedTax = toNumberOrZero(taxAmount);
+    if (!description || parsedAmount <= 0) { setError("Description and amount are required"); return; }
     if (!bsb || !accountNumber) { setError("BSB and account number are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      const token = localStorage.getItem("access_token");
-      const res = await fetch("/api/tenant/services/charge-with-bank-details", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          client_id: clientId,
-          service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
-          description, amount, tax_amount: taxAmount, notes: notes || null,
-          account_holder_name: accountHolderName, account_number: accountNumber, bsb,
-        }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
-      const data = await res.json();
+      const data = await api.chargeServiceWithBankDetails({
+        client_id: clientId,
+        service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
+        description,
+        amount: parsedAmount,
+        tax_amount: parsedTax,
+        notes: notes || null,
+        account_holder_name: accountHolderName,
+        account_number: accountNumber,
+        bsb,
+      }) as any;
       if (data.warning) {
         setSuccess(`Mandate created (${data.gocardless_mandate_id}). Warning: ${data.warning}`);
       } else {
@@ -1401,14 +1443,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const handleSendMandateLink = async () => {
     setSendingLink(true); setError("");
     try {
-      const token = localStorage.getItem("access_token");
-      const res = await fetch(`/api/tenant/clients/${clientId}/send-mandate-link`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
-      const data = await res.json();
+      const data = await api.sendClientMandateLink(clientId) as any;
       setMandateLink(data.redirect_url || "");
       if (data.email_sent) {
         setSuccess(`Mandate setup link sent to ${clientEmail}. You can also copy the link below.`);
@@ -1419,7 +1454,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     finally { setSendingLink(false); }
   };
 
-  const total = amount + taxAmount;
+  const total = toNumberOrZero(amount) + toNumberOrZero(taxAmount);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -1536,7 +1571,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                     selectedServiceId === "__custom" ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
                   }`}>
                     <input type="radio" name="service" value="__custom" checked={selectedServiceId === "__custom"}
-                      onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(0); setTaxAmount(0); }} className="h-4 w-4 text-indigo-600" />
+                      onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(""); setTaxAmount(""); }} className="h-4 w-4 text-indigo-600" />
                     <span className="text-[13px] font-medium text-gray-700">Custom charge</span>
                   </label>
                 </div>
@@ -1550,11 +1585,11 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-gray-700 mb-1">Amount ($)</label>
-                  <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                  <input type="number" value={amount} onChange={e => setAmount(e.target.value === "" ? "" : Number(e.target.value))} className="input-field" min="0" step="0.01" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax ($)</label>
-                  <input type="number" value={taxAmount} onChange={e => setTaxAmount(Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                  <input type="number" value={taxAmount} onChange={e => setTaxAmount(e.target.value === "" ? "" : Number(e.target.value))} className="input-field" min="0" step="0.01" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-gray-700 mb-1">Total</label>
@@ -1575,12 +1610,12 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
                 {hasMandate ? (
-                  <button onClick={handleChargeWithMandate} disabled={saving || amount <= 0} className="btn-primary text-[12px]">
+                  <button onClick={handleChargeWithMandate} disabled={saving || toNumberOrZero(amount) <= 0} className="btn-primary text-[12px]">
                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
                     {saving ? "Processing..." : `Charge $${total.toFixed(2)} via Direct Debit`}
                   </button>
                 ) : showBankForm ? (
-                  <button onClick={handleChargeWithBankDetails} disabled={saving || amount <= 0 || !bsb || !accountNumber} className="btn-primary text-[12px]">
+                  <button onClick={handleChargeWithBankDetails} disabled={saving || toNumberOrZero(amount) <= 0 || !bsb || !accountNumber} className="btn-primary text-[12px]">
                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
                     {saving ? "Setting up..." : `Set up mandate & charge $${total.toFixed(2)}`}
                   </button>

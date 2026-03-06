@@ -27,6 +27,17 @@ func gcSubscriptionParams(paymentFrequency string) (interval string, intervalCou
 	}
 }
 
+func normalizeIntervalUnit(unit string) string {
+	switch unit {
+	case "week", "weekly":
+		return "weekly"
+	case "month", "monthly":
+		return "monthly"
+	default:
+		return ""
+	}
+}
+
 // subscriptionEndDateFromNumPayments computes the subscription end date when num_payments is set:
 // end = now + (num_payments * period). GoCardless will stop after that date.
 func subscriptionEndDateFromNumPayments(interval string, intervalCount, numPayments int) time.Time {
@@ -53,6 +64,8 @@ func createGoCardlessSubscription(
 	tenantID uuid.UUID,
 	paymentFrequency string,
 	paymentAmount float64,
+	paymentIntervalUnit *string,
+	paymentIntervalCount int,
 	membershipName string,
 	endDate time.Time,
 	numPayments *int,
@@ -61,7 +74,17 @@ func createGoCardlessSubscription(
 		return "", nil // No subscription needed for upfront payments
 	}
 
-	interval, intervalCount := gcSubscriptionParams(paymentFrequency)
+	interval := ""
+	intervalCount := paymentIntervalCount
+	if paymentIntervalUnit != nil && *paymentIntervalUnit != "" {
+		interval = normalizeIntervalUnit(*paymentIntervalUnit)
+	}
+	if interval == "" {
+		interval, intervalCount = gcSubscriptionParams(paymentFrequency)
+	}
+	if intervalCount <= 0 {
+		intervalCount = 1
+	}
 	amountMinor := int64(paymentAmount * 100)
 	if amountMinor <= 0 {
 		return "", nil

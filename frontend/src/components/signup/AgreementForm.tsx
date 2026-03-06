@@ -7,13 +7,17 @@ interface Props {
   membership: MembershipType;
   termOption: TermOption;
   tenantSlug: string;
+  paymentProviders: string[];
   onComplete: (thankyou: Record<string, unknown>) => void;
   onBack: () => void;
 }
 
 type FormStep = "member" | "payment" | "bank" | "sign";
 
-export default function AgreementForm({ tenant, membership, termOption, tenantSlug, onComplete, onBack }: Props) {
+export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, onComplete, onBack }: Props) {
+  const supportsStripe = paymentProviders.includes("stripe");
+  const supportsGoCardless = paymentProviders.includes("gocardless");
+  const defaultMethod = supportsGoCardless ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
   const [formStep, setFormStep] = useState<FormStep>("member");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -24,7 +28,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     emergency_contact_name: "", emergency_contact_phone: "",
   });
   const [payment, setPayment] = useState({
-    payment_method: "direct_debit",
+    payment_method: defaultMethod,
     payment_frequency: "monthly",
     start_date: new Date().toISOString().split("T")[0],
   });
@@ -34,12 +38,15 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   });
   const [memberSignature, setMemberSignature] = useState("");
 
+  const usesBankStep = payment.payment_method !== "card";
   const steps: { key: FormStep; label: string; icon: string }[] = [
     { key: "member", label: "Your Details", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
     { key: "payment", label: "Payment", icon: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" },
-    { key: "bank", label: "Bank Details", icon: "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" },
     { key: "sign", label: "Sign", icon: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 17.07a4.5 4.5 0 01-1.897 1.13L2.25 19.5l1.245-4.28a4.5 4.5 0 011.13-1.897L16.862 4.487z" },
   ];
+  if (usesBankStep) {
+    steps.splice(2, 0, { key: "bank", label: "Bank Details", icon: "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" })
+  }
 
   const currentIdx = steps.findIndex((s) => s.key === formStep);
 
@@ -47,6 +54,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     if (!memberSignature) { setError("Please provide your signature"); return; }
     setSubmitting(true); setError("");
     try {
+      const isCustomSchedule = payment.payment_frequency === "custom_schedule";
+      const paymentAmount = isCustomSchedule
+        ? (termOption.custom_schedule_amount || termOption.fee_total)
+        : (termOption[`fee_${payment.payment_frequency}` as keyof TermOption] || termOption.fee_total);
       const res = await fetch(`/api/signup/${tenantSlug}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,12 +66,20 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           membership_type_id: membership.id, term_option_id: termOption.id,
           start_date: payment.start_date, payment_method: payment.payment_method,
           payment_frequency: payment.payment_frequency,
-          payment_amount: termOption[`fee_${payment.payment_frequency}` as keyof TermOption] || termOption.fee_total,
-          member_signature: memberSignature, ...bank,
+          payment_amount: paymentAmount,
+          payment_interval_unit: isCustomSchedule ? termOption.custom_schedule_interval_unit : undefined,
+          payment_interval_count: isCustomSchedule ? termOption.custom_schedule_interval_count : undefined,
+          num_payments: isCustomSchedule ? termOption.custom_schedule_num_payments : termOption.num_payments,
+          member_signature: memberSignature,
+          ...(payment.payment_method === "direct_debit" ? bank : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+        return;
+      }
       const tyData = data.thankyou || {};
       if (data.gocardless_error) {
         tyData.gocardless_error = data.gocardless_error;
@@ -135,9 +154,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="px-8 py-8 sm:px-10 sm:py-10">
           {formStep === "member" && <MemberSection data={member} onChange={setMember} onNext={() => setFormStep("payment")} />}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} onNext={() => setFormStep("bank")} onBack={() => setFormStep("member")} />}
-          {formStep === "bank" && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep("sign")} onBack={() => setFormStep("payment")} />}
-          {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep("bank")} submitting={submitting} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} onNext={() => setFormStep(payment.payment_method === "card" ? "sign" : "bank")} onBack={() => setFormStep("member")} />}
+          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep("sign")} onBack={() => setFormStep("payment")} />}
+          {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} submitting={submitting} />}
         </div>
       </div>
     </div>
@@ -226,9 +245,11 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
 }
 
 /* ─── Section B: Payment Details ─── */
-function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; onNext: () => void; onBack: () => void }) {
+function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; onNext: () => void; onBack: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all";
+  const supportsStripe = paymentProviders.includes("stripe");
+  const supportsGoCardless = paymentProviders.includes("gocardless");
 
   const frequencies = [
     { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termOption.allow_upfront, amount: termOption.fee_total },
@@ -236,6 +257,16 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
     { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: !!termOption.fee_fortnightly, amount: termOption.fee_fortnightly },
     { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: !!termOption.fee_monthly, amount: termOption.fee_monthly },
     { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: !!(termOption as any).fee_quarterly, amount: (termOption as any).fee_quarterly },
+    {
+      value: "custom_schedule",
+      label: termOption.custom_schedule_label || `${termOption.custom_schedule_num_payments || 0} instalments`,
+      desc: termOption.custom_schedule_interval_count && termOption.custom_schedule_interval_unit
+        ? `${termOption.custom_schedule_num_payments || 0} payments every ${termOption.custom_schedule_interval_count} ${termOption.custom_schedule_interval_unit}${termOption.custom_schedule_interval_count === 1 ? "" : "s"}`
+        : "Custom instalment plan",
+      icon: "📆",
+      enabled: !!termOption.custom_schedule_enabled && !!termOption.custom_schedule_amount,
+      amount: termOption.custom_schedule_amount,
+    },
   ].filter((f) => f.enabled);
 
   return (
@@ -246,6 +277,36 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
       </div>
 
       <div className="space-y-8">
+        <div>
+          <label className="block text-[13px] font-semibold text-gray-700 mb-3">Payment Method</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {supportsGoCardless && (
+              <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
+                data.payment_method === "direct_debit" ? "border-indigo-500 bg-indigo-50/50 shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+              }`}>
+                <input type="radio" name="payment_method" value="direct_debit" checked={data.payment_method === "direct_debit"} onChange={(e) => set("payment_method", e.target.value)}
+                  className="h-5 w-5 text-indigo-600 border-gray-300" />
+                <div>
+                  <p className="text-[14px] font-semibold text-gray-900">Direct Debit</p>
+                  <p className="text-[12px] text-gray-500">Pay from bank account (GoCardless)</p>
+                </div>
+              </label>
+            )}
+            {supportsStripe && (
+              <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
+                data.payment_method === "card" ? "border-indigo-500 bg-indigo-50/50 shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+              }`}>
+                <input type="radio" name="payment_method" value="card" checked={data.payment_method === "card"} onChange={(e) => set("payment_method", e.target.value)}
+                  className="h-5 w-5 text-indigo-600 border-gray-300" />
+                <div>
+                  <p className="text-[14px] font-semibold text-gray-900">Credit / Debit Card</p>
+                  <p className="text-[12px] text-gray-500">Secure Stripe checkout</p>
+                </div>
+              </label>
+            )}
+          </div>
+        </div>
+
         <Field label="Start Date">
           <input type="date" value={data.start_date} onChange={(e) => set("start_date", e.target.value)} className={`${inputCls} max-w-xs`} />
         </Field>
@@ -276,7 +337,7 @@ function PaymentSection({ data, onChange, termOption, onNext, onBack }: { data: 
         </div>
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Bank Details" />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "card" ? "Sign Agreement" : "Bank Details"} />
     </div>
   );
 }

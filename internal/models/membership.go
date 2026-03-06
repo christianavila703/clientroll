@@ -43,6 +43,12 @@ type TermOption struct {
 	FeeQuarterly     *float64  `json:"fee_quarterly"`
 	AllowUpfront     bool      `json:"allow_upfront"`
 	NumPayments      *int      `json:"num_payments"` // if set, payments stop after N (membership stays active)
+	CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
+	CustomScheduleLabel         *string  `json:"custom_schedule_label"`
+	CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
+	CustomScheduleIntervalUnit  *string  `json:"custom_schedule_interval_unit"`
+	CustomScheduleIntervalCount *int     `json:"custom_schedule_interval_count"`
+	CustomScheduleNumPayments   *int     `json:"custom_schedule_num_payments"`
 	// Joined data
 	Bonuses          []Bonus   `json:"bonuses,omitempty"`
 }

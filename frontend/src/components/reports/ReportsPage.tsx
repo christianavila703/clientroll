@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
+import api from "../../api/client";
 
 interface Report {
   active_members: number; total_clients: number;
@@ -55,9 +56,7 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<"overview" | "revenue" | "memberships" | "payments" | "clients">("overview");
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    fetch("/api/tenant/reports/comprehensive", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+    api.getComprehensiveReport()
       .then((payload) => setData(normalizeReport(payload)))
       .catch(() => {})
       .finally(() => setLoading(false));

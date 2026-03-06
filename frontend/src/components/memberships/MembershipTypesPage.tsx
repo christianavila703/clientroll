@@ -283,16 +283,34 @@ function MtRowMenu({ mt, onArchive, onActivate, onDelete }: {
 }
 
 function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
+  type NumericField = number | "";
+  const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+
   const [form, setForm] = useState({
-    title: "", description: "", inclusions: "", total_value: 0, sort_order: 0, top_image_url: "", intrinsic_value: 0,
+    title: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const title = form.title.trim();
+    if (!title) {
+      setError("Title is required");
+      return;
+    }
     setSaving(true); setError("");
-    try { await api.createMembershipType(form); onCreated(); }
+    try {
+      await api.createMembershipType({
+        title,
+        description: form.description || "",
+        inclusions: form.inclusions || "",
+        total_value: toNumberOrZero(form.total_value),
+        sort_order: toNumberOrZero(form.sort_order),
+        top_image_url: form.top_image_url || "",
+      });
+      onCreated();
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   };
@@ -339,11 +357,11 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Value ($)</label>
             <p className="text-[10px] text-gray-400 mb-1">Base value of the membership (excl. bonuses)</p>
-            <input type="number" value={form.total_value} onChange={(e) => setForm({ ...form, total_value: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+            <input type="number" value={form.total_value} onChange={(e) => setForm({ ...form, total_value: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.01" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
-            <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="input-field" min="0" />
+            <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />
           </div>
         </div>
       </form>

@@ -342,7 +342,7 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 					}
 				}
 				createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
-					tenantID, *m.PaymentFrequency, *m.PaymentAmount, "Membership", m.MinTermEndDate, numPay)
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
 			}
 			break
 		}

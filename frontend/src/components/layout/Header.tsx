@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import api from "../../api/client";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -37,16 +38,14 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
-      const token = localStorage.getItem("access_token");
-      const headers = { Authorization: `Bearer ${token}` };
       const items: SearchResult[] = [];
 
       try {
         const [clientsRes, mtRes, bonusRes] = await Promise.all([
-          fetch(`/api/tenant/clients?search=${encodeURIComponent(q)}`, { headers }).then(r => r.json()),
-          fetch("/api/tenant/membership-types", { headers }).then(r => r.json()),
-          fetch("/api/tenant/bonuses", { headers }).then(r => r.json()),
-        ]);
+          api.listClients(q),
+          api.listMembershipTypes(),
+          api.listBonuses(),
+        ]) as [any, any, any];
 
         (clientsRes.clients || []).slice(0, 5).forEach((c: { id: string; name: string; email?: string }) => {
           if (c.name.toLowerCase().includes(q.toLowerCase()) || c.email?.toLowerCase().includes(q.toLowerCase())) {
@@ -143,11 +142,9 @@ function NotificationBell() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-    fetch("/api/tenant/reports/dashboard", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(setData)
+    if (!localStorage.getItem("access_token")) return;
+    api.getDashboardReport()
+      .then((d) => setData(d as { failed_payments: number; open_disputes: number; new_signups: number; active_members: number }))
       .catch(() => {});
   }, []);
 

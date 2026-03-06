@@ -149,13 +149,16 @@ function BonusForm({ initial, onSaved, onCancel }: {
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  type NumericField = number | "";
+  const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+
   const [form, setForm] = useState({
     title: initial?.title || "",
     description: initial?.description || "",
     image_url: initial?.image_url || "",
-    value: initial?.value || 0,
+    value: initial ? initial.value : "",
     is_active: initial?.is_active ?? true,
-    sort_order: initial?.sort_order || 0,
+    sort_order: initial ? initial.sort_order : "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -165,10 +168,15 @@ function BonusForm({ initial, onSaved, onCancel }: {
     if (!form.title) { setError("Title is required"); return; }
     setSaving(true); setError("");
     try {
+      const payload = {
+        ...form,
+        value: toNumberOrZero(form.value),
+        sort_order: toNumberOrZero(form.sort_order),
+      };
       if (initial) {
-        await api.updateBonus(initial.id, form);
+        await api.updateBonus(initial.id, payload);
       } else {
-        await api.createBonus(form);
+        await api.createBonus(payload);
       }
       onSaved();
     } catch (err) {
@@ -217,12 +225,12 @@ function BonusForm({ initial, onSaved, onCancel }: {
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Value ($)</label>
             <p className="text-[11px] text-gray-400 mb-1.5">Dollar value shown to clients</p>
-            <input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+            <input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.01" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
             <p className="text-[11px] text-gray-400 mb-1.5">Lower numbers first</p>
-            <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="input-field" min="0" />
+            <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />
           </div>
         </div>
         {initial && (

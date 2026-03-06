@@ -162,6 +162,11 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
                         or ${term.fee_monthly.toLocaleString()}/month
                       </p>
                     )}
+                    {term.custom_schedule_enabled && term.custom_schedule_amount && term.custom_schedule_num_payments && term.custom_schedule_interval_count && (
+                      <p className="text-xs text-indigo-600 font-medium mt-1">
+                        {term.custom_schedule_label || `${term.custom_schedule_num_payments} payments every ${term.custom_schedule_interval_count} ${term.custom_schedule_interval_unit || "month"}${term.custom_schedule_interval_count === 1 ? "" : "s"}`} (${term.custom_schedule_amount.toLocaleString()} each)
+                      </p>
+                    )}
                     {(term as any).num_payments && (
                       <p className="text-xs text-indigo-600 font-medium mt-1">
                         {(term as any).num_payments} payments then membership stays active

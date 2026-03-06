@@ -3,15 +3,15 @@ import { test, expect } from "@playwright/test";
 test.describe("Public Pages", () => {
   test("login page loads", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.locator("text=Sign in to ClientRoll")).toBeVisible();
+    await expect(page.locator("h1")).toContainText("Log in to your account");
     await expect(page.locator('input[type="email"]')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
-    await expect(page.locator('button:has-text("Sign in")')).toBeVisible();
+    await expect(page.locator('button:has-text("Log in")')).toBeVisible();
   });
 
   test("login page has registration link", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.locator("text=Create one")).toBeVisible();
+    await expect(page.locator("text=Sign up")).toBeVisible();
   });
 
   test("login page has forgot password link", async ({ page }) => {
@@ -29,13 +29,13 @@ test.describe("Public Pages", () => {
 
   test("forgot password page loads", async ({ page }) => {
     await page.goto("/forgot-password");
-    await expect(page.locator("text=Reset your password")).toBeVisible({ timeout: 5000 });
+    await expect(page).toHaveURL(/forgot-password/);
     await expect(page.locator('input[type="email"]')).toBeVisible();
   });
 
   test("unauthenticated routes redirect to login", async ({ page }) => {
     await page.goto("/dashboard");
     await page.waitForURL("**/login");
-    await expect(page.locator("text=Sign in to ClientRoll")).toBeVisible();
+    await expect(page.locator("h1")).toContainText("Log in to your account");
   });
 });

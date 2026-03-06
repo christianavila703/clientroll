@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import api, { ApiError } from "../../api/client";
 
 interface Service {
   id: string;
@@ -15,27 +16,31 @@ interface Service {
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
   const [search, setSearch] = useState("");
 
-  const token = localStorage.getItem("access_token");
-  const h = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-
   const load = async () => {
     try {
-      const res = await fetch("/api/tenant/services", { headers: h });
-      const data = await res.json();
+      setLoadError("");
+      const data = await api.listServices() as { services?: Service[] };
       setServices(data.services || []);
-    } catch {} finally { setLoading(false); }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load services");
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"?`)) return;
-    await fetch(`/api/tenant/services/${id}`, { method: "DELETE", headers: h });
-    load();
+    try {
+      await api.deleteService(id);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete service");
+    }
   };
 
   const filtered = services.filter(s =>
@@ -71,6 +76,8 @@ export default function ServicesPage() {
 
       {loading ? (
         <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>
+      ) : loadError ? (
+        <div className="card px-5 py-12 text-center text-[13px] text-red-600">{loadError}</div>
       ) : filtered.length === 0 ? (
         <div className="card px-5 py-12 text-center">
           <p className="text-[13px] text-gray-500">No services found</p>
@@ -123,13 +130,16 @@ export default function ServicesPage() {
 }
 
 function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; onSaved: () => void; onCancel: () => void }) {
+  type NumericField = number | "";
+  const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+
   const [form, setForm] = useState({
     name: initial?.name || "",
     description: initial?.description || "",
-    price: initial?.price || 0,
-    tax_rate: initial?.tax_rate || 0,
+    price: initial ? initial.price : "",
+    tax_rate: initial ? initial.tax_rate : "",
     is_active: initial?.is_active ?? true,
-    sort_order: initial?.sort_order || 0,
+    sort_order: initial ? initial.sort_order : "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -139,16 +149,26 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
     if (!form.name) { setError("Name is required"); return; }
     setSaving(true); setError("");
     try {
-      const token = localStorage.getItem("access_token");
-      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-      const payload = { ...form, description: form.description || null };
+      const payload = {
+        ...form,
+        description: form.description || null,
+        price: toNumberOrZero(form.price),
+        tax_rate: toNumberOrZero(form.tax_rate),
+        sort_order: toNumberOrZero(form.sort_order),
+      };
       if (initial) {
-        await fetch(`/api/tenant/services/${initial.id}`, { method: "PUT", headers, body: JSON.stringify(payload) });
+        await api.updateService(initial.id, payload);
       } else {
-        await fetch("/api/tenant/services", { method: "POST", headers, body: JSON.stringify(payload) });
+        await api.createService(payload);
       }
       onSaved();
-    } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message || "Failed to save service");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed");
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -178,15 +198,15 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Price ($)</label>
-            <input type="number" value={form.price} onChange={e => setForm({ ...form, price: Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+            <input type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.01" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax Rate (%)</label>
-            <input type="number" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: Number(e.target.value) })} className="input-field" min="0" step="0.1" placeholder="e.g. 10" />
+            <input type="number" value={form.tax_rate} onChange={e => setForm({ ...form, tax_rate: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.1" placeholder="e.g. 10" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
-            <input type="number" value={form.sort_order} onChange={e => setForm({ ...form, sort_order: Number(e.target.value) })} className="input-field" min="0" />
+            <input type="number" value={form.sort_order} onChange={e => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />
           </div>
           {initial && (
             <div className="flex items-end pb-1">

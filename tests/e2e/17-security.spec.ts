@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { getE2EContext } from "./helpers";
 
 test.describe("Security", () => {
   test("API rejects requests without auth", async ({ request }) => {
@@ -30,9 +31,9 @@ test.describe("Security", () => {
   });
 
   test("platform routes reject non-platform users", async ({ request }) => {
-    // Login as tenant user
+    const ctx = await getE2EContext(request);
     const loginRes = await request.post("/api/auth/login", {
-      data: { email: "ben@businessnet.com.au", password: "Clientroll1Test" },
+      data: { email: ctx.email, password: ctx.password },
     });
     const { tokens } = await loginRes.json();
 

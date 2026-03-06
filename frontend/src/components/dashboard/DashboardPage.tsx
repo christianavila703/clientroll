@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
+import api from "../../api/client";
 
 interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; active_mandates: number; active_subscriptions: number; pending_payments: number; }
 interface MonthlyData { month: string; revenue: number; }
@@ -18,13 +19,11 @@ export default function DashboardPage() {
   const [recentClients, setRecentClients] = useState<RecentClient[]>([]);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    const h = { Authorization: `Bearer ${token}` };
-    fetch("/api/tenant/reports/dashboard", { headers: h }).then(r => r.json()).then(setSummary).catch(() => {});
-    fetch("/api/tenant/reports/revenue/monthly", { headers: h }).then(r => r.json()).then(d => setMonthly(d.months || [])).catch(() => {});
-    fetch("/api/tenant/reports/memberships/breakdown", { headers: h }).then(r => r.json()).then(d => setBreakdown(d.breakdown || [])).catch(() => {});
-    fetch("/api/tenant/reports/payments/status", { headers: h }).then(r => r.json()).then(d => setStatuses(d.statuses || {})).catch(() => {});
-    fetch("/api/tenant/clients?search=", { headers: h }).then(r => r.json()).then(d => setRecentClients((d.clients || []).slice(0, 7))).catch(() => {});
+    api.getDashboardReport().then((d) => setSummary(d as Summary)).catch(() => {});
+    api.getMonthlyRevenueReport().then((d: any) => setMonthly(d.months || [])).catch(() => {});
+    api.getMembershipBreakdownReport().then((d: any) => setBreakdown(d.breakdown || [])).catch(() => {});
+    api.getPaymentStatusReport().then((d: any) => setStatuses(d.statuses || {})).catch(() => {});
+    api.listClients("").then((d: any) => setRecentClients((d.clients || []).slice(0, 7))).catch(() => {});
   }, []);
 
   const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);

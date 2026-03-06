@@ -141,7 +141,10 @@ type ClientMembershipRow struct {
 	EndDate           string   `json:"end_date"`
 	PaymentMethod     *string  `json:"payment_method"`
 	PaymentFrequency  *string  `json:"payment_frequency"`
+	PaymentIntervalUnit  *string `json:"payment_interval_unit"`
+	PaymentIntervalCount int     `json:"payment_interval_count"`
 	PaymentAmount     *float64 `json:"payment_amount"`
+	NumPayments       *int     `json:"num_payments"`
 	Status            string   `json:"status"`
 	MandateID         *string  `json:"mandate_id"`
 	SubscriptionID    *string  `json:"subscription_id"`
@@ -167,12 +170,18 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD'),
 			m.payment_method,
 			m.payment_frequency,
+			m.payment_interval_unit,
+			m.payment_interval_count,
 			m.payment_amount,
+			m.num_payments,
 			m.status,
 			m.gocardless_mandate_id,
 			m.gocardless_subscription_id,
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
-			COALESCE(m.payment_amount, 0) * mto.duration_months,
+			CASE
+				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
+				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
+			END,
 			(SELECT COUNT(*) FROM payments p WHERE p.membership_id = m.id AND p.status = 'failed'),
 			(SELECT TO_CHAR(p.paid_date, 'YYYY-MM-DD') FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
 			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1)
@@ -196,7 +205,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&row.MembershipID, &row.MembershipType, &row.MembershipTypeID,
 			&row.TermMonths, &row.StartDate, &row.EndDate,
-			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentAmount,
+			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentIntervalUnit, &row.PaymentIntervalCount, &row.PaymentAmount, &row.NumPayments,
 			&row.Status, &row.MandateID, &row.SubscriptionID,
 			&row.TotalPaid, &row.TotalExpected,
 			&row.FailedCount, &row.LastPaymentDate, &row.LastPaymentStatus,
@@ -392,7 +401,7 @@ func (h *ClientHandler) CompleteMandateLink(w http.ResponseWriter, r *http.Reque
 					}
 				}
 				subID, _ := createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
-					tenantID, *m.PaymentFrequency, *m.PaymentAmount, "Membership", m.MinTermEndDate, numPay)
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
 				subscriptionID = subID
 			}
 			break

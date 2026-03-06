@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import api from "../../api/client";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -47,14 +48,14 @@ export default function StaffSignupLauncher() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    const h = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch("/api/tenant/membership-types", { headers: h }).then(r => r.json()),
-      fetch("/api/tenant/settings/tenant", { headers: h }).then(r => r.json()),
+      api.listMembershipTypes(),
+      api.getTenantSettings(),
     ]).then(([mtData, tenantData]) => {
-      setTypes((mtData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
-      setTenant({ slug: tenantData.slug, name: tenantData.name });
+      const membershipData = mtData as any;
+      const tenantSettings = tenantData as any;
+      setTypes((membershipData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
+      setTenant({ slug: tenantSettings.slug, name: tenantSettings.name });
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 

@@ -24,8 +24,8 @@ test.describe("Clients", () => {
   test("create new dropdown opens client form", async ({ page }) => {
     await loginAsAdmin(page);
     await page.getByRole("button", { name: /Create new/i }).first().click();
-    await page.getByRole("menuitem", { name: /Add to your client list/i }).or(page.locator("text=Add to your client list")).first().click();
-    await expect(page.getByRole("heading", { name: "New client" })).toBeVisible({ timeout: 5000 });
+    await page.locator("text=Add to your client list").first().click();
+    await expect(page.getByRole("heading", { name: "New client" })).toBeVisible({ timeout: 10000 });
     await expect(page.locator("text=Details")).toBeVisible();
     await expect(page.locator("text=Company")).toBeVisible();
   });

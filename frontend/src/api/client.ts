@@ -155,6 +155,14 @@ export const api = {
     request(`/tenant/clients/${id}`, { method: "PUT", body: data }),
   getClientMemberships: (id: string) =>
     request(`/tenant/clients/${id}/memberships`),
+  getClientMandateStatus: (id: string) =>
+    request(`/tenant/clients/${id}/mandate-status`),
+  sendClientMandateLink: (id: string) =>
+    request(`/tenant/clients/${id}/send-mandate-link`, { method: "POST", body: {} }),
+
+  // Memberships
+  createMembership: (data: unknown) =>
+    request("/tenant/memberships", { method: "POST", body: data }),
 
   // Membership Types
   listMembershipTypes: () => request("/tenant/membership-types"),
@@ -185,6 +193,29 @@ export const api = {
     }),
   getTermOptionBonuses: (termOptionId: string) =>
     request(`/tenant/term-options/${termOptionId}/bonuses`),
+
+  // Services
+  listServices: () => request("/tenant/services"),
+  createService: (data: unknown) =>
+    request("/tenant/services", { method: "POST", body: data }),
+  updateService: (id: string, data: unknown) =>
+    request(`/tenant/services/${id}`, { method: "PUT", body: data }),
+  deleteService: (id: string) =>
+    request(`/tenant/services/${id}`, { method: "DELETE" }),
+  chargeService: (data: unknown) =>
+    request("/tenant/services/charge", { method: "POST", body: data }),
+  chargeServiceWithBankDetails: (data: unknown) =>
+    request("/tenant/services/charge-with-bank-details", {
+      method: "POST",
+      body: data,
+    }),
+
+  // Reports
+  getDashboardReport: () => request("/tenant/reports/dashboard"),
+  getMonthlyRevenueReport: () => request("/tenant/reports/revenue/monthly"),
+  getMembershipBreakdownReport: () => request("/tenant/reports/memberships/breakdown"),
+  getPaymentStatusReport: () => request("/tenant/reports/payments/status"),
+  getComprehensiveReport: () => request("/tenant/reports/comprehensive"),
 
   // Terms & Conditions
   listTerms: () => request("/tenant/terms"),

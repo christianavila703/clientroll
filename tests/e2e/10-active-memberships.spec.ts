@@ -12,7 +12,7 @@ test.describe("Active Memberships", () => {
     await loginAsAdmin(page);
     await page.click("text=Active Members");
     await expect(page.locator("button:has-text('Active')")).toBeVisible();
-    await expect(page.locator("button:has-text('Expired')")).toBeVisible();
+    await expect(page.locator("button:has-text('All')")).toBeVisible();
   });
 
   test("API returns active memberships with payment data", async ({ request }) => {

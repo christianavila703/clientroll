@@ -154,6 +154,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
 	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, memberRepo, clientRepo, enc, emailSvc)
+	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, enc, paymentRepo)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
@@ -165,6 +166,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	signupHandler.SetDispatcher(dispatcher)
 	activeMembershipsHandler.SetDispatcher(dispatcher)
 	gocardlessHandler.SetDispatcher(dispatcher)
+	stripeWebhookHandler.SetDispatcher(dispatcher)
 
 	// Health check
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -199,6 +201,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 		// GoCardless OAuth callback and webhook (no auth)
 		gocardlessHandler.RegisterPublicRoutes(r)
+		stripeWebhookHandler.RegisterPublicRoutes(r)
 		inboundWebhookHandler.RegisterPublicRoutes(r)
 
 		// Public slug check (no rate limit — read-only)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -59,7 +60,10 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		StartDate        string  `json:"start_date"`
 		PaymentMethod    string  `json:"payment_method"`
 		PaymentFrequency string  `json:"payment_frequency"`
+		PaymentIntervalUnit  string  `json:"payment_interval_unit,omitempty"`
+		PaymentIntervalCount int     `json:"payment_interval_count,omitempty"`
 		PaymentAmount    float64 `json:"payment_amount"`
+		NumPayments      *int    `json:"num_payments,omitempty"`
 		// Bank details for GoCardless mandate setup
 		AccountHolderName string `json:"account_holder_name,omitempty"`
 		AccountNumber     string `json:"account_number,omitempty"`
@@ -70,13 +74,73 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		return
 	}
 
-	clientID, _ := uuid.Parse(input.ClientID)
-	mtID, _ := uuid.Parse(input.MembershipTypeID)
-	toID, _ := uuid.Parse(input.TermOptionID)
-	startDate, _ := time.Parse("2006-01-02", input.StartDate)
+	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.MembershipTypeID = strings.TrimSpace(input.MembershipTypeID)
+	input.TermOptionID = strings.TrimSpace(input.TermOptionID)
+	input.StartDate = strings.TrimSpace(input.StartDate)
+	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
+	input.PaymentFrequency = strings.TrimSpace(strings.ToLower(input.PaymentFrequency))
+	input.PaymentIntervalUnit = strings.TrimSpace(strings.ToLower(input.PaymentIntervalUnit))
+	if input.PaymentIntervalCount <= 0 {
+		input.PaymentIntervalCount = 1
+	}
+	if input.PaymentIntervalUnit != "" && input.PaymentIntervalUnit != "week" && input.PaymentIntervalUnit != "month" {
+		writeError(w, http.StatusBadRequest, "payment_interval_unit must be 'week' or 'month'")
+		return
+	}
+
+	if input.ClientID == "" || input.MembershipTypeID == "" || input.TermOptionID == "" || input.StartDate == "" {
+		writeError(w, http.StatusBadRequest, "Missing required fields")
+		return
+	}
+	if input.PaymentMethod == "" || input.PaymentFrequency == "" || input.PaymentAmount <= 0 {
+		writeError(w, http.StatusBadRequest, "Invalid payment details")
+		return
+	}
+	if input.PaymentFrequency == "custom_schedule" {
+		if input.PaymentIntervalUnit == "" || (input.PaymentIntervalUnit != "week" && input.PaymentIntervalUnit != "month") {
+			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_unit (week or month)")
+			return
+		}
+		if input.PaymentIntervalCount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_count > 0")
+			return
+		}
+		if input.NumPayments == nil || *input.NumPayments <= 0 {
+			writeError(w, http.StatusBadRequest, "custom schedule requires num_payments > 0")
+			return
+		}
+	}
+
+	clientID, err := uuid.Parse(input.ClientID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client_id")
+		return
+	}
+	mtID, err := uuid.Parse(input.MembershipTypeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid membership_type_id")
+		return
+	}
+	toID, err := uuid.Parse(input.TermOptionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term_option_id")
+		return
+	}
+	startDate, err := time.Parse("2006-01-02", input.StartDate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid start_date")
+		return
+	}
 
 	m, err := h.memberRepo.Create(r.Context(), tenantID, clientID, mtID, toID,
 		startDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		func() *string {
+			if input.PaymentIntervalUnit == "" {
+				return nil
+			}
+			return &input.PaymentIntervalUnit
+		}(), input.PaymentIntervalCount, input.NumPayments,
 		"", &userID, "")
 	if err != nil {
 		log.Printf("Error creating membership: %v", err)
@@ -144,12 +208,15 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 						log.Printf("GoCardless mandate %s created for membership %s", mandateID, m.ID)
 
 						// Create subscription for recurring payments (pass num_payments from term option if set)
-						var numPay *int
-						if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenantID); to != nil && to.NumPayments != nil {
-							numPay = to.NumPayments
+						numPay := m.NumPayments
+						if numPay == nil {
+							if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenantID); to != nil && to.NumPayments != nil {
+								numPay = to.NumPayments
+							}
 						}
 						createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, m,
-							tenantID, input.PaymentFrequency, input.PaymentAmount, "Membership", m.MinTermEndDate, numPay)
+							tenantID, input.PaymentFrequency, input.PaymentAmount,
+							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
 					}
 				}
 			}
@@ -300,7 +367,10 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 			(SELECT p.amount FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded' ORDER BY p.paid_date DESC LIMIT 1),
 			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
-			m.payment_amount * mto.duration_months,
+			CASE
+				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
+				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
+			END,
 			(SELECT COUNT(*) FROM payments p WHERE p.membership_id = m.id AND p.status = 'failed')
 		FROM memberships m
 		JOIN clients c ON c.id = m.client_id

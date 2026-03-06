@@ -37,7 +37,11 @@ type Membership struct {
 	MinTermEndDate       time.Time  `json:"min_term_end_date"`
 	PaymentMethod        *string    `json:"payment_method"`
 	PaymentFrequency     *string    `json:"payment_frequency"`
+	PaymentIntervalUnit  *string    `json:"payment_interval_unit"`
+	PaymentIntervalCount int        `json:"payment_interval_count"`
 	PaymentAmount        *float64   `json:"payment_amount"`
+	NumPayments          *int       `json:"num_payments"`
+	PaymentsMade         int        `json:"payments_made"`
 	Status               string     `json:"status"`
 	GoCardlessMandateID      *string    `json:"gocardless_mandate_id,omitempty"`
 	GoCardlessSubscriptionID *string    `json:"gocardless_subscription_id,omitempty"`

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { TEST_EMAIL, TEST_PASS, loginAsAdmin } from "./helpers";
+import { getE2EContext, loginViaForm } from "./helpers";
 
 test.describe("Authentication", () => {
   test("login with invalid credentials shows error", async ({ page }) => {
@@ -11,14 +11,15 @@ test.describe("Authentication", () => {
   });
 
   test("login with valid credentials redirects to dashboard", async ({ page }) => {
-    await loginAsAdmin(page);
+    await loginViaForm(page);
     await expect(page.locator("text=Overview")).toBeVisible();
   });
 
-  test.skip("login API returns tokens", async ({ request }) => {
+  test("login API returns tokens", async ({ request }) => {
+    const ctx = await getE2EContext(request);
     const res = await request.post("/api/auth/login", {
       headers: { "Content-Type": "application/json" },
-      data: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS }),
+      data: JSON.stringify({ email: ctx.email, password: ctx.password }),
     });
     const body = await res.json();
     if (!res.ok()) {
@@ -26,14 +27,15 @@ test.describe("Authentication", () => {
     }
     expect(body.tokens.access_token).toBeTruthy();
     expect(body.tokens.refresh_token).toBeTruthy();
-    expect(body.user.email).toBe(TEST_EMAIL);
+    expect(body.user.email).toBe(ctx.email);
     expect(body.user.role).toBe("tenant_admin");
   });
 
-  test.skip("refresh token rotation works", async ({ request }) => {
+  test("refresh token rotation works", async ({ request }) => {
+    const ctx = await getE2EContext(request);
     const loginRes = await request.post("/api/auth/login", {
       headers: { "Content-Type": "application/json" },
-      data: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS }),
+      data: JSON.stringify({ email: ctx.email, password: ctx.password }),
     });
     const body = await loginRes.json();
     const tokens = body.tokens;

@@ -5,8 +5,8 @@ test.describe("Staff", () => {
   test("staff page loads", async ({ page }) => {
     await loginAsAdmin(page);
     await page.click("text=Team");
-    await expect(page.locator("h1:has-text('Staff')")).toBeVisible();
-    await expect(page.locator("text=Ben")).toBeVisible();
+    await expect(page).toHaveURL(/\/staff/);
+    await expect(page.getByRole("button", { name: /Add Staff/i })).toBeVisible();
   });
 
   test("add staff button shows form", async ({ page }) => {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"clientroll/internal/middleware"
 	"clientroll/internal/repository"
@@ -61,10 +62,17 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description *string `json:"description"`
 		Inclusions  *string `json:"inclusions"`
 		TopImageURL *string `json:"top_image_url"`
-		TotalValue  float64 `json:"total_value"`
-		SortOrder   int     `json:"sort_order"`
+		// Kept for backward compatibility with older frontends that still send it.
+		IntrinsicValue *float64 `json:"intrinsic_value"`
+		TotalValue     float64  `json:"total_value"`
+		SortOrder      int      `json:"sort_order"`
 	}
-	if err := decodeJSON(r, &input); err != nil || input.Title == "" {
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	input.Title = strings.TrimSpace(input.Title)
+	if input.Title == "" {
 		writeError(w, http.StatusBadRequest, "Title is required")
 		return
 	}
@@ -207,14 +215,48 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		FeeQuarterly   *float64 `json:"fee_quarterly"`
 		AllowUpfront   bool     `json:"allow_upfront"`
 		NumPayments    *int     `json:"num_payments"`
+		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
+		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
+		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
+		CustomScheduleIntervalUnit  *string  `json:"custom_schedule_interval_unit"`
+		CustomScheduleIntervalCount *int     `json:"custom_schedule_interval_count"`
+		CustomScheduleNumPayments   *int     `json:"custom_schedule_num_payments"`
 	}
-	if err := decodeJSON(r, &input); err != nil || input.DurationMonths <= 0 {
-		writeError(w, http.StatusBadRequest, "Duration months must be positive")
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
+	}
+	if input.DurationMonths <= 0 {
+		writeError(w, http.StatusBadRequest, "Duration must be a whole number of months")
+		return
+	}
+	if input.NumPayments != nil && *input.NumPayments <= 0 {
+		writeError(w, http.StatusBadRequest, "num_payments must be a whole number greater than 0")
+		return
+	}
+	if input.CustomScheduleEnabled {
+		if input.CustomScheduleAmount == nil || *input.CustomScheduleAmount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_amount must be greater than 0")
+			return
+		}
+		if input.CustomScheduleIntervalCount == nil || *input.CustomScheduleIntervalCount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_interval_count must be greater than 0")
+			return
+		}
+		if input.CustomScheduleNumPayments == nil || *input.CustomScheduleNumPayments <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_num_payments must be greater than 0")
+			return
+		}
+		if input.CustomScheduleIntervalUnit == nil || (*input.CustomScheduleIntervalUnit != "week" && *input.CustomScheduleIntervalUnit != "month") {
+			writeError(w, http.StatusBadRequest, "custom_schedule_interval_unit must be 'week' or 'month'")
+			return
+		}
 	}
 	to, err := h.mtRepo.CreateTermOption(r.Context(), tenantID, mtID,
 		input.DurationMonths, input.FeeTotal, input.FeeWeekly,
-		input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments)
+		input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
+		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
 	if err != nil {
 		log.Printf("Error creating term option: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create term option")
@@ -240,13 +282,47 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		FeeQuarterly   *float64 `json:"fee_quarterly"`
 		AllowUpfront   bool     `json:"allow_upfront"`
 		NumPayments    *int     `json:"num_payments"`
+		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
+		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
+		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
+		CustomScheduleIntervalUnit  *string  `json:"custom_schedule_interval_unit"`
+		CustomScheduleIntervalCount *int     `json:"custom_schedule_interval_count"`
+		CustomScheduleNumPayments   *int     `json:"custom_schedule_num_payments"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if input.DurationMonths <= 0 {
+		writeError(w, http.StatusBadRequest, "Duration must be a whole number of months")
+		return
+	}
+	if input.NumPayments != nil && *input.NumPayments <= 0 {
+		writeError(w, http.StatusBadRequest, "num_payments must be a whole number greater than 0")
+		return
+	}
+	if input.CustomScheduleEnabled {
+		if input.CustomScheduleAmount == nil || *input.CustomScheduleAmount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_amount must be greater than 0")
+			return
+		}
+		if input.CustomScheduleIntervalCount == nil || *input.CustomScheduleIntervalCount <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_interval_count must be greater than 0")
+			return
+		}
+		if input.CustomScheduleNumPayments == nil || *input.CustomScheduleNumPayments <= 0 {
+			writeError(w, http.StatusBadRequest, "custom_schedule_num_payments must be greater than 0")
+			return
+		}
+		if input.CustomScheduleIntervalUnit == nil || (*input.CustomScheduleIntervalUnit != "week" && *input.CustomScheduleIntervalUnit != "month") {
+			writeError(w, http.StatusBadRequest, "custom_schedule_interval_unit must be 'week' or 'month'")
+			return
+		}
+	}
 	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
-		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments)
+		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
+		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
 	if err != nil {
 		log.Printf("Error updating term option: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update term option")
