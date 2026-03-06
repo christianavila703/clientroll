@@ -944,6 +944,15 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const formRef = useRef<HTMLFormElement | null>(null);
+
+  const toBirthDateISOString = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    // Backend decodes into time.Time and expects RFC3339.
+    const iso = `${trimmed}T00:00:00Z`;
+    return Number.isNaN(Date.parse(iso)) ? null : iso;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -963,7 +972,8 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
         emergency_contact_name: form.emergency_contact_name,
         emergency_contact_phone: form.emergency_contact_phone,
       };
-      if (form.birth_date) payload.birth_date = form.birth_date;
+      const birthDateISO = toBirthDateISOString(form.birth_date);
+      if (birthDateISO) payload.birth_date = birthDateISO;
       await api.updateClient(client.id, payload);
       onSaved();
       onClose();
@@ -990,7 +1000,12 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
             <h2 className="text-[15px] font-bold text-gray-900">Edit: {client.name}</h2>
             <div className="flex items-center gap-2">
               <button type="button" onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
-              <button type="submit" form="edit-client-form" disabled={saving} className="btn-primary text-[12px]">
+              <button
+                type="button"
+                onClick={() => formRef.current?.requestSubmit()}
+                disabled={saving}
+                className="btn-primary text-[12px]"
+              >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -1009,7 +1024,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
 
           {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
 
-          <form id="edit-client-form" onSubmit={handleSubmit} className="px-6 py-5 max-h-[60vh] overflow-y-auto">
+          <form ref={formRef} id="edit-client-form" onSubmit={handleSubmit} className="px-6 py-5 max-h-[60vh] overflow-y-auto">
             {tab === "details" && (
               <div className="space-y-5">
                 <div>

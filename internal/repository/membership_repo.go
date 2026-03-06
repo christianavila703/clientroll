@@ -61,7 +61,7 @@ func (r *MembershipRepo) Create(
 		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments,
 		    status, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active', $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', $13, $14, $15, $16, $17)
 		RETURNING id, tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, member_signature_data, member_signed_at,

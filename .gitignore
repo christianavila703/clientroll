@@ -16,6 +16,7 @@ frontend/.cache/
 web/assets/*.js
 web/assets/*.css
 web/assets/*.map
+tests/test-results/
 
 # Uploads (user data)
 uploads/tenants/

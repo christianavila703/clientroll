@@ -8,6 +8,7 @@ interface MonthlyData { month: string; revenue: number; }
 interface BreakdownData { type_title: string; revenue: number; count: number; }
 interface StatusData { [key: string]: number; }
 interface RecentClient { id: string; name: string; email?: string; created_at: string; }
+interface MixSlice { name: string; count: number; revenue: number; colour: string; }
 
 const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6"];
 
@@ -32,6 +33,22 @@ export default function DashboardPage() {
   const revDelta = prevMonthRevenue > 0 ? Math.round(((curMonthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100) : 0;
 
   const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
+
+  const topMixCount = 5;
+  const sortedBreakdown = [...breakdown].sort((a, b) => b.count - a.count);
+  const topMix = sortedBreakdown.slice(0, topMixCount).map((b, i) => ({
+    name: b.type_title,
+    count: b.count,
+    revenue: b.revenue,
+    colour: COLOURS[i % COLOURS.length],
+  }));
+  const remainingMix = sortedBreakdown.slice(topMixCount);
+  const otherMixCount = remainingMix.reduce((sum, item) => sum + item.count, 0);
+  const otherMixRevenue = remainingMix.reduce((sum, item) => sum + item.revenue, 0);
+  const membershipMix: MixSlice[] = otherMixCount > 0
+    ? [...topMix, { name: "Other", count: otherMixCount, revenue: otherMixRevenue, colour: "#9ca3af" }]
+    : topMix;
+  const totalMixMembers = membershipMix.reduce((sum, item) => sum + item.count, 0);
 
   /* ─── Revenue Chart — gradient bars + trend line ─── */
   const revenueChart = {
@@ -131,16 +148,16 @@ export default function DashboardPage() {
   /* ─── Membership Mix Donut ─── */
   const membershipDonut = {
     tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
-    legend: { bottom: 0, left: "center", textStyle: { color: "#6b7280", fontSize: 12 } },
+    legend: { show: false },
     series: [{
       type: "pie" as const,
       radius: ["45%", "70%"],
-      center: ["50%", "40%"],
+      center: ["50%", "45%"],
       avoidLabelOverlap: true,
       itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 3 },
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 14, fontWeight: "bold" } },
-      data: breakdown.map((b, i) => ({ value: b.count, name: b.type_title, itemStyle: { color: COLOURS[i % COLOURS.length] } })),
+      data: membershipMix.map((m) => ({ value: m.count, name: m.name, itemStyle: { color: m.colour } })),
     }],
   };
 
@@ -224,9 +241,24 @@ export default function DashboardPage() {
           {/* Membership Mix Donut */}
           <div className="card overflow-hidden">
             <div className="card-header"><h3>Membership Mix</h3></div>
-            <div className="px-3 py-4">
-              {breakdown.length > 0 ? (
-                <ReactECharts option={membershipDonut} style={{ height: 280 }} />
+            <div className="px-4 py-4">
+              {membershipMix.length > 0 ? (
+                <>
+                  <ReactECharts option={membershipDonut} style={{ height: 250 }} />
+                  <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                    {membershipMix.map((item) => {
+                      const pct = totalMixMembers > 0 ? Math.round((item.count / totalMixMembers) * 100) : 0;
+                      return (
+                        <div key={item.name} className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ background: item.colour }} />
+                          <span className="text-[12px] text-gray-600 truncate flex-1" title={item.name}>{item.name}</span>
+                          <span className="text-[12px] font-medium text-gray-900 tabular-nums">{item.count}</span>
+                          <span className="text-[11px] text-gray-400 tabular-nums w-10 text-right">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               ) : (
                 <div className="flex h-40 items-center justify-center text-[13px] text-gray-400">No data yet</div>
               )}

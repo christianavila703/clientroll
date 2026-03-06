@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"clientroll/internal/database"
 	"clientroll/internal/email"
@@ -117,12 +118,74 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid client ID")
 		return
 	}
-	var input models.Client
+
+	var input struct {
+		Name                  *string `json:"name"`
+		Address               *string `json:"address"`
+		Suburb                *string `json:"suburb"`
+		State                 *string `json:"state"`
+		Postcode              *string `json:"postcode"`
+		Email                 *string `json:"email"`
+		Phone                 *string `json:"phone"`
+		BirthDate             *string `json:"birth_date"`
+		Gender                *string `json:"gender"`
+		EmergencyContactName  *string `json:"emergency_contact_name"`
+		EmergencyContactPhone *string `json:"emergency_contact_phone"`
+	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	client, err := h.clientRepo.Update(r.Context(), clientID, tenantID, &input)
+
+	normalize := func(v *string) *string {
+		if v == nil {
+			return nil
+		}
+		t := strings.TrimSpace(*v)
+		if t == "" {
+			return nil
+		}
+		return &t
+	}
+
+	var birthDate *time.Time
+	if bd := normalize(input.BirthDate); bd != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, *bd)
+		if parseErr != nil {
+			if d, dayErr := time.Parse("2006-01-02", *bd); dayErr == nil {
+				parsed = d
+			} else {
+				writeError(w, http.StatusBadRequest, "Invalid request body")
+				return
+			}
+		}
+		birthDate = &parsed
+	}
+
+	update := &models.Client{
+		Name: strings.TrimSpace(func() string {
+			if input.Name == nil {
+				return ""
+			}
+			return *input.Name
+		}()),
+		Address:               normalize(input.Address),
+		Suburb:                normalize(input.Suburb),
+		State:                 normalize(input.State),
+		Postcode:              normalize(input.Postcode),
+		Email:                 normalize(input.Email),
+		Phone:                 normalize(input.Phone),
+		BirthDate:             birthDate,
+		Gender:                normalize(input.Gender),
+		EmergencyContactName:  normalize(input.EmergencyContactName),
+		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
+	}
+	if update.Name == "" {
+		writeError(w, http.StatusBadRequest, "Name is required")
+		return
+	}
+
+	client, err := h.clientRepo.Update(r.Context(), clientID, tenantID, update)
 	if err != nil {
 		log.Printf("Error updating client: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update client")
@@ -133,26 +196,26 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ClientMembershipRow is the enriched membership data for the client profile.
 type ClientMembershipRow struct {
-	MembershipID      string   `json:"membership_id"`
-	MembershipType    string   `json:"membership_type"`
-	MembershipTypeID  string   `json:"membership_type_id"`
-	TermMonths        int      `json:"term_months"`
-	StartDate         string   `json:"start_date"`
-	EndDate           string   `json:"end_date"`
-	PaymentMethod     *string  `json:"payment_method"`
-	PaymentFrequency  *string  `json:"payment_frequency"`
-	PaymentIntervalUnit  *string `json:"payment_interval_unit"`
-	PaymentIntervalCount int     `json:"payment_interval_count"`
-	PaymentAmount     *float64 `json:"payment_amount"`
-	NumPayments       *int     `json:"num_payments"`
-	Status            string   `json:"status"`
-	MandateID         *string  `json:"mandate_id"`
-	SubscriptionID    *string  `json:"subscription_id"`
-	TotalPaid         float64  `json:"total_paid"`
-	TotalExpected     float64  `json:"total_expected"`
-	FailedCount       int      `json:"failed_count"`
-	LastPaymentDate   *string  `json:"last_payment_date"`
-	LastPaymentStatus *string  `json:"last_payment_status"`
+	MembershipID         string   `json:"membership_id"`
+	MembershipType       string   `json:"membership_type"`
+	MembershipTypeID     string   `json:"membership_type_id"`
+	TermMonths           int      `json:"term_months"`
+	StartDate            string   `json:"start_date"`
+	EndDate              string   `json:"end_date"`
+	PaymentMethod        *string  `json:"payment_method"`
+	PaymentFrequency     *string  `json:"payment_frequency"`
+	PaymentIntervalUnit  *string  `json:"payment_interval_unit"`
+	PaymentIntervalCount int      `json:"payment_interval_count"`
+	PaymentAmount        *float64 `json:"payment_amount"`
+	NumPayments          *int     `json:"num_payments"`
+	Status               string   `json:"status"`
+	MandateID            *string  `json:"mandate_id"`
+	SubscriptionID       *string  `json:"subscription_id"`
+	TotalPaid            float64  `json:"total_paid"`
+	TotalExpected        float64  `json:"total_expected"`
+	FailedCount          int      `json:"failed_count"`
+	LastPaymentDate      *string  `json:"last_payment_date"`
+	LastPaymentStatus    *string  `json:"last_payment_status"`
 }
 
 // GetMemberships returns all memberships for a client with enriched data.

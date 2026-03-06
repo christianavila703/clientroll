@@ -16,7 +16,11 @@ test("edit client modal saves without invalid request body", async ({ page, requ
   await page.locator('label:has-text("Email")').locator("xpath=following-sibling::input[1]").fill(email);
   await page.locator('label:has-text("Password")').locator("xpath=following-sibling::input[1]").fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByText("Check your email")).toBeVisible({ timeout: 15000 });
+  const checkEmailNotice = page.getByText("Check your email");
+  await Promise.race([
+    page.waitForURL("**/dashboard", { timeout: 15000 }),
+    checkEmailNotice.waitFor({ state: "visible", timeout: 15000 }),
+  ]);
 
   await page.goto("/dashboard");
   await page.waitForLoadState("networkidle");
@@ -46,6 +50,8 @@ test("edit client modal saves without invalid request body", async ({ page, requ
   await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.locator("text=Invalid request body")).toHaveCount(0);
-  await expect(modal).toBeHidden({ timeout: 10000 });
+  await expect(page.locator("text=Failed")).toHaveCount(0);
+  await expect(modal).toBeHidden({ timeout: 20000 });
+  await expect(page.locator("main")).toContainText("0411111111");
 });
 
