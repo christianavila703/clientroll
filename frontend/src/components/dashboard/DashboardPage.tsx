@@ -18,13 +18,18 @@ export default function DashboardPage() {
   const [breakdown, setBreakdown] = useState<BreakdownData[]>([]);
   const [statuses, setStatuses] = useState<StatusData>({});
   const [recentClients, setRecentClients] = useState<RecentClient[]>([]);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    api.getDashboardReport().then((d) => setSummary(d as Summary)).catch(() => {});
-    api.getMonthlyRevenueReport().then((d: any) => setMonthly(d.months || [])).catch(() => {});
-    api.getMembershipBreakdownReport().then((d: any) => setBreakdown(d.breakdown || [])).catch(() => {});
-    api.getPaymentStatusReport().then((d: any) => setStatuses(d.statuses || {})).catch(() => {});
-    api.listClients("").then((d: any) => setRecentClients((d.clients || []).slice(0, 7))).catch(() => {});
+    const markError = (e: unknown) => {
+      console.error(e);
+      setLoadError((prev) => prev || "Some dashboard data failed to load.");
+    };
+    api.getDashboardReport().then((d) => setSummary(d as Summary)).catch(markError);
+    api.getMonthlyRevenueReport().then((d: any) => setMonthly(d.months || [])).catch(markError);
+    api.getMembershipBreakdownReport().then((d: any) => setBreakdown(d.breakdown || [])).catch(markError);
+    api.getPaymentStatusReport().then((d: any) => setStatuses(d.statuses || {})).catch(markError);
+    api.listClients("").then((d: any) => setRecentClients((d.clients || []).slice(0, 7))).catch(markError);
   }, []);
 
   const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
@@ -166,6 +171,12 @@ export default function DashboardPage() {
       <div className="page-header">
         <h1 className="page-title">Overview</h1>
       </div>
+
+      {loadError && (
+        <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+          {loadError}
+        </div>
+      )}
 
       {/* Alert */}
       {summary && summary.failed_payments > 0 && (

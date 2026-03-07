@@ -46,6 +46,7 @@ export default function StaffSignupLauncher() {
   const [types, setTypes] = useState<MembershipType[]>([]);
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     Promise.all([
@@ -56,7 +57,7 @@ export default function StaffSignupLauncher() {
       const tenantSettings = tenantData as any;
       setTypes((membershipData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
       setTenant({ slug: tenantSettings.slug, name: tenantSettings.name });
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch((e) => { console.error(e); setError("Failed to load signup launcher"); }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
@@ -71,6 +72,10 @@ export default function StaffSignupLauncher() {
           <p className="text-[13px] text-gray-500">Start a membership signup on iPad or share a link with a client</p>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
 
       {/* Quick launch — iPad mode */}
       <div className="card mb-5 overflow-hidden">

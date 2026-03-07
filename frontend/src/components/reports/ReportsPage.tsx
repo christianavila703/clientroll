@@ -53,17 +53,18 @@ const STATUS_COLOURS: Record<string, string> = { succeeded: "#10b981", failed: "
 export default function ReportsPage() {
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [tab, setTab] = useState<"overview" | "revenue" | "memberships" | "payments" | "clients">("overview");
 
   useEffect(() => {
     api.getComprehensiveReport()
       .then((payload) => setData(normalizeReport(payload)))
-      .catch(() => {})
+      .catch((e) => { console.error(e); setError("Failed to load reports"); })
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
-  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">Failed to load report data</div>;
+  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">{error || "Failed to load report data"}</div>;
   const safeData = normalizeReport(data);
 
   const tabs = [

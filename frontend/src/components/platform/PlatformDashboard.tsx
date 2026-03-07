@@ -14,6 +14,7 @@ interface Tenant {
 export default function PlatformDashboard() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     api
@@ -22,7 +23,7 @@ export default function PlatformDashboard() {
         const d = data as { tenants: Tenant[] };
         setTenants(d.tenants || []);
       })
-      .catch(() => {})
+      .catch((e) => { console.error(e); setError("Failed to load tenants"); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -41,6 +42,10 @@ export default function PlatformDashboard() {
           + Create Tenant
         </Link>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
 
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-8">

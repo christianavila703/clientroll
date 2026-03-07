@@ -21,11 +21,12 @@ import ReportsPage from "./components/reports/ReportsPage";
 import TermsPage from "./components/terms/TermsPage";
 import EmailTemplatesPage from "./components/settings/EmailTemplatesPage";
 import BonusesPage from "./components/bonuses/BonusesPage";
-import PlaceholderPage from "./components/common/PlaceholderPage";
 import StaffSignupLauncher from "./components/signup/StaffSignupLauncher";
 import ServicesPage from "./components/services/ServicesPage";
 import RequirePlatformAdmin from "./components/platform/RequirePlatformAdmin";
 import PlatformTenantCreatePage from "./components/platform/PlatformTenantCreatePage";
+import PlatformBillingPage from "./components/platform/PlatformBillingPage";
+import PlatformTenantBillingDetailPage from "./components/platform/PlatformTenantBillingDetailPage";
 
 function App() {
   return (
@@ -65,16 +66,8 @@ function App() {
             <Route path="/platform" element={<PlatformDashboard />} />
             <Route path="/platform/tenants" element={<PlatformDashboard />} />
             <Route path="/platform/tenants/new" element={<PlatformTenantCreatePage />} />
-            <Route
-              path="/platform/billing"
-              element={
-                <PlaceholderPage
-                  title="Platform Billing"
-                  description="Manage tenant subscriptions and usage"
-                  phase="Phase 8"
-                />
-              }
-            />
+            <Route path="/platform/billing" element={<PlatformBillingPage />} />
+            <Route path="/platform/billing/tenants/:tenantId" element={<PlatformTenantBillingDetailPage />} />
           </Route>
         </Route>
 

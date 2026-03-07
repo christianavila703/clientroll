@@ -16,6 +16,7 @@ func NewMockBillingProvider() *MockBillingProvider {
 }
 
 func (m *MockBillingProvider) CreateSubscription(_ context.Context, input SubscriptionInput) (string, error) {
+	_ = input // included for parity with real provider
 	return fmt.Sprintf("mock_sub_%s", uuid.New().String()[:8]), nil
 }
 

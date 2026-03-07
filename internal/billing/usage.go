@@ -49,6 +49,9 @@ func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember fl
 		amountUSD := float64(activeCount) * pricePerMember
 
 		_, err := u.db.Pool.Exec(ctx, `
+			WITH _ AS (
+				SELECT set_config('app.current_tenant_id', $1::text, true)
+			)
 			INSERT INTO tenant_usage_snapshots (tenant_id, active_member_count, amount_usd, snapshot_date)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (tenant_id, snapshot_date) DO UPDATE SET
@@ -61,6 +64,9 @@ func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember fl
 
 		// Update the subscription record
 		u.db.Pool.Exec(ctx, `
+			WITH _ AS (
+				SELECT set_config('app.current_tenant_id', $1::text, true)
+			)
 			UPDATE tenant_subscriptions SET active_member_count = $2,
 				current_monthly_amount_usd = $3, updated_at = NOW()
 			WHERE tenant_id = $1`,

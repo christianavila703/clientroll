@@ -61,7 +61,7 @@ function AgreementSettings() {
     api
       .getAgreementSettings()
       .then((res) => setData(res as AgreementData))
-      .catch(() => {});
+      .catch((e) => { console.error(e); setMessage("Failed to load agreement settings"); });
   }, []);
 
   const handleSave = async () => {
@@ -139,7 +139,7 @@ function TenantSettings() {
         default_thankyou_image_url: t.default_thankyou_image_url || "",
         default_thankyou_redirect_url: t.default_thankyou_redirect_url || "",
       });
-    }).catch(() => {});
+    }).catch((e) => { console.error(e); setMessage("Failed to load organisation settings"); });
   }, []);
 
   const handleSave = async () => {
@@ -236,7 +236,7 @@ function IntegrationsSettings() {
   const refreshIntegrations = () => {
     api.listIntegrations().then((data) => {
       setIntegrations((data as { integrations: typeof integrations }).integrations || []);
-    }).catch(() => {});
+    }).catch((e) => { console.error(e); setMessage("Failed to load integrations"); });
   };
 
   useEffect(() => {
@@ -244,7 +244,7 @@ function IntegrationsSettings() {
     api.getTenantSettings().then((res) => {
       const t = res as { slug?: string };
       setTenantSlug(t.slug || "");
-    }).catch(() => {});
+    }).catch((e) => { console.error(e); setMessage("Failed to load tenant settings"); });
   }, []);
 
   const providers = [

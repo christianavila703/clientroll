@@ -244,6 +244,16 @@ export const api = {
   getTenant: (id: string) => request(`/platform/tenants/${id}`),
   updateTenant: (id: string, data: unknown) =>
     request(`/platform/tenants/${id}`, { method: "PUT", body: data }),
+
+  // Platform billing (platform admin)
+  getPlatformBillingConfig: () => request("/platform/billing/config"),
+  updatePlatformBillingConfig: (data: unknown) =>
+    request("/platform/billing/config", { method: "PUT", body: data }),
+  listPlatformBillingTenants: () => request("/platform/billing/tenants"),
+  getPlatformBillingTenant: (tenantId: string) =>
+    request(`/platform/billing/tenants/${tenantId}`),
+  createPlatformBillingPortalSession: (tenantId: string, data?: unknown) =>
+    request(`/platform/billing/tenants/${tenantId}/portal`, { method: "POST", body: data || {} }),
 };
 
 export { ApiError };

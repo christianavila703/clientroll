@@ -23,9 +23,16 @@ type PlatformBillingProvider interface {
 
 // SubscriptionInput holds data for creating a subscription.
 type SubscriptionInput struct {
-	TenantID    string
-	TenantName  string
-	AdminEmail  string
+	TenantID   string
+	TenantName string
+	AdminEmail string
+
+	// StripePriceID is the recurring price ID (per active member per month).
+	// This is platform-configured and stored in platform_billing_config.
+	StripePriceID string
+
+	// PricePerMember is retained for reporting/validation, but Stripe billing
+	// should rely on StripePriceID as the source of truth.
 	PricePerMember float64
 }
 

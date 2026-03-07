@@ -16,6 +16,7 @@ frontend/.cache/
 web/assets/*.js
 web/assets/*.css
 web/assets/*.map
+# (Playwright E2E suite removed; keep in case reintroduced)
 tests/test-results/
 
 # Uploads (user data)

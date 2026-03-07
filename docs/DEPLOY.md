@@ -66,3 +66,60 @@ This builds locally, SCPs the binary and `frontend/dist` to the server, runs mig
 |------|-------------|
 | **Git → GitHub → pull on server → `./scripts/deploy-on-server.sh`** | Standard: single source of truth in GitHub; server always builds from latest pull. |
 | **`./deploy.sh`** (build locally, SCP) | When the server has no Go/Node or you want to avoid building on the server. |
+
+---
+
+## Platform billing cron (daily usage snapshot)
+
+Platform billing uses **daily active-member snapshots** to keep Stripe subscription quantities in sync.
+
+The job entrypoint is:
+
+```bash
+go run ./cmd/billing-snapshot
+```
+
+It requires (in the same environment as the API):
+
+- `DATABASE_URL`
+- `MASTER_ENCRYPTION_KEY`
+
+And platform billing must be enabled/configured in the database (`platform_billing_config`).
+
+### Example systemd unit + timer
+
+Create a service (example: `/etc/systemd/system/clientroll-billing-snapshot.service`):
+
+```ini
+[Unit]
+Description=ClientRoll platform billing snapshot
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/www/clientroll-repo
+EnvironmentFile=/var/www/clientroll/.env
+ExecStart=/usr/bin/env bash -lc 'go run ./cmd/billing-snapshot'
+```
+
+Create a timer (example: `/etc/systemd/system/clientroll-billing-snapshot.timer`):
+
+```ini
+[Unit]
+Description=Run ClientRoll billing snapshot daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now clientroll-billing-snapshot.timer
+sudo systemctl list-timers | grep clientroll-billing-snapshot
+```

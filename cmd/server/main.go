@@ -128,6 +128,10 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	inboundWebhookEventRepo := repository.NewInboundWebhookEventRepo(db)
 	inboundWebhookKeyRepo := repository.NewInboundWebhookKeyRepo(db)
 	credRepo := repository.NewTenantCredentialRepo(db)
+	platformBillingConfigRepo := repository.NewPlatformBillingConfigRepo(db)
+	tenantSubRepo := repository.NewTenantSubscriptionRepo(db)
+	tenantUsageRepo := repository.NewTenantUsageRepo(db)
+	tenantInvoiceRepo := repository.NewTenantInvoiceRepo(db)
 
 	// Email service
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
@@ -135,6 +139,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	// Handlers
 	authHandler := handlers.NewAuthHandler(userRepo, adminRepo, tenantRepo, jwtMgr, sessionMgr)
 	platformHandler := handlers.NewPlatformHandler(tenantRepo, userRepo)
+	platformBillingHandler := handlers.NewPlatformBillingHandler(cfg.AppURL, enc, platformBillingConfigRepo, tenantRepo, tenantSubRepo, tenantUsageRepo, tenantInvoiceRepo)
+	platformBillingWebhookHandler := handlers.NewPlatformBillingWebhookHandler(enc, platformBillingConfigRepo, tenantSubRepo, tenantInvoiceRepo)
 	settingsHandler := handlers.NewSettingsHandler(settingsRepo, tenantRepo)
 	staffHandler := handlers.NewStaffHandler(userRepo)
 	bonusHandler := handlers.NewBonusHandler(bonusRepo)
@@ -202,6 +208,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		// GoCardless OAuth callback and webhook (no auth)
 		gocardlessHandler.RegisterPublicRoutes(r)
 		stripeWebhookHandler.RegisterPublicRoutes(r)
+		platformBillingWebhookHandler.RegisterPublicRoutes(r)
 		inboundWebhookHandler.RegisterPublicRoutes(r)
 
 		// Public slug check (no rate limit — read-only)
@@ -284,6 +291,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Route("/platform", func(r chi.Router) {
 				r.Use(authMW.RequirePlatformAdmin)
 				platformHandler.RegisterRoutes(r)
+				platformBillingHandler.RegisterRoutes(r)
 				// Phase 8: Platform billing
 			})
 		})
