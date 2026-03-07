@@ -26,9 +26,9 @@ echo "Uploading binary..."
 scp "${SSH_OPTS[@]}" server_linux_amd64 "$DEPLOY_HOST:$DEPLOY_PATH/server_new"
 
 echo "Preparing remote dirs..."
-ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "mkdir -p $DEPLOY_PATH/frontend_dist_new"
+ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "mkdir -p $DEPLOY_PATH/web_new"
 echo "Uploading frontend (web/)..."
-scp "${SSH_OPTS[@]}" -r web/* "$DEPLOY_HOST:$DEPLOY_PATH/frontend_dist_new/"
+scp "${SSH_OPTS[@]}" -r web/* "$DEPLOY_HOST:$DEPLOY_PATH/web_new/"
 
 echo "Running migration (if repo present) and switching binary + frontend on server..."
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH' '$SERVICE'" << 'REMOTE'
@@ -53,9 +53,9 @@ ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH' '$SERVICE'" << 'R
     cp -f server "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
     chmod +x "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
   fi
-  rm -rf frontend_dist_old
-  [[ -d frontend_dist ]] && mv frontend_dist frontend_dist_old
-  mv -f frontend_dist_new frontend_dist
+  rm -rf web_old
+  [[ -d web ]] && mv web web_old
+  mv -f web_new web
   echo "Starting $SERVICE..."
   sudo systemctl start "$SERVICE" 2>/dev/null || true
   echo "Deploy done."

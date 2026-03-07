@@ -67,30 +67,26 @@ fi
 
 echo "Preparing deploy directories..."
 mkdir -p "$DEPLOY_PATH"
-mkdir -p "$DEPLOY_PATH/frontend_dist_new"
-rm -rf "$DEPLOY_PATH/frontend_dist_new"/*
+mkdir -p "$DEPLOY_PATH/web_new"
+rm -rf "$DEPLOY_PATH/web_new"/*
 
 echo "Copying backend binary..."
 cp -f "$BUILD_DIR/server_new" "$DEPLOY_PATH/server_new"
 
 echo "Staging frontend bundle from web/..."
-mkdir -p "$BUILD_DIR/frontend_dist"
-cp -a "$SOURCE_REPO/web/." "$BUILD_DIR/frontend_dist/"
-
-echo "Copying frontend bundle to deploy path..."
-cp -a "$BUILD_DIR/frontend_dist/." "$DEPLOY_PATH/frontend_dist_new/"
+cp -a "$SOURCE_REPO/web/." "$DEPLOY_PATH/web_new/"
 
 # Write a build marker into the deployed frontend so you can verify what is live.
-echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/frontend_dist_new/build.txt"
+echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/web_new/build.txt"
 echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/BUILD_SHA"
 
 echo "Switching release files..."
 sudo systemctl stop "$SERVICE" 2>/dev/null || true
 mv -f "$DEPLOY_PATH/server_new" "$DEPLOY_PATH/server"
 chmod +x "$DEPLOY_PATH/server" 2>/dev/null || true
-rm -rf "$DEPLOY_PATH/frontend_dist_old"
-[[ -d "$DEPLOY_PATH/frontend_dist" ]] && mv "$DEPLOY_PATH/frontend_dist" "$DEPLOY_PATH/frontend_dist_old"
-mv -f "$DEPLOY_PATH/frontend_dist_new" "$DEPLOY_PATH/frontend_dist"
+rm -rf "$DEPLOY_PATH/web_old"
+[[ -d "$DEPLOY_PATH/web" ]] && mv "$DEPLOY_PATH/web" "$DEPLOY_PATH/web_old"
+mv -f "$DEPLOY_PATH/web_new" "$DEPLOY_PATH/web"
 
 # If your systemd unit points at bin/clientroll, keep it in sync.
 if [[ -d "$DEPLOY_PATH/bin" ]]; then
