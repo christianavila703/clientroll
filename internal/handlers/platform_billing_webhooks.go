@@ -81,15 +81,15 @@ func (h *PlatformBillingWebhookHandler) Handle(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	switch event.Type {
+	switch string(event.Type) {
 	case "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted":
-		if err := h.handleSubscriptionEvent(r, event.Data.Raw, event.Type); err != nil {
+		if err := h.handleSubscriptionEvent(r, event.Data.Raw, string(event.Type)); err != nil {
 			log.Printf("platform billing webhook: subscription handler error: %v", err)
 			writeError(w, http.StatusInternalServerError, "Webhook processing error")
 			return
 		}
 	case "invoice.created", "invoice.finalized", "invoice.paid", "invoice.payment_failed", "invoice.voided":
-		if err := h.handleInvoiceEvent(r, event.Data.Raw, event.Type); err != nil {
+		if err := h.handleInvoiceEvent(r, event.Data.Raw, string(event.Type)); err != nil {
 			log.Printf("platform billing webhook: invoice handler error: %v", err)
 			writeError(w, http.StatusInternalServerError, "Webhook processing error")
 			return

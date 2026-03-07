@@ -3,7 +3,6 @@ package handlers
 import (
 	"log"
 	"net/http"
-	"time"
 
 	"clientroll/internal/database"
 	"clientroll/internal/models"
@@ -300,7 +299,7 @@ func (h *PlatformBillingHandler) CreatePortalSession(w http.ResponseWriter, r *h
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"url":        sess.URL,
-		"expires_at": time.Unix(sess.ExpiresAt, 0).UTC(),
+		// Billing Portal sessions do not expose an expires_at field in stripe-go.
 	})
 }
 
