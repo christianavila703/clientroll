@@ -51,7 +51,7 @@ export default function MembershipSelect({ memberships, onSelect }: Props) {
                 </p>
               )}
               <div className="mt-5 flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-indigo-600 tabular-nums">
+                <span className="text-3xl font-bold tabular-nums" style={{ color: "var(--brandPrimary)" }}>
                   ${((mt as any).intrinsic_value || mt.total_value).toLocaleString()}
                 </span>
                 <span className="text-[13px] text-gray-400">membership value</span>
@@ -61,7 +61,10 @@ export default function MembershipSelect({ memberships, onSelect }: Props) {
                   {mt.term_options.length} term option{mt.term_options.length !== 1 ? "s" : ""} available
                 </p>
               )}
-              <div className="mt-6 w-full rounded-xl bg-indigo-600 text-white text-center py-3.5 text-[14px] font-semibold group-hover:bg-indigo-700 transition-colors">
+              <div
+                className="mt-6 w-full rounded-xl text-white text-center py-3.5 text-[14px] font-semibold transition-colors"
+                style={{ backgroundColor: "var(--brandPrimary)" }}
+              >
                 View Details
               </div>
             </div>

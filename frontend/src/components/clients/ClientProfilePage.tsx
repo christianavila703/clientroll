@@ -981,15 +981,6 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
     finally { setSaving(false); }
   };
 
-  const F = ({ label, value, onChange, type = "text", placeholder = "", required = false, colSpan = false }: {
-    label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; required?: boolean; colSpan?: boolean;
-  }) => (
-    <div className={colSpan ? "sm:col-span-2" : ""}>
-      <label className="block text-[13px] font-medium text-gray-700 mb-1">{label}{required && <span className="text-red-500"> *</span>}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="input-field" placeholder={placeholder} required={required} />
-    </div>
-  );
-
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
@@ -1030,13 +1021,34 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Personal information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <F label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required colSpan />
-                    <F label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
-                    <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
-                    <F label="Date of birth" value={form.birth_date} onChange={(v) => setForm({ ...form, birth_date: v })} type="date" />
+                    <LabeledInput
+                      label="Full name"
+                      value={form.name}
+                      onChange={(v) => setForm((prev) => ({ ...prev, name: v }))}
+                      required
+                      colSpan
+                    />
+                    <LabeledInput
+                      label="Email"
+                      value={form.email}
+                      onChange={(v) => setForm((prev) => ({ ...prev, email: v }))}
+                      type="email"
+                    />
+                    <LabeledInput
+                      label="Phone"
+                      value={form.phone}
+                      onChange={(v) => setForm((prev) => ({ ...prev, phone: v }))}
+                      type="tel"
+                    />
+                    <LabeledInput
+                      label="Date of birth"
+                      value={form.birth_date}
+                      onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
+                      type="date"
+                    />
                     <div>
                       <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
-                      <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} className="input-field">
+                      <select value={form.gender} onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))} className="input-field">
                         <option value="">—</option><option value="Female">Female</option><option value="Male">Male</option>
                       </select>
                     </div>
@@ -1045,17 +1057,43 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Address</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <F label="Street address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} colSpan />
-                    <F label="Suburb" value={form.suburb} onChange={(v) => setForm({ ...form, suburb: v })} />
-                    <F label="State" value={form.state} onChange={(v) => setForm({ ...form, state: v })} />
-                    <F label="Postcode" value={form.postcode} onChange={(v) => setForm({ ...form, postcode: v })} />
+                    <LabeledInput
+                      label="Street address"
+                      value={form.address}
+                      onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
+                      colSpan
+                    />
+                    <LabeledInput
+                      label="Suburb"
+                      value={form.suburb}
+                      onChange={(v) => setForm((prev) => ({ ...prev, suburb: v }))}
+                    />
+                    <LabeledInput
+                      label="State"
+                      value={form.state}
+                      onChange={(v) => setForm((prev) => ({ ...prev, state: v }))}
+                    />
+                    <LabeledInput
+                      label="Postcode"
+                      value={form.postcode}
+                      onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
+                    />
                   </div>
                 </div>
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <F label="Contact name" value={form.emergency_contact_name} onChange={(v) => setForm({ ...form, emergency_contact_name: v })} />
-                    <F label="Contact phone" value={form.emergency_contact_phone} onChange={(v) => setForm({ ...form, emergency_contact_phone: v })} type="tel" />
+                    <LabeledInput
+                      label="Contact name"
+                      value={form.emergency_contact_name}
+                      onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
+                    />
+                    <LabeledInput
+                      label="Contact phone"
+                      value={form.emergency_contact_phone}
+                      onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
+                      type="tel"
+                    />
                   </div>
                 </div>
               </div>
@@ -1065,21 +1103,21 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <F label="Business structure" value={form.business_structure} onChange={(v) => setForm({ ...form, business_structure: v })} placeholder="e.g. Sole Trader" />
-                    <F label="GST registered" value={form.gst_registered} onChange={(v) => setForm({ ...form, gst_registered: v })} placeholder="Yes / No" />
-                    <F label="Tax number" value={form.tax_number} onChange={(v) => setForm({ ...form, tax_number: v })} />
-                    <F label="Company number" value={form.company_number} onChange={(v) => setForm({ ...form, company_number: v })} />
-                    <F label="Phone" value={form.company_phone} onChange={(v) => setForm({ ...form, company_phone: v })} type="tel" />
-                    <F label="Website" value={form.company_website} onChange={(v) => setForm({ ...form, company_website: v })} placeholder="https://" colSpan />
+                    <LabeledInput label="Business structure" value={form.business_structure} onChange={(v) => setForm((prev) => ({ ...prev, business_structure: v }))} placeholder="e.g. Sole Trader" />
+                    <LabeledInput label="GST registered" value={form.gst_registered} onChange={(v) => setForm((prev) => ({ ...prev, gst_registered: v }))} placeholder="Yes / No" />
+                    <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
+                    <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
+                    <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" />
+                    <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" colSpan />
                   </div>
                 </div>
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company address</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <F label="Street address" value={form.company_address} onChange={(v) => setForm({ ...form, company_address: v })} colSpan />
-                    <F label="Suburb" value={form.company_suburb} onChange={(v) => setForm({ ...form, company_suburb: v })} />
-                    <F label="State" value={form.company_state} onChange={(v) => setForm({ ...form, company_state: v })} />
-                    <F label="Postcode" value={form.company_postcode} onChange={(v) => setForm({ ...form, company_postcode: v })} />
+                    <LabeledInput label="Street address" value={form.company_address} onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))} colSpan />
+                    <LabeledInput label="Suburb" value={form.company_suburb} onChange={(v) => setForm((prev) => ({ ...prev, company_suburb: v }))} />
+                    <LabeledInput label="State" value={form.company_state} onChange={(v) => setForm((prev) => ({ ...prev, company_state: v }))} />
+                    <LabeledInput label="Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} />
                   </div>
                 </div>
               </div>
@@ -1087,6 +1125,41 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+  required = false,
+  colSpan = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+  colSpan?: boolean;
+}) {
+  return (
+    <div className={colSpan ? "sm:col-span-2" : ""}>
+      <label className="block text-[13px] font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500"> *</span>}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="input-field"
+        placeholder={placeholder}
+        required={required}
+      />
     </div>
   );
 }

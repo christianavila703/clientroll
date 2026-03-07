@@ -153,6 +153,10 @@ export const api = {
   getClient: (id: string) => request(`/tenant/clients/${id}`),
   updateClient: (id: string, data: unknown) =>
     request(`/tenant/clients/${id}`, { method: "PUT", body: data }),
+  deleteClient: (id: string) =>
+    request(`/tenant/clients/${id}`, { method: "DELETE" }),
+  bulkDeleteClients: (clientIds: string[]) =>
+    request(`/tenant/clients/bulk-delete`, { method: "POST", body: { client_ids: clientIds } }),
   getClientMemberships: (id: string) =>
     request(`/tenant/clients/${id}/memberships`),
   getClientMandateStatus: (id: string) =>
@@ -223,6 +227,8 @@ export const api = {
     request("/tenant/terms", { method: "POST", body: data }),
   updateTerms: (id: string, data: unknown) =>
     request(`/tenant/terms/${id}`, { method: "PUT", body: data }),
+  deleteTerms: (id: string) =>
+    request(`/tenant/terms/${id}`, { method: "DELETE" }),
   attachTerms: (mtId: string, termsId: string) =>
     request(`/tenant/membership-types/${mtId}/terms/${termsId}`, { method: "POST" }),
   detachTerms: (mtId: string, termsId: string) =>

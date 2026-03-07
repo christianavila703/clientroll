@@ -48,6 +48,8 @@ func (h *ClientHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/clients", h.Create)
 	r.Get("/clients/{clientID}", h.Get)
 	r.Put("/clients/{clientID}", h.Update)
+	r.Delete("/clients/{clientID}", h.Delete)
+	r.Post("/clients/bulk-delete", h.BulkDelete)
 	r.Get("/clients/{clientID}/memberships", h.GetMemberships)
 	r.Get("/clients/{clientID}/mandate-status", h.GetMandateStatus)
 	r.Post("/clients/{clientID}/send-mandate-link", h.SendMandateLink)
@@ -192,6 +194,53 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, client)
+}
+
+// Delete soft-deletes a client.
+func (h *ClientHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+
+	if err := h.clientRepo.SoftDelete(r.Context(), clientID, tenantID); err != nil {
+		log.Printf("Error deleting client: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete client")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "deleted"})
+}
+
+// BulkDelete soft-deletes multiple clients.
+func (h *ClientHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	var input struct {
+		ClientIDs []string `json:"client_ids"`
+	}
+	if err := decodeJSON(r, &input); err != nil || len(input.ClientIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "client_ids is required")
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(input.ClientIDs))
+	for _, s := range input.ClientIDs {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid client ID")
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	deleted, err := h.clientRepo.SoftDeleteMany(r.Context(), tenantID, ids)
+	if err != nil {
+		log.Printf("Error bulk deleting clients: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete clients")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "deleted", "deleted": deleted})
 }
 
 // ClientMembershipRow is the enriched membership data for the client profile.

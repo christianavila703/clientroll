@@ -10,6 +10,7 @@ interface Tenant {
   slug: string;
   logo_url?: string;
   primary_colour: string;
+  secondary_colour?: string;
   payment_providers?: string[];
 }
 
@@ -130,7 +131,13 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div
+      className="min-h-screen bg-gray-50"
+      style={{
+        ["--brandPrimary" as any]: tenant?.primary_colour || "#6366f1",
+        ["--brandSecondary" as any]: tenant?.secondary_colour || tenant?.primary_colour || "#4f46e5",
+      }}
+    >
       {/* Branded header */}
       {tenant && (
         <header className="bg-white border-b border-gray-200 px-6 sm:px-10 py-5">
@@ -140,7 +147,7 @@ export default function SignupPage() {
             ) : (
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-lg text-white font-bold"
-                style={{ backgroundColor: tenant.primary_colour }}
+                style={{ backgroundColor: "var(--brandPrimary)" }}
               >
                 {tenant.name[0]}
               </div>

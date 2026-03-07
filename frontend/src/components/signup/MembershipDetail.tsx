@@ -58,7 +58,7 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
               {membership.title}
             </h1>
             <div className="flex items-baseline gap-3">
-              <span className="text-4xl font-bold text-indigo-600 tabular-nums">
+              <span className="text-4xl font-bold tabular-nums" style={{ color: "var(--brandPrimary)" }}>
                 ${((membership as any).intrinsic_value || membership.total_value + bonuses.reduce((s, b) => s + b.value, 0)).toLocaleString()}
               </span>
               <span className="text-lg text-gray-500">total membership value</span>
@@ -179,7 +179,8 @@ export default function MembershipDetail({ membership, tenantSlug, onSelectTerm,
               {currentTerm && (
                 <button
                   onClick={() => onSelectTerm(currentTerm)}
-                  className="w-full rounded-xl bg-indigo-600 text-white text-lg py-4 font-semibold shadow-md hover:bg-indigo-700 hover:shadow-lg transition-all"
+                  className="w-full rounded-xl text-white text-lg py-4 font-semibold shadow-md hover:shadow-lg transition-all"
+                  style={{ backgroundColor: "var(--brandPrimary)" }}
                 >
                   Continue to Signup →
                 </button>

@@ -28,12 +28,12 @@ func (r *ClientRepo) DB() *database.Postgres {
 
 const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
-	emergency_contact_phone, gocardless_customer_id, created_at, updated_at`
+	emergency_contact_phone, gocardless_customer_id, deleted_at, created_at, updated_at`
 
 // List returns all clients for a tenant with optional search and status filter.
 // status: "active" = has active membership, "inactive" = no active membership, "" = all
 func (r *ClientRepo) List(ctx context.Context, tenantID uuid.UUID, search, status string) ([]models.Client, error) {
-	query := `SELECT ` + clientFields + ` FROM clients WHERE tenant_id = $1`
+	query := `SELECT ` + clientFields + ` FROM clients WHERE tenant_id = $1 AND deleted_at IS NULL`
 	args := []interface{}{tenantID}
 	argN := 2
 
@@ -61,7 +61,7 @@ func (r *ClientRepo) List(ctx context.Context, tenantID uuid.UUID, search, statu
 
 // FindByID returns a client by ID.
 func (r *ClientRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (*models.Client, error) {
-	query := `SELECT ` + clientFields + ` FROM clients WHERE id = $1 AND tenant_id = $2`
+	query := `SELECT ` + clientFields + ` FROM clients WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`
 
 	var c models.Client
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(r.scanFields(&c)...)
@@ -98,7 +98,7 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 		UPDATE clients SET name=$3, address=$4, suburb=$5, state=$6, postcode=$7,
 		    email=$8, phone=$9, birth_date=$10, gender=$11,
 		    emergency_contact_name=$12, emergency_contact_phone=$13, updated_at=NOW()
-		WHERE id=$1 AND tenant_id=$2
+		WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		RETURNING ` + clientFields
 
 	var out models.Client
@@ -114,7 +114,7 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 // SetGoCardlessCustomerID stores the GoCardless customer ID for a client.
 func (r *ClientRepo) SetGoCardlessCustomerID(ctx context.Context, clientID, tenantID uuid.UUID, customerID string) error {
 	_, err := r.db.Pool.Exec(ctx,
-		"UPDATE clients SET gocardless_customer_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+		"UPDATE clients SET gocardless_customer_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
 		clientID, tenantID, customerID)
 	return err
 }
@@ -152,11 +152,35 @@ func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid
 	return memberships, rows.Err()
 }
 
+// SoftDelete marks a client as deleted (soft delete).
+func (r *ClientRepo) SoftDelete(ctx context.Context, clientID, tenantID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE clients SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
+		clientID, tenantID,
+	)
+	return err
+}
+
+// SoftDeleteMany marks multiple clients as deleted (soft delete).
+func (r *ClientRepo) SoftDeleteMany(ctx context.Context, tenantID uuid.UUID, clientIDs []uuid.UUID) (int64, error) {
+	if len(clientIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.db.Pool.Exec(ctx,
+		"UPDATE clients SET deleted_at = NOW(), updated_at = NOW() WHERE tenant_id = $1 AND id = ANY($2) AND deleted_at IS NULL",
+		tenantID, clientIDs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
 		&c.ID, &c.TenantID, &c.Name, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
-		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.CreatedAt, &c.UpdatedAt,
+		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 	}
 }
 

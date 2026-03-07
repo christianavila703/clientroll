@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../../api/client";
 import RichTextEditor from "../common/RichTextEditor";
+import type { Editor } from "@tiptap/react";
 
 const TC_VARIABLES = [
   { key: "client_name", label: "Client Name", desc: "Full name of the member" },
@@ -46,6 +47,18 @@ export default function TermsPage() {
   };
 
   useEffect(() => { loadTerms(); }, []);
+
+  const handleDelete = async (id: string, title: string) => {
+    const ok = window.confirm(`Delete "${title}"?\n\nThis will remove it from any memberships it’s attached to.`);
+    if (!ok) return;
+    try {
+      await api.deleteTerms(id);
+      await loadTerms();
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "Failed to delete terms");
+    }
+  };
 
   const filtered = terms.filter((t) =>
     !search || t.title.toLowerCase().includes(search.toLowerCase())
@@ -102,6 +115,7 @@ export default function TermsPage() {
               <tr>
                 <th>Name</th>
                 <th>Last Updated</th>
+                <th className="w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -130,6 +144,15 @@ export default function TermsPage() {
                       day: "numeric", month: "long", year: "numeric"
                     })}
                   </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDelete(t.id, t.title)}
+                      className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                      title="Delete"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -150,6 +173,7 @@ function TermsForm({ initial, onSaved, onCancel }: {
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const editorRef = useRef<Editor | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,8 +225,13 @@ function TermsForm({ initial, onSaved, onCancel }: {
                 type="button"
                 onClick={() => {
                   const tag = `{{${v.key}}}`;
-                  navigator.clipboard.writeText(tag);
-                  setContent(prev => prev ? prev.replace(/<\/p>$/, ` ${tag}</p>`) : `<p>${tag}</p>`);
+                  const editor = editorRef.current;
+                  if (editor) {
+                    editor.chain().focus().insertContent(tag).run();
+                    return;
+                  }
+                  // Fallback: append to end.
+                  setContent((prev) => (prev ? prev.replace(/<\/p>$/, ` ${tag}</p>`) : `<p>${tag}</p>`));
                 }}
                 className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 text-[11px] font-mono text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 transition-colors shadow-sm cursor-pointer"
                 title={v.desc}
@@ -223,6 +252,9 @@ function TermsForm({ initial, onSaved, onCancel }: {
             content={content}
             onChange={setContent}
             placeholder="Enter your terms and conditions here..."
+            onReady={(ed) => {
+              editorRef.current = ed;
+            }}
           />
         </div>
         {initial && (

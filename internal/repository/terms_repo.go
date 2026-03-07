@@ -100,6 +100,15 @@ func (r *TermsRepo) Update(ctx context.Context, id, tenantID uuid.UUID, title, c
 	return &t, nil
 }
 
+// Delete removes a T&C document.
+func (r *TermsRepo) Delete(ctx context.Context, id, tenantID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"DELETE FROM terms_and_conditions WHERE id = $1 AND tenant_id = $2",
+		id, tenantID,
+	)
+	return err
+}
+
 // AttachToMembershipType links a T&C to a membership type.
 func (r *TermsRepo) AttachToMembershipType(ctx context.Context, tenantID, membershipTypeID, termsID uuid.UUID) error {
 	query := `

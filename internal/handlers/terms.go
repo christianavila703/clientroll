@@ -27,6 +27,7 @@ func (h *TermsHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/terms", h.Create)
 	r.Get("/terms/{termsID}", h.Get)
 	r.Put("/terms/{termsID}", h.Update)
+	r.Delete("/terms/{termsID}", h.Delete)
 }
 
 // List returns all T&C documents for the tenant.
@@ -101,4 +102,20 @@ func (h *TermsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, terms)
+}
+
+// Delete removes a T&C document.
+func (h *TermsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	termsID, err := uuid.Parse(chi.URLParam(r, "termsID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid terms ID")
+		return
+	}
+	if err := h.termsRepo.Delete(r.Context(), termsID, tenantID); err != nil {
+		log.Printf("Error deleting terms: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to delete terms")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

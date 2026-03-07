@@ -134,6 +134,8 @@ function TenantSettings() {
       setData({
         timezone: t.timezone || "Australia/Brisbane",
         primary_colour: t.primary_colour || "#6366f1",
+        secondary_colour: t.secondary_colour || "",
+        logo_url: t.logo_url || "",
         default_thankyou_heading: t.default_thankyou_heading || "",
         default_thankyou_body: t.default_thankyou_body || "",
         default_thankyou_image_url: t.default_thankyou_image_url || "",
@@ -168,6 +170,13 @@ function TenantSettings() {
       <div className="card">
         <div className="card-header"><h3>General</h3></div>
         <div className="card-body space-y-4">
+          <ImageUpload
+            value={data.logo_url || ""}
+            entityType="tenant"
+            onChange={(url) => setData({ ...data, logo_url: url })}
+            label="Logo"
+            hint="Shown on public signup pages"
+          />
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Timezone</label>
             <select value={data.timezone || ""} onChange={(e) => setData({ ...data, timezone: e.target.value })} className="input-field max-w-xs">
@@ -180,6 +189,17 @@ function TenantSettings() {
             <div className="flex items-center gap-3">
               <input type="color" value={data.primary_colour || "#6366f1"} onChange={(e) => setData({ ...data, primary_colour: e.target.value })} className="h-9 w-9 rounded border border-gray-300 cursor-pointer p-0.5" />
               <input type="text" value={data.primary_colour || ""} onChange={(e) => setData({ ...data, primary_colour: e.target.value })} className="input-field max-w-[120px] font-mono text-[13px]" placeholder="#6366f1" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Secondary / accent colour</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Used for accents on public signup pages</p>
+            <div className="flex items-center gap-3">
+              <input type="color" value={data.secondary_colour || "#4f46e5"} onChange={(e) => setData({ ...data, secondary_colour: e.target.value })} className="h-9 w-9 rounded border border-gray-300 cursor-pointer p-0.5" />
+              <input type="text" value={data.secondary_colour || ""} onChange={(e) => setData({ ...data, secondary_colour: e.target.value })} className="input-field max-w-[120px] font-mono text-[13px]" placeholder="#4f46e5" />
+              <button type="button" className="btn-secondary text-[12px]" onClick={() => setData({ ...data, secondary_colour: "" })}>
+                Reset
+              </button>
             </div>
           </div>
         </div>

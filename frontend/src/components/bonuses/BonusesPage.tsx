@@ -168,14 +168,23 @@ function BonusForm({ initial, onSaved, onCancel }: {
     if (!form.title) { setError("Title is required"); return; }
     setSaving(true); setError("");
     try {
-      const payload = {
-        ...form,
-        value: toNumberOrZero(form.value),
-        sort_order: toNumberOrZero(form.sort_order),
-      };
       if (initial) {
+        const payload = {
+          ...form,
+          value: toNumberOrZero(form.value),
+          sort_order: toNumberOrZero(form.sort_order),
+        };
         await api.updateBonus(initial.id, payload);
       } else {
+        // Backend create endpoint rejects unknown fields (DisallowUnknownFields).
+        // Only send fields accepted by POST /tenant/bonuses.
+        const payload = {
+          title: form.title,
+          description: form.description || null,
+          image_url: form.image_url || null,
+          value: toNumberOrZero(form.value),
+          sort_order: toNumberOrZero(form.sort_order),
+        };
         await api.createBonus(payload);
       }
       onSaved();

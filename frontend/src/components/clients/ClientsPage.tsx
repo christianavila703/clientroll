@@ -28,10 +28,59 @@ const CLIENT_FIELDS = [
   { key: "emergency_contact_phone", label: "Emergency Contact Phone" },
 ];
 
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+  required = false,
+  colSpan = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+  colSpan?: boolean;
+}) {
+  return (
+    <div className={colSpan ? "sm:col-span-2" : ""}>
+      <label className="block text-[13px] font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500"> *</span>}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="input-field"
+        placeholder={placeholder}
+        required={required}
+      />
+    </div>
+  );
+}
+
+function normalizeStringOrNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toBirthDateISOStringOrNull(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // Backend update handler accepts RFC3339, and also tries YYYY-MM-DD.
+  const iso = `${trimmed}T00:00:00Z`;
+  return Number.isNaN(Date.parse(iso)) ? null : iso;
+}
+
 export default function ClientsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(searchParams.get("new") === "1");
@@ -44,6 +93,7 @@ export default function ClientsPage() {
     try {
       const data = (await api.listClients(q, status)) as { clients: Client[] };
       setClients(data.clients || []);
+      setSelected(new Set());
     } catch { /* handle */ }
     finally { setLoading(false); }
   };
@@ -53,12 +103,49 @@ export default function ClientsPage() {
   const handleSearch = () => { loadClients(search, statusTab); };
 
   const statusTabs = ["All", "Active", "Inactive"];
+  const allVisibleIds = clients.map((c) => c.id);
+  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  const toggleRow = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleAll = (checked: boolean) => {
+    setSelected(() => (checked ? new Set(allVisibleIds) : new Set()));
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    const typed = window.prompt(
+      `You are about to delete ${count} client${count === 1 ? "" : "s"}.\n\nThis is a SOFT delete (they can be added again later).\n\nType DELETE to confirm:`
+    );
+    if (typed !== "DELETE") return;
+    try {
+      await api.bulkDeleteClients(Array.from(selected));
+      await loadClients(search, statusTab);
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "Failed to delete clients");
+    }
+  };
 
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Clients</h1>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button onClick={handleBulkDelete} className="btn-danger text-[12px]">
+              Delete selected ({selected.size})
+            </button>
+          )}
           <button onClick={() => exportCSV(clients)} className="btn-secondary text-[12px]">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
             Export
@@ -132,7 +219,17 @@ export default function ClientsPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th className="w-10"><input type="checkbox" className="rounded border-gray-300" /></th>
+                  <th className="w-10">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={(e) => toggleAll(e.target.checked)}
+                    />
+                  </th>
                   <th>Client ▲</th>
                   <th>Status</th>
                   <th>Primary Contact</th>
@@ -144,7 +241,14 @@ export default function ClientsPage() {
               <tbody>
                 {clients.map((c) => (
                   <tr key={c.id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${c.id}`)}>
-                    <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="rounded border-gray-300" /></td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300"
+                        checked={selected.has(c.id)}
+                        onChange={(e) => toggleRow(c.id, e.target.checked)}
+                      />
+                    </td>
                     <td className="font-medium text-gray-900">{c.name}</td>
                     <td><span className="badge badge-green">Active</span></td>
                     <td>
@@ -248,15 +352,11 @@ function ClientRowMenu({ clientId, clientName }: { clientId: string; clientName:
 }
 
 function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCreated: () => void }) {
-  const [tab, setTab] = useState<"details" | "company">("details");
   const [form, setForm] = useState({
     name: editing?.name || "", email: editing?.email || "", phone: editing?.phone || "",
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
     postcode: editing?.postcode || "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
-    business_structure: "", gst_registered: "", tax_number: "", company_number: "",
-    company_phone: "", company_website: "",
-    company_address: "", company_suburb: "", company_state: "", company_postcode: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -265,28 +365,28 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     e.preventDefault();
     setSaving(true); setError("");
     try {
+      // Backend rejects unknown fields (DisallowUnknownFields) for clients create/update.
+      // Only send supported fields.
       const payload = {
-        ...form,
-        birth_date: form.birth_date || null,
-        gender: form.gender || null,
-        emergency_contact_name: form.emergency_contact_name || null,
-        emergency_contact_phone: form.emergency_contact_phone || null,
+        name: form.name,
+        email: normalizeStringOrNull(form.email),
+        phone: normalizeStringOrNull(form.phone),
+        address: normalizeStringOrNull(form.address),
+        suburb: normalizeStringOrNull(form.suburb),
+        state: normalizeStringOrNull(form.state),
+        postcode: normalizeStringOrNull(form.postcode),
+        gender: normalizeStringOrNull(form.gender),
+        birth_date: toBirthDateISOStringOrNull(form.birth_date),
+        emergency_contact_name: normalizeStringOrNull(form.emergency_contact_name),
+        emergency_contact_phone: normalizeStringOrNull(form.emergency_contact_phone),
       };
-      if (editing) { await api.updateClient(editing.id, payload); }
-      else { await api.createClient(payload); }
+
+      if (editing) await api.updateClient(editing.id, payload);
+      else await api.createClient(payload);
       onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   };
-
-  const F = ({ label, value, onChange, type = "text", placeholder = "", required = false, colSpan = false }: {
-    label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; required?: boolean; colSpan?: boolean;
-  }) => (
-    <div className={colSpan ? "sm:col-span-2" : ""}>
-      <label className="block text-[13px] font-medium text-gray-700 mb-1">{label}{required && <span className="text-red-500"> *</span>}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="input-field" placeholder={placeholder} required={required} />
-    </div>
-  );
 
   return (
     <div className="mb-5 card overflow-hidden">
@@ -301,78 +401,93 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         </div>
       </div>
 
-      <div className="flex border-b border-gray-200 px-5">
-        {(["details", "company"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-3 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
-              tab === t ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}>{t === "details" ? "Details" : "Company"}</button>
-        ))}
-      </div>
-
       {error && <div className="mx-5 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
 
       <form id="client-form" onSubmit={handleSubmit} className="px-5 py-4">
-        {tab === "details" && (
-          <div className="space-y-5">
-            <div>
-              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Personal information</h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <F label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required colSpan />
-                <F label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} type="email" />
-                <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
-                <F label="Date of birth" value={form.birth_date} onChange={(v) => setForm({ ...form, birth_date: v })} type="date" />
-                <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
-                  <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} className="input-field">
-                    <option value="">—</option><option value="Female">Female</option><option value="Male">Male</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div>
-              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Address</h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <F label="Street address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} colSpan />
-                <F label="Suburb" value={form.suburb} onChange={(v) => setForm({ ...form, suburb: v })} />
-                <F label="State" value={form.state} onChange={(v) => setForm({ ...form, state: v })} />
-                <F label="Postcode" value={form.postcode} onChange={(v) => setForm({ ...form, postcode: v })} />
-              </div>
-            </div>
-            <div>
-              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <F label="Contact name" value={form.emergency_contact_name} onChange={(v) => setForm({ ...form, emergency_contact_name: v })} />
-                <F label="Contact phone" value={form.emergency_contact_phone} onChange={(v) => setForm({ ...form, emergency_contact_phone: v })} type="tel" />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {tab === "company" && (
-          <div className="space-y-5">
-            <div>
-              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <F label="Business structure" value={form.business_structure || ""} onChange={(v) => setForm({ ...form, business_structure: v })} placeholder="e.g. Sole Trader" />
-                <F label="GST registered" value={form.gst_registered || ""} onChange={(v) => setForm({ ...form, gst_registered: v })} placeholder="Yes / No" />
-                <F label="Tax number" value={form.tax_number || ""} onChange={(v) => setForm({ ...form, tax_number: v })} placeholder="e.g. 123 456 789" />
-                <F label="Company number" value={form.company_number || ""} onChange={(v) => setForm({ ...form, company_number: v })} />
-                <F label="Phone" value={form.company_phone || ""} onChange={(v) => setForm({ ...form, company_phone: v })} type="tel" />
-                <F label="Website" value={form.company_website || ""} onChange={(v) => setForm({ ...form, company_website: v })} placeholder="https://" colSpan />
-              </div>
-            </div>
-            <div>
-              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company address</h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <F label="Street address" value={form.company_address || ""} onChange={(v) => setForm({ ...form, company_address: v })} colSpan />
-                <F label="Suburb" value={form.company_suburb || ""} onChange={(v) => setForm({ ...form, company_suburb: v })} />
-                <F label="State" value={form.company_state || ""} onChange={(v) => setForm({ ...form, company_state: v })} />
-                <F label="Postcode" value={form.company_postcode || ""} onChange={(v) => setForm({ ...form, company_postcode: v })} />
+        <div className="space-y-5">
+          <div>
+            <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Personal information</h4>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <LabeledInput
+                label="Full name"
+                value={form.name}
+                onChange={(v) => setForm((prev) => ({ ...prev, name: v }))}
+                required
+                colSpan
+              />
+              <LabeledInput
+                label="Email"
+                value={form.email}
+                onChange={(v) => setForm((prev) => ({ ...prev, email: v }))}
+                type="email"
+              />
+              <LabeledInput
+                label="Phone"
+                value={form.phone}
+                onChange={(v) => setForm((prev) => ({ ...prev, phone: v }))}
+                type="tel"
+              />
+              <LabeledInput
+                label="Date of birth"
+                value={form.birth_date}
+                onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
+                type="date"
+              />
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
+                <select
+                  value={form.gender}
+                  onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))}
+                  className="input-field"
+                >
+                  <option value="">—</option><option value="Female">Female</option><option value="Male">Male</option>
+                </select>
               </div>
             </div>
           </div>
-        )}
+          <div>
+            <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Address</h4>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <LabeledInput
+                label="Street address"
+                value={form.address}
+                onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
+                colSpan
+              />
+              <LabeledInput
+                label="Suburb"
+                value={form.suburb}
+                onChange={(v) => setForm((prev) => ({ ...prev, suburb: v }))}
+              />
+              <LabeledInput
+                label="State"
+                value={form.state}
+                onChange={(v) => setForm((prev) => ({ ...prev, state: v }))}
+              />
+              <LabeledInput
+                label="Postcode"
+                value={form.postcode}
+                onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
+              />
+            </div>
+          </div>
+          <div>
+            <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <LabeledInput
+                label="Contact name"
+                value={form.emergency_contact_name}
+                onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
+              />
+              <LabeledInput
+                label="Contact phone"
+                value={form.emergency_contact_phone}
+                onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
+                type="tel"
+              />
+            </div>
+          </div>
+        </div>
       </form>
     </div>
   );

@@ -15,6 +15,7 @@ type Tenant struct {
 	IsActive                bool      `json:"is_active"`
 	LogoURL                 *string   `json:"logo_url"`
 	PrimaryColour           string    `json:"primary_colour"`
+	SecondaryColour         *string   `json:"secondary_colour"`
 	DefaultThankyouHeading  *string   `json:"default_thankyou_heading"`
 	DefaultThankyouBody     *string   `json:"default_thankyou_body"`
 	DefaultThankyouImageURL *string   `json:"default_thankyou_image_url"`
@@ -36,4 +37,10 @@ type UpdateTenantInput struct {
 	Timezone      *string `json:"timezone,omitempty"`
 	IsActive      *bool   `json:"is_active,omitempty"`
 	PrimaryColour *string `json:"primary_colour,omitempty"`
+	SecondaryColour *string `json:"secondary_colour,omitempty"`
+	LogoURL         *string `json:"logo_url,omitempty"`
+	DefaultThankyouHeading     *string `json:"default_thankyou_heading,omitempty"`
+	DefaultThankyouBody        *string `json:"default_thankyou_body,omitempty"`
+	DefaultThankyouImageURL    *string `json:"default_thankyou_image_url,omitempty"`
+	DefaultThankyouRedirectURL *string `json:"default_thankyou_redirect_url,omitempty"`
 }

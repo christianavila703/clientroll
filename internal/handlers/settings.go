@@ -111,6 +111,8 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	var input struct {
 		Timezone      *string `json:"timezone,omitempty"`
 		PrimaryColour *string `json:"primary_colour,omitempty"`
+		SecondaryColour *string `json:"secondary_colour,omitempty"`
+		LogoURL         *string `json:"logo_url,omitempty"`
 		DefaultThankyouHeading     *string `json:"default_thankyou_heading,omitempty"`
 		DefaultThankyouBody        *string `json:"default_thankyou_body,omitempty"`
 		DefaultThankyouImageURL    *string `json:"default_thankyou_image_url,omitempty"`
@@ -124,6 +126,12 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	updateInput := models.UpdateTenantInput{
 		Timezone:      input.Timezone,
 		PrimaryColour: input.PrimaryColour,
+		SecondaryColour: input.SecondaryColour,
+		LogoURL:         input.LogoURL,
+		DefaultThankyouHeading:     input.DefaultThankyouHeading,
+		DefaultThankyouBody:        input.DefaultThankyouBody,
+		DefaultThankyouImageURL:    input.DefaultThankyouImageURL,
+		DefaultThankyouRedirectURL: input.DefaultThankyouRedirectURL,
 	}
 
 	tenant, err := h.tenantRepo.Update(r.Context(), tenantID, updateInput)

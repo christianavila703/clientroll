@@ -1,4 +1,4 @@
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
@@ -10,9 +10,10 @@ interface Props {
   content: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  onReady?: (editor: Editor) => void;
 }
 
-export default function RichTextEditor({ content, onChange, placeholder = "Start typing..." }: Props) {
+export default function RichTextEditor({ content, onChange, placeholder = "Start typing...", onReady }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -40,6 +41,11 @@ export default function RichTextEditor({ content, onChange, placeholder = "Start
       editor.commands.setContent(content);
     }
   }, [content, editor]);
+
+  useEffect(() => {
+    if (!editor || !onReady) return;
+    onReady(editor);
+  }, [editor, onReady]);
 
   if (!editor) return null;
 

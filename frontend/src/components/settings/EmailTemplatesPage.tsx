@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import RichTextEditor from "../common/RichTextEditor";
+import type { Editor } from "@tiptap/react";
 
 interface Template {
   id: string;
@@ -149,6 +150,9 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
   const [body, setBody] = useState(template.body);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const subjectRef = useRef<HTMLInputElement | null>(null);
+  const bodyEditorRef = useRef<Editor | null>(null);
+  const lastTargetRef = useRef<"subject" | "body">("subject");
 
   const handleSave = () => {
     setSaving(true);
@@ -161,9 +165,30 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
 
   const insertVariable = (v: string) => {
     const tag = `{{${v}}}`;
-    navigator.clipboard.writeText(tag);
-    setMessage(`Copied ${tag}`);
-    setTimeout(() => setMessage(""), 1500);
+
+    if (lastTargetRef.current === "subject") {
+      const input = subjectRef.current;
+      const start = input?.selectionStart ?? subject.length;
+      const end = input?.selectionEnd ?? subject.length;
+      const next = subject.slice(0, start) + tag + subject.slice(end);
+      setSubject(next);
+      queueMicrotask(() => {
+        if (!input) return;
+        input.focus();
+        const caret = start + tag.length;
+        input.setSelectionRange(caret, caret);
+      });
+      return;
+    }
+
+    const editor = bodyEditorRef.current;
+    if (editor) {
+      editor.chain().focus().insertContent(tag).run();
+      return;
+    }
+
+    // Fallback: append.
+    setBody((prev) => (prev || "") + tag);
   };
 
   return (
@@ -205,10 +230,24 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
               Email subject <span className="text-red-500">*</span>
             </label>
             <div className="relative max-w-lg">
-              <input value={subject} onChange={(e) => setSubject(e.target.value)} className="input-field pr-28" />
+              <input
+                ref={subjectRef}
+                value={subject}
+                onFocus={() => {
+                  lastTargetRef.current = "subject";
+                }}
+                onChange={(e) => setSubject(e.target.value)}
+                className="input-field pr-28"
+              />
               {/* Inline placeholders dropdown for subject */}
               <div className="absolute right-1 top-1/2 -translate-y-1/2">
-                <PlaceholderDropdown variables={template.variables} onInsert={(v) => setSubject(subject + ` {{${v}}}`)} />
+                <PlaceholderDropdown
+                  variables={template.variables}
+                  onInsert={(v) => {
+                    lastTargetRef.current = "subject";
+                    insertVariable(v);
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -216,7 +255,20 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
           {/* Rich text editor with Placeholders dropdown in toolbar */}
           <div>
             <div className="rounded-md border border-gray-300 overflow-hidden focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-shadow">
-              <RichTextEditor content={body} onChange={setBody} placeholder="Write your email content..." />
+              <div
+                onMouseDown={() => {
+                  lastTargetRef.current = "body";
+                }}
+              >
+                <RichTextEditor
+                  content={body}
+                  onChange={setBody}
+                  placeholder="Write your email content..."
+                  onReady={(ed) => {
+                    bodyEditorRef.current = ed;
+                  }}
+                />
+              </div>
             </div>
           </div>
 
@@ -230,13 +282,13 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
                   type="button"
                   onClick={() => insertVariable(v)}
                   className="rounded bg-white border border-gray-200 px-2 py-0.5 text-[11px] font-mono text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors shadow-sm"
-                  title={`Click to copy {{${v}}}`}
+                  title={`Insert {{${v}}} at cursor`}
                 >
                   {v}
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">Click to copy a placeholder, then paste it into the subject or body.</p>
+            <p className="text-[11px] text-gray-400 mt-2">Click a placeholder to insert it at your cursor.</p>
           </div>
         </div>
       </div>

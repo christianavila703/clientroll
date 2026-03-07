@@ -24,7 +24,7 @@ func NewTenantRepo(db *database.Postgres) *TenantRepo {
 // FindByID returns a tenant by ID.
 func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour,
+		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       created_at, updated_at
@@ -33,7 +33,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
-		&t.LogoURL, &t.PrimaryColour,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -50,7 +50,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 // FindBySlug returns a tenant by slug.
 func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour,
+		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       created_at, updated_at
@@ -59,7 +59,7 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, slug).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
-		&t.LogoURL, &t.PrimaryColour,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -78,7 +78,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	query := `
 		INSERT INTO tenants (name, slug, timezone)
 		VALUES ($1, $2, $3)
-		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour,
+		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          created_at, updated_at`
@@ -86,7 +86,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, input.Name, input.Slug, input.Timezone).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
-		&t.LogoURL, &t.PrimaryColour,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -100,7 +100,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 // List returns all tenants (for platform admin).
 func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour,
+		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       created_at, updated_at
@@ -117,7 +117,7 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 		var t models.Tenant
 		if err := rows.Scan(
 			&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
-			&t.LogoURL, &t.PrimaryColour,
+			&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
 			&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 			&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 			&t.CreatedAt, &t.UpdatedAt,
@@ -137,9 +137,15 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 			timezone = COALESCE($3, timezone),
 			is_active = COALESCE($4, is_active),
 			primary_colour = COALESCE($5, primary_colour),
+			secondary_colour = COALESCE($6, secondary_colour),
+			logo_url = COALESCE($7, logo_url),
+			default_thankyou_heading = COALESCE($8, default_thankyou_heading),
+			default_thankyou_body = COALESCE($9, default_thankyou_body),
+			default_thankyou_image_url = COALESCE($10, default_thankyou_image_url),
+			default_thankyou_redirect_url = COALESCE($11, default_thankyou_redirect_url),
 			updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour,
+		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          created_at, updated_at`
@@ -147,9 +153,11 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, id,
 		input.Name, input.Timezone, input.IsActive, input.PrimaryColour,
+		input.SecondaryColour, input.LogoURL,
+		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL,
 	).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
-		&t.LogoURL, &t.PrimaryColour,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 		&t.CreatedAt, &t.UpdatedAt,

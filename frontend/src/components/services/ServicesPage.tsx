@@ -149,16 +149,25 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
     if (!form.name) { setError("Name is required"); return; }
     setSaving(true); setError("");
     try {
-      const payload = {
-        ...form,
-        description: form.description || null,
-        price: toNumberOrZero(form.price),
-        tax_rate: toNumberOrZero(form.tax_rate),
-        sort_order: toNumberOrZero(form.sort_order),
-      };
       if (initial) {
+        const payload = {
+          ...form,
+          description: form.description || null,
+          price: toNumberOrZero(form.price),
+          tax_rate: toNumberOrZero(form.tax_rate),
+          sort_order: toNumberOrZero(form.sort_order),
+        };
         await api.updateService(initial.id, payload);
       } else {
+        // Backend create endpoint rejects unknown fields (DisallowUnknownFields).
+        // Only send fields accepted by POST /tenant/services.
+        const payload = {
+          name: form.name,
+          description: form.description || null,
+          price: toNumberOrZero(form.price),
+          tax_rate: toNumberOrZero(form.tax_rate),
+          sort_order: toNumberOrZero(form.sort_order),
+        };
         await api.createService(payload);
       }
       onSaved();
