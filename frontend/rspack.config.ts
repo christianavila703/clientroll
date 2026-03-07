@@ -80,6 +80,10 @@ export default defineConfig({
   },
   plugins: [
     isDev && new RefreshPlugin(),
+    new rspack.DefinePlugin({
+      __APP_BUILD_SHA__: JSON.stringify(process.env.APP_BUILD_SHA || ""),
+      __APP_BUILD_TIME__: JSON.stringify(process.env.APP_BUILD_TIME || ""),
+    }),
     new rspack.HtmlRspackPlugin({
       template: "./src/index.html",
       filename: "index.html",

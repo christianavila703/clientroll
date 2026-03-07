@@ -51,6 +51,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const createRef = useRef<HTMLDivElement>(null);
+  const buildSha = typeof __APP_BUILD_SHA__ !== "undefined" ? __APP_BUILD_SHA__ : "";
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -193,6 +194,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               <p className="truncate text-[11px] text-gray-400 leading-tight">
                 {user?.role === "platform_admin" ? "Platform Admin" : user?.role === "tenant_admin" ? "Admin" : "Staff"}
               </p>
+              {buildSha && (
+                <p className="truncate text-[10px] text-gray-300 leading-tight mt-0.5">
+                  Build {buildSha}
+                </p>
+              )}
             </div>
             <button onClick={() => logout()} className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Sign out">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>

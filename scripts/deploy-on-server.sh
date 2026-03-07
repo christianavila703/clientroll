@@ -5,18 +5,27 @@
 #   Deploy path: /var/www/clientroll
 #
 # Optional env:
+#   SOURCE_REPO     (override source repo path)
+#   DEPLOY_PATH     (override deploy destination path)
 #   DEPLOY_SERVICE  (default: clientroll)
 #   SKIP_PULL=1     (skip git pull in source repo)
 
 set -euo pipefail
 
-SOURCE_REPO="/var/www/clientroll-repo"
-DEPLOY_PATH="/var/www/clientroll"
+SOURCE_REPO="${SOURCE_REPO:-/var/www/clientroll-repo}"
+DEPLOY_PATH="${DEPLOY_PATH:-/var/www/clientroll}"
 SERVICE="${DEPLOY_SERVICE:-clientroll}"
+BUILD_DIR="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$BUILD_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 echo "Source repo: $SOURCE_REPO"
 echo "Deploy path: $DEPLOY_PATH"
 echo "Service: $SERVICE"
+echo "Build dir: $BUILD_DIR"
 
 cd "$SOURCE_REPO"
 
@@ -25,13 +34,17 @@ if [[ "${SKIP_PULL:-0}" != "1" ]]; then
   git pull --ff-only
 fi
 
+GIT_SHA="$(git rev-parse --short HEAD)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "Building from git SHA: $GIT_SHA ($BUILD_TIME)"
+
 echo "Building backend binary..."
-CGO_ENABLED=0 go build -o server_new ./cmd/server/
+CGO_ENABLED=0 go build -o "$BUILD_DIR/server_new" ./cmd/server/
 
 echo "Building frontend assets..."
 (
   cd frontend
-  npm run build
+  APP_BUILD_SHA="$GIT_SHA" APP_BUILD_TIME="$BUILD_TIME" npm run build
 )
 
 # Load env for migration from deploy path first, then source repo as fallback.
@@ -58,10 +71,18 @@ mkdir -p "$DEPLOY_PATH/frontend_dist_new"
 rm -rf "$DEPLOY_PATH/frontend_dist_new"/*
 
 echo "Copying backend binary..."
-cp -f "$SOURCE_REPO/server_new" "$DEPLOY_PATH/server_new"
+cp -f "$BUILD_DIR/server_new" "$DEPLOY_PATH/server_new"
 
-echo "Copying frontend bundle from web/..."
-cp -a "$SOURCE_REPO/web/." "$DEPLOY_PATH/frontend_dist_new/"
+echo "Staging frontend bundle from web/..."
+mkdir -p "$BUILD_DIR/frontend_dist"
+cp -a "$SOURCE_REPO/web/." "$BUILD_DIR/frontend_dist/"
+
+echo "Copying frontend bundle to deploy path..."
+cp -a "$BUILD_DIR/frontend_dist/." "$DEPLOY_PATH/frontend_dist_new/"
+
+# Write a build marker into the deployed frontend so you can verify what is live.
+echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/frontend_dist_new/build.txt"
+echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/BUILD_SHA"
 
 echo "Switching release files..."
 sudo systemctl stop "$SERVICE" 2>/dev/null || true
@@ -76,6 +97,9 @@ if [[ -d "$DEPLOY_PATH/bin" ]]; then
   cp -f "$DEPLOY_PATH/server" "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
   chmod +x "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
 fi
+
+echo "Service ExecStart (for verification):"
+systemctl show -p ExecStart "$SERVICE" 2>/dev/null || true
 
 echo "Starting $SERVICE..."
 sudo systemctl start "$SERVICE" 2>/dev/null || true
