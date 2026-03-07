@@ -16,6 +16,11 @@ frontend/.cache/
 web/assets/*.js
 web/assets/*.css
 web/assets/*.map
+web/index.html
+
+# Server build artifacts (deploy scripts)
+server
+server_new
 # (Playwright E2E suite removed; keep in case reintroduced)
 tests/test-results/
 
