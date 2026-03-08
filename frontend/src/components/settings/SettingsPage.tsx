@@ -132,6 +132,7 @@ function TenantSettings() {
     api.getTenantSettings().then((res) => {
       const t = res as Record<string, string>;
       setData({
+        slug: t.slug || "",
         timezone: t.timezone || "Australia/Brisbane",
         primary_colour: t.primary_colour || "#6366f1",
         secondary_colour: t.secondary_colour || "",
@@ -152,6 +153,8 @@ function TenantSettings() {
     } catch { setMessage("Failed to save"); }
     finally { setSaving(false); }
   };
+
+  const joinUrl = data.slug ? `${window.location.origin}/join/${data.slug}` : "";
 
   const timezones = [
     "Australia/Brisbane", "Australia/Sydney", "Australia/Melbourne", "Australia/Perth",
@@ -177,6 +180,30 @@ function TenantSettings() {
             label="Logo"
             hint="Shown on public signup pages"
           />
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Join page URL slug</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">This controls your public join URL.</p>
+            <input
+              type="text"
+              value={data.slug || ""}
+              onChange={(e) => setData({ ...data, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
+              className="input-field max-w-sm font-mono text-[13px]"
+              placeholder="your-business-slug"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <code className="rounded bg-gray-50 px-2 py-1 text-[11px] text-gray-600 border border-gray-200">
+                {joinUrl || "https://your-domain/join/your-slug"}
+              </code>
+              <button
+                type="button"
+                disabled={!joinUrl}
+                onClick={() => navigator.clipboard.writeText(joinUrl)}
+                className="btn-secondary text-[11px] px-2 py-1 disabled:opacity-50"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Timezone</label>
             <select value={data.timezone || ""} onChange={(e) => setData({ ...data, timezone: e.target.value })} className="input-field max-w-xs">

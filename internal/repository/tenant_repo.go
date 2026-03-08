@@ -143,6 +143,7 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 			default_thankyou_body = COALESCE($9, default_thankyou_body),
 			default_thankyou_image_url = COALESCE($10, default_thankyou_image_url),
 			default_thankyou_redirect_url = COALESCE($11, default_thankyou_redirect_url),
+			slug = COALESCE($12, slug),
 			updated_at = NOW()
 		WHERE id = $1
 		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
@@ -154,7 +155,7 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 	err := r.db.Pool.QueryRow(ctx, query, id,
 		input.Name, input.Timezone, input.IsActive, input.PrimaryColour,
 		input.SecondaryColour, input.LogoURL,
-		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL,
+		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL, input.Slug,
 	).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,

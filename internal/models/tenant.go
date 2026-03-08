@@ -34,6 +34,7 @@ type CreateTenantInput struct {
 // UpdateTenantInput is the input for updating a tenant.
 type UpdateTenantInput struct {
 	Name          *string `json:"name,omitempty"`
+	Slug          *string `json:"slug,omitempty"`
 	Timezone      *string `json:"timezone,omitempty"`
 	IsActive      *bool   `json:"is_active,omitempty"`
 	PrimaryColour *string `json:"primary_colour,omitempty"`

@@ -3,6 +3,8 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
@@ -11,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+var tenantSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$`)
 
 // SettingsHandler handles tenant settings endpoints.
 type SettingsHandler struct {
@@ -110,6 +114,7 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 
 	var input struct {
 		Timezone      *string `json:"timezone,omitempty"`
+		Slug          *string `json:"slug,omitempty"`
 		PrimaryColour *string `json:"primary_colour,omitempty"`
 		SecondaryColour *string `json:"secondary_colour,omitempty"`
 		LogoURL         *string `json:"logo_url,omitempty"`
@@ -123,8 +128,23 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	var nextSlug *string
+	if input.Slug != nil {
+		normalized := strings.ToLower(strings.TrimSpace(*input.Slug))
+		if !tenantSlugRegex.MatchString(normalized) {
+			writeError(w, http.StatusBadRequest, "Slug must be 3-50 characters, lowercase letters, numbers, and hyphens only")
+			return
+		}
+		if existing, _ := h.tenantRepo.FindBySlug(r.Context(), normalized); existing != nil && existing.ID != tenantID {
+			writeError(w, http.StatusConflict, "This URL is already taken. Please choose a different one.")
+			return
+		}
+		nextSlug = &normalized
+	}
+
 	updateInput := models.UpdateTenantInput{
 		Timezone:      input.Timezone,
+		Slug:          nextSlug,
 		PrimaryColour: input.PrimaryColour,
 		SecondaryColour: input.SecondaryColour,
 		LogoURL:         input.LogoURL,
