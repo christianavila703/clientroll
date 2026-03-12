@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -24,8 +25,11 @@ type StripeWebhookHandler struct {
 	db          *database.Postgres
 	tenantRepo  *repository.TenantRepo
 	credRepo    *repository.TenantCredentialRepo
+	eventRepo   *repository.InboundWebhookEventRepo
 	encryptor   *database.Encryptor
 	paymentRepo *repository.PaymentRepo
+	disputeRepo *repository.PaymentDisputeRepo
+	memberRepo  *repository.MembershipRepo
 	dispatcher  *events.Dispatcher
 }
 
@@ -34,15 +38,21 @@ func NewStripeWebhookHandler(
 	db *database.Postgres,
 	tr *repository.TenantRepo,
 	credRepo *repository.TenantCredentialRepo,
+	eventRepo *repository.InboundWebhookEventRepo,
 	encryptor *database.Encryptor,
 	paymentRepo *repository.PaymentRepo,
+	disputeRepo *repository.PaymentDisputeRepo,
+	memberRepo *repository.MembershipRepo,
 ) *StripeWebhookHandler {
 	return &StripeWebhookHandler{
 		db:          db,
 		tenantRepo:  tr,
 		credRepo:    credRepo,
+		eventRepo:   eventRepo,
 		encryptor:   encryptor,
 		paymentRepo: paymentRepo,
+		disputeRepo: disputeRepo,
+		memberRepo:  memberRepo,
 	}
 }
 
@@ -96,6 +106,25 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if event.ID != "" && h.eventRepo != nil {
+		inserted, recErr := h.eventRepo.RecordReceived(
+			r.Context(),
+			tenant.ID,
+			"stripe",
+			event.ID,
+			stripeResourceType(event.Type),
+			stripeResourceIDFromRaw(event.Data.Raw, event.ID),
+		)
+		if recErr != nil {
+			writeError(w, http.StatusInternalServerError, "Webhook dedupe failed")
+			return
+		}
+		if !inserted {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+
 	switch event.Type {
 	case "checkout.session.completed":
 		h.handleCheckoutCompleted(r.Context(), tenant.ID, event)
@@ -105,6 +134,15 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		h.handleInvoicePayment(r.Context(), tenant.ID, event, true)
 	case "invoice.payment_failed":
 		h.handleInvoicePayment(r.Context(), tenant.ID, event, false)
+	case "customer.subscription.deleted":
+		h.handleSubscriptionDeleted(r.Context(), tenant.ID, event)
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
+		h.handleDisputeEvent(r.Context(), tenant.ID, event)
+	case "charge.refunded", "refund.updated":
+		h.handleRefundEvent(r.Context(), tenant.ID, event)
+	}
+	if event.ID != "" && h.eventRepo != nil {
+		_ = h.eventRepo.MarkProcessed(r.Context(), tenant.ID, "stripe", event.ID)
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -225,4 +263,235 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 			"source":        "stripe_webhook",
 		}))
 	}
+}
+
+func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+	if h.memberRepo == nil {
+		return
+	}
+	var sub struct {
+		ID       string            `json:"id"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
+		return
+	}
+	membershipID, err := uuid.Parse(sub.Metadata["membership_id"])
+	if err != nil {
+		log.Printf("stripe webhook subscription.deleted missing membership metadata subscription=%s", sub.ID)
+		return
+	}
+	m, err := h.memberRepo.FindByID(ctx, membershipID, tenantID)
+	if err != nil || m == nil {
+		return
+	}
+	if err := h.memberRepo.UpdateStatus(ctx, membershipID, tenantID, "cancelled"); err != nil {
+		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(ctx, events.NewEvent(events.MembershipCancelled, tenantID, map[string]interface{}{
+			"membership_id":   m.ID,
+			"client_id":       m.ClientID,
+			"subscription_id": sub.ID,
+			"status":          "cancelled",
+			"source":          "stripe_webhook",
+		}))
+	}
+}
+
+func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+	if h.disputeRepo == nil || h.paymentRepo == nil {
+		return
+	}
+	var dispute struct {
+		ID            string      `json:"id"`
+		Amount        int64       `json:"amount"`
+		Reason        string      `json:"reason"`
+		Status        string      `json:"status"`
+		PaymentIntent interface{} `json:"payment_intent"`
+		Charge        interface{} `json:"charge"`
+	}
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		return
+	}
+
+	chargeID := stripeExpandableID(dispute.Charge)
+	paymentIntentID := stripeExpandableID(dispute.PaymentIntent)
+	p, err := h.paymentRepo.GetByProviderReferences(ctx, tenantID, paymentIntentID, chargeID)
+	if err != nil || p == nil {
+		return
+	}
+
+	disputeStatus, paymentStatus, resolvedAt := mapStripeDisputeState(event.Type, dispute.Status)
+	reason := strings.TrimSpace(dispute.Reason)
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	disputeID := strings.TrimSpace(dispute.ID)
+	var disputeIDPtr *string
+	if disputeID != "" {
+		disputeIDPtr = &disputeID
+	}
+	amount := p.Amount
+	if dispute.Amount > 0 {
+		amount = float64(dispute.Amount) / 100.0
+	}
+	_, _ = h.disputeRepo.UpsertByProviderOrPayment(
+		ctx,
+		tenantID,
+		p.ID,
+		p.ClientID,
+		disputeIDPtr,
+		reasonPtr,
+		disputeStatus,
+		amount,
+		nil,
+		nil,
+		resolvedAt,
+	)
+
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, paymentStatus, nil, nil, nil); err != nil {
+		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentDisputed, tenantID, map[string]interface{}{
+			"payment_id":      p.ID,
+			"membership_id":   p.MembershipID,
+			"client_id":       p.ClientID,
+			"amount":          amount,
+			"status":          paymentStatus,
+			"dispute_id":      dispute.ID,
+			"dispute_status":  disputeStatus,
+			"dispute_reason":  dispute.Reason,
+			"provider_ref":    firstNonEmpty(paymentIntentID, chargeID),
+			"provider_charge": chargeID,
+			"source":          "stripe_webhook",
+		}))
+	}
+}
+
+func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+	if h.paymentRepo == nil {
+		return
+	}
+
+	refs := []string{}
+	amount := 0.0
+
+	switch event.Type {
+	case "charge.refunded":
+		var charge struct {
+			ID            string      `json:"id"`
+			PaymentIntent interface{} `json:"payment_intent"`
+			Invoice       interface{} `json:"invoice"`
+			AmountRefunded int64      `json:"amount_refunded"`
+		}
+		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
+			return
+		}
+		refs = append(refs, charge.ID, stripeExpandableID(charge.PaymentIntent), stripeExpandableID(charge.Invoice))
+		if charge.AmountRefunded > 0 {
+			amount = float64(charge.AmountRefunded) / 100.0
+		}
+	case "refund.updated":
+		var refund struct {
+			ID            string      `json:"id"`
+			Status        string      `json:"status"`
+			Amount        int64       `json:"amount"`
+			Charge        interface{} `json:"charge"`
+			PaymentIntent interface{} `json:"payment_intent"`
+		}
+		if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
+			return
+		}
+		if refund.Status != "" && refund.Status != "succeeded" {
+			return
+		}
+		refs = append(refs, stripeExpandableID(refund.PaymentIntent), stripeExpandableID(refund.Charge))
+		if refund.Amount > 0 {
+			amount = float64(refund.Amount) / 100.0
+		}
+	}
+
+	p, err := h.paymentRepo.GetByProviderReferences(ctx, tenantID, refs...)
+	if err != nil || p == nil {
+		return
+	}
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
+		return
+	}
+	if amount <= 0 {
+		amount = p.Amount
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentRefunded, tenantID, map[string]interface{}{
+			"payment_id":    p.ID,
+			"membership_id": p.MembershipID,
+			"client_id":     p.ClientID,
+			"amount":        amount,
+			"status":        "refunded",
+			"provider_ref":  firstNonEmpty(refs...),
+			"source":        "stripe_webhook",
+		}))
+	}
+}
+
+func stripeResourceType(eventType stripe.EventType) string {
+	parts := strings.SplitN(string(eventType), ".", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return "stripe_event"
+	}
+	return parts[0]
+}
+
+func stripeResourceIDFromRaw(raw json.RawMessage, fallback string) string {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return fallback
+	}
+	if id, ok := payload["id"].(string); ok && id != "" {
+		return id
+	}
+	return fallback
+}
+
+func stripeExpandableID(v interface{}) string {
+	switch vv := v.(type) {
+	case string:
+		return vv
+	case map[string]interface{}:
+		if id, ok := vv["id"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func mapStripeDisputeState(eventType stripe.EventType, stripeStatus string) (string, string, *time.Time) {
+	status := strings.ToLower(strings.TrimSpace(stripeStatus))
+	switch status {
+	case "warning_needs_response", "warning_under_review":
+		return "under_review", "disputed", nil
+	case "won":
+		now := time.Now().UTC()
+		return "won", "succeeded", &now
+	case "lost":
+		now := time.Now().UTC()
+		return "lost", "disputed", &now
+	}
+	if eventType == "charge.dispute.closed" {
+		now := time.Now().UTC()
+		return "resolved", "disputed", &now
+	}
+	return "open", "disputed", nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

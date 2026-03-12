@@ -170,6 +170,25 @@ Base path: **`/api`**. The frontend uses `API_BASE = "/api"` in `frontend/src/ap
 - **Slug check:** `GET /api/register/check-slug/{slug}`
 - **Registration / password reset / email verify:** Under rate-limited group (`Register`, password reset, verify routes)
 
+### Payment webhook event matrix
+
+| Provider | Incoming event/action | Internal payment status | Outbound event |
+|----------|------------------------|--------------------------|----------------|
+| Stripe | `checkout.session.completed` | `succeeded` | `payment.succeeded` |
+| Stripe | `checkout.session.expired` | `failed` | `payment.failed` |
+| Stripe | `invoice.payment_succeeded` | `succeeded` | `payment.succeeded` |
+| Stripe | `invoice.payment_failed` | `failed` | `payment.failed` |
+| Stripe | `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed` | `disputed` (or `succeeded` when dispute is won) | `payment.disputed` |
+| Stripe | `charge.refunded`, `refund.updated` (succeeded only) | `refunded` | `payment.refunded` |
+| Stripe | `customer.subscription.deleted` | membership `cancelled` | `membership.cancelled` |
+| GoCardless | `payments.paid_out` | `succeeded` | `payment.succeeded` |
+| GoCardless | `payments.failed`, `payments.late_failure_settled` | `failed` | `payment.failed` |
+| GoCardless | `payments.charged_back`, `payments.chargeback_settled` | `disputed` | `payment.disputed` |
+| GoCardless | `payments.cancelled` | `cancelled` | none |
+| GoCardless | `refunds.created`, `refunds.submitted`, `refunds.paid`, `refunds.refunded` | `refunded` | `payment.refunded` |
+| GoCardless | `mandates.cancelled`, `mandates.failed`, `mandates.expired` | mandate link cleared on memberships | none |
+| GoCardless | `subscriptions.cancelled`, `subscriptions.finished` | membership `cancelled`/`expired` | `membership.cancelled`/`membership.expired` |
+
 ### Authenticated
 
 - **Current user:** `GET /api/me` — returns `user_id`, `tenant_id`, `role` (works for tenant and platform admin).

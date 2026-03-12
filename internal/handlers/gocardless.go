@@ -64,6 +64,7 @@ type GoCardlessHandler struct {
 	credRepo    *repository.TenantCredentialRepo
 	eventRepo   *repository.InboundWebhookEventRepo
 	paymentRepo *repository.PaymentRepo
+	disputeRepo *repository.PaymentDisputeRepo
 	memberRepo  *repository.MembershipRepo
 	clientRepo  *repository.ClientRepo
 	encryptor   *database.Encryptor
@@ -72,12 +73,13 @@ type GoCardlessHandler struct {
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
-func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
+func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
 	return &GoCardlessHandler{
 		cfg:         cfg,
 		credRepo:    cr,
 		eventRepo:   eventRepo,
 		paymentRepo: paymentRepo,
+		disputeRepo: disputeRepo,
 		memberRepo:  memberRepo,
 		clientRepo:  clientRepo,
 		encryptor:   enc,
@@ -480,7 +482,7 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		case "subscriptions":
 			h.handleSubscriptionEvent(r.Context(), tenantID, ev.Action, ev.Links.Subscription, ev.Links.Payment, ev.Details.Reason, ev.Details.Cause)
 		case "refunds":
-			h.handleRefundEvent(r.Context(), tenantID, ev.Links.Refund, ev.Action, ev.Details.Reason, ev.Details.Cause)
+			processErr = h.handleRefundEvent(r.Context(), tenantID, ev.Links.Refund, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		default:
 			// other resource types (e.g. creditor, payout, instalment_schedule, block) — log only
 			log.Printf("gocardless.webhook ignored_resource tenant=%s org=%s resource=%s action=%s event=%s", tenantID, orgID, ev.ResourceType, ev.Action, ev.ID)
@@ -565,8 +567,55 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 	}
 }
 
-func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, refundID, action, reason, cause string) {
+func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, refundID, action, reason, cause string) error {
 	log.Printf("GoCardless webhook refund.%s refund=%s reason=%s cause=%s", action, refundID, reason, cause)
+	if refundID == "" || h.paymentRepo == nil {
+		return nil
+	}
+	if !isGoCardlessRefundActionSupported(action) {
+		return nil
+	}
+
+	prov, err := h.getGoCardlessProvider(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	if prov == nil {
+		return nil
+	}
+	refundInfo, err := prov.GetRefund(ctx, refundID)
+	if err != nil {
+		return err
+	}
+	if refundInfo.PaymentID == "" {
+		return nil
+	}
+	p, err := h.paymentRepo.GetByProviderReference(ctx, tenantID, refundInfo.PaymentID)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		p, err = h.reconcileExternalPayment(ctx, tenantID, refundInfo.PaymentID)
+		if err != nil || p == nil {
+			return err
+		}
+	}
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
+		return err
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentRefunded, tenantID, map[string]interface{}{
+			"payment_id":      p.ID,
+			"membership_id":   p.MembershipID,
+			"client_id":       p.ClientID,
+			"amount":          float64(refundInfo.Amount) / 100.0,
+			"status":          "refunded",
+			"provider_ref":    refundInfo.PaymentID,
+			"provider_refund": refundID,
+			"source":          "gocardless_webhook",
+		}))
+	}
+	return nil
 }
 
 // handlePaymentEvent updates the payments table from a GoCardless payment webhook event.
@@ -594,15 +643,27 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 	var status string
 	var paidDate *time.Time
 	var failureReason, failureCode *string
-	switch action {
-	case "paid_out":
+	isDispute := false
+	mappedStatus, mappedDispute, handled := mapGoCardlessPaymentAction(action)
+	if !handled {
+		log.Printf("gocardless.webhook payment_unhandled action=%s payment=%s", action, gcPaymentID)
+		return nil
+	}
+	if mappedStatus == "" {
+		log.Printf("gocardless.webhook payment_approval action=%s payment=%s", action, gcPaymentID)
+		return nil
+	}
+	status = mappedStatus
+	isDispute = mappedDispute
+	switch status {
+	case "succeeded":
 		status = "succeeded"
 		now := time.Now().UTC()
 		paidDate = &now
-	case "confirmed", "submitted", "pending_submission":
+	case "pending":
 		// payments table currently persists processing states as pending until settled.
 		status = "pending"
-	case "failed", "charged_back", "late_failure_settled", "chargeback_settled":
+	case "failed":
 		status = "failed"
 		if reason != "" {
 			failureReason = &reason
@@ -610,24 +671,44 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 		if cause != "" {
 			failureCode = &cause
 		}
-	case "cancelled":
-		status = "cancelled"
-	case "customer_approval_granted", "customer_approval_denied":
-		log.Printf("gocardless.webhook payment_approval action=%s payment=%s", action, gcPaymentID)
-		return nil
-	default:
-		log.Printf("gocardless.webhook payment_unhandled action=%s payment=%s", action, gcPaymentID)
-		return nil
+	case "disputed":
+		status = "disputed"
+		if reason != "" {
+			failureReason = &reason
+		}
+		if cause != "" {
+			failureCode = &cause
+		}
 	}
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
 		return err
 	}
+	if status == "disputed" && isDispute && h.disputeRepo != nil {
+		var providerDisputeID *string
+		synthetic := gcPaymentID + ":chargeback"
+		providerDisputeID = &synthetic
+		_, _ = h.disputeRepo.UpsertByProviderOrPayment(
+			ctx,
+			tenantID,
+			p.ID,
+			p.ClientID,
+			providerDisputeID,
+			failureReason,
+			"open",
+			p.Amount,
+			nil,
+			nil,
+			nil,
+		)
+	}
 	if h.dispatcher != nil {
-		if status == "succeeded" || status == "failed" {
+		if status == "succeeded" || status == "failed" || status == "disputed" {
 			eventType := events.PaymentFailed
 			if status == "succeeded" {
 				eventType = events.PaymentSucceeded
+			} else if status == "disputed" {
+				eventType = events.PaymentDisputed
 			}
 			h.dispatcher.Dispatch(ctx, events.NewEvent(eventType, tenantID, map[string]interface{}{
 				"payment_id":     p.ID,
@@ -646,6 +727,34 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 	h.sendPaymentEmail(ctx, tenantID, p.ClientID, p.Amount, status, reason)
 	log.Printf("gocardless.webhook payment_updated tenant=%s payment=%s provider_ref=%s status=%s", tenantID, p.ID, gcPaymentID, status)
 	return nil
+}
+
+func mapGoCardlessPaymentAction(action string) (status string, isDispute bool, handled bool) {
+	switch action {
+	case "paid_out":
+		return "succeeded", false, true
+	case "confirmed", "submitted", "pending_submission":
+		return "pending", false, true
+	case "failed", "late_failure_settled":
+		return "failed", false, true
+	case "charged_back", "chargeback_settled":
+		return "disputed", true, true
+	case "cancelled":
+		return "cancelled", false, true
+	case "customer_approval_granted", "customer_approval_denied":
+		return "", false, true
+	default:
+		return "", false, false
+	}
+}
+
+func isGoCardlessRefundActionSupported(action string) bool {
+	switch action {
+	case "created", "submitted", "paid", "refunded":
+		return true
+	default:
+		return false
+	}
 }
 
 func webhookResourceIDFromLinks(resourceType, paymentID, mandateID, subscriptionID, refundID, fallback string) string {

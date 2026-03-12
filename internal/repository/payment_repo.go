@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -134,6 +135,31 @@ func (r *PaymentRepo) GetByProviderReference(ctx context.Context, tenantID uuid.
 		return nil, fmt.Errorf("finding payment by provider reference: %w", err)
 	}
 	return &p, nil
+}
+
+// GetByProviderReferences returns the first payment matched by any provider reference.
+func (r *PaymentRepo) GetByProviderReferences(ctx context.Context, tenantID uuid.UUID, providerRefs ...string) (*Payment, error) {
+	refs := make([]string, 0, len(providerRefs))
+	for _, ref := range providerRefs {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	for _, ref := range refs {
+		p, err := r.GetByProviderReference(ctx, tenantID, ref)
+		if err != nil {
+			return nil, err
+		}
+		if p != nil {
+			return p, nil
+		}
+	}
+	return nil, nil
 }
 
 // UpdateStatus updates a payment's status.
