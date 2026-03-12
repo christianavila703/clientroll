@@ -424,7 +424,16 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
                   Copy
                 </button>
               </div>
-              <p>3. Enable events for checkout + invoice payment updates.</p>
+              <p>3. Enable these webhook events:</p>
+              <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
+                <li><code>checkout.session.completed</code></li>
+                <li><code>checkout.session.expired</code></li>
+                <li><code>invoice.payment_succeeded</code></li>
+                <li><code>invoice.payment_failed</code></li>
+                <li><code>customer.subscription.deleted</code></li>
+                <li><code>charge.dispute.created</code>, <code>charge.dispute.updated</code>, <code>charge.dispute.closed</code></li>
+                <li><code>charge.refunded</code> and <code>refund.updated</code></li>
+              </ul>
             </div>
             <div className="mt-2 flex items-center gap-2 text-[11px]">
               <span className={`rounded px-1.5 py-0.5 ${existing?.has_key ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>

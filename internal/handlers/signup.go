@@ -286,93 +286,118 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- GoCardless: create customer + mandate if bank details provided and GC is configured ---
+	// --- GoCardless direct debit path ---
 	gcMandateID := ""
-	gcError := ""
-	if input.BSB != "" && input.AccountNumber != "" {
+	if input.PaymentMethod == "direct_debit" {
+		if strings.TrimSpace(input.BSB) == "" || strings.TrimSpace(input.AccountNumber) == "" {
+			writeError(w, http.StatusBadRequest, "BSB and account number are required for direct debit")
+			return
+		}
+
 		prov, provErr := h.getGoCardlessProvider(r.Context(), tenant.ID)
-		if provErr == nil && prov != nil {
-			// Create or reuse GoCardless customer
-			gcCustomerID := ""
-			if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
-				gcCustomerID = *client.GoCardlessCustomerID
-			} else {
-				clientEmail := ""
-				if client.Email != nil {
-					clientEmail = *client.Email
-				}
-				clientPhone := ""
-				if client.Phone != nil {
-					clientPhone = *client.Phone
-				}
-				cid, err := prov.CreateCustomer(r.Context(), payment.CreateCustomerInput{
-					Email:     clientEmail,
-					Name:      client.Name,
-					Phone:     clientPhone,
-					Reference: client.ID.String(),
-				})
-				if err != nil {
-					var gce *payment.GCError
-					if errors.As(err, &gce) {
-						log.Printf("GoCardless CreateCustomer during signup: %s (raw: %s)", gce.Message, gce.Raw)
-					} else {
-						log.Printf("GoCardless CreateCustomer during signup: %v", err)
-					}
-					gcError = "Direct debit setup failed. Please contact us to set up your payments."
-				} else {
-					gcCustomerID = cid
-					_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), client.ID, tenant.ID, cid)
-				}
+		if provErr != nil {
+			log.Printf("GoCardless provider init during signup: %v", provErr)
+			writeError(w, http.StatusBadGateway, "Direct debit setup failed")
+			return
+		}
+		if prov == nil {
+			writeError(w, http.StatusServiceUnavailable, "Direct debit is not configured")
+			return
+		}
+
+		// Create or reuse GoCardless customer
+		gcCustomerID := ""
+		if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
+			gcCustomerID = *client.GoCardlessCustomerID
+		} else {
+			clientEmail := ""
+			if client.Email != nil {
+				clientEmail = *client.Email
 			}
-
-			// Create mandate via direct debit setup
-			if gcCustomerID != "" {
-				holderName := input.AccountHolderName
-				if holderName == "" {
-					holderName = client.Name
-				}
-				mandateID, err := prov.SetupDirectDebit(r.Context(), payment.SetupDirectDebitInput{
-					CustomerID:        gcCustomerID,
-					AccountHolderName: holderName,
-					AccountNumber:     input.AccountNumber,
-					BSB:               input.BSB,
-					Reference:         membership.ID.String(),
-				})
-				if err != nil {
-					log.Printf("GoCardless SetupDirectDebit during signup: %v", err)
-					gcError = "Direct debit setup failed. Please contact us to set up your payments."
-				} else {
-					gcMandateID = mandateID
-					_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), membership.ID, tenant.ID, mandateID)
-					log.Printf("GoCardless mandate %s created for membership %s (client %s)", mandateID, membership.ID, client.ID)
-
-					// Store bank details (last 4 digits only)
-					if h.bankDetailsRepo != nil {
-						last4 := input.AccountNumber
-						if len(last4) > 4 {
-							last4 = last4[len(last4)-4:]
-						}
-						_ = h.bankDetailsRepo.Create(r.Context(), tenant.ID, client.ID,
-							input.AccountHolderName, input.BSB, last4, input.InstitutionName, "")
-					}
-
-					// Create GoCardless subscription for recurring payments.
-					mtForSub, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
-					subName := "Membership"
-					if mtForSub != nil {
-						subName = mtForSub.Title
-					}
-					numPay := membership.NumPayments
-					if numPay == nil {
-						if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
-							numPay = to.NumPayments
-						}
-					}
-					createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, membership,
-						tenant.ID, input.PaymentFrequency, input.PaymentAmount,
-						membership.PaymentIntervalUnit, membership.PaymentIntervalCount, subName, membership.MinTermEndDate, numPay)
-				}
+			clientPhone := ""
+			if client.Phone != nil {
+				clientPhone = *client.Phone
 			}
+			cid, err := prov.CreateCustomer(r.Context(), payment.CreateCustomerInput{
+				Email:     clientEmail,
+				Name:      client.Name,
+				Phone:     clientPhone,
+				Reference: client.ID.String(),
+			})
+			if err != nil {
+				var gce *payment.GCError
+				if errors.As(err, &gce) {
+					log.Printf("GoCardless CreateCustomer during signup: %s (raw: %s)", gce.Message, gce.Raw)
+					writeError(w, http.StatusBadGateway, gce.Message)
+				} else {
+					log.Printf("GoCardless CreateCustomer during signup: %v", err)
+					writeError(w, http.StatusBadGateway, "Direct debit setup failed")
+				}
+				return
+			}
+			gcCustomerID = cid
+			_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), client.ID, tenant.ID, cid)
+		}
+
+		holderName := input.AccountHolderName
+		if holderName == "" {
+			holderName = client.Name
+		}
+		mandateID, err := prov.SetupDirectDebit(r.Context(), payment.SetupDirectDebitInput{
+			CustomerID:        gcCustomerID,
+			AccountHolderName: holderName,
+			AccountNumber:     input.AccountNumber,
+			BSB:               input.BSB,
+			Reference:         membership.ID.String(),
+		})
+		if err != nil {
+			log.Printf("GoCardless SetupDirectDebit during signup: %v", err)
+			writeError(w, http.StatusBadGateway, "Direct debit setup failed")
+			return
+		}
+		gcMandateID = mandateID
+		_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), membership.ID, tenant.ID, mandateID)
+		log.Printf("GoCardless mandate %s created for membership %s (client %s)", mandateID, membership.ID, client.ID)
+
+		// Store bank details (last 4 digits only)
+		if h.bankDetailsRepo != nil {
+			last4 := input.AccountNumber
+			if len(last4) > 4 {
+				last4 = last4[len(last4)-4:]
+			}
+			_ = h.bankDetailsRepo.Create(r.Context(), tenant.ID, client.ID,
+				input.AccountHolderName, input.BSB, last4, input.InstitutionName, "")
+		}
+
+		// Create GoCardless subscription for recurring payments.
+		mtForSub, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+		subName := "Membership"
+		if mtForSub != nil {
+			subName = mtForSub.Title
+		}
+		numPay := membership.NumPayments
+		if numPay == nil {
+			if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
+				numPay = to.NumPayments
+			}
+		}
+		if _, err := createGoCardlessSubscription(
+			r.Context(),
+			prov,
+			h.memberRepo,
+			mandateID,
+			membership,
+			tenant.ID,
+			input.PaymentFrequency,
+			input.PaymentAmount,
+			membership.PaymentIntervalUnit,
+			membership.PaymentIntervalCount,
+			subName,
+			membership.MinTermEndDate,
+			numPay,
+		); err != nil {
+			writeError(w, http.StatusBadGateway, "Direct debit subscription setup failed")
+			return
 		}
 	}
 
@@ -399,9 +424,6 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	if gcMandateID != "" {
 		resp["gocardless_mandate_id"] = gcMandateID
-	}
-	if gcError != "" {
-		resp["gocardless_error"] = gcError
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
