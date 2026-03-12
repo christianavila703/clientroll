@@ -92,7 +92,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   return (
     <div className="max-w-3xl mx-auto">
       {/* Back link */}
-      <button onClick={onBack} className="mb-8 text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1.5 group">
+      <button onClick={onBack} className="mb-8 text-sm font-medium flex items-center gap-1.5 group" style={{ color: "var(--brandPrimary)" }}>
         <svg className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
         Back to membership details
       </button>
@@ -102,11 +102,15 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
         <div className="flex items-center justify-between">
           {steps.map((s, i) => (
             <div key={s.key} className="flex items-center gap-2">
-              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all ${
-                i < currentIdx ? "bg-indigo-600 text-white" :
-                i === currentIdx ? "bg-indigo-600 text-white ring-4 ring-indigo-100" :
-                "bg-gray-100 text-gray-400"
-              }`}>
+              <div
+                className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all ${
+                  i <= currentIdx ? "text-white" : "bg-gray-100 text-gray-400"
+                }`}
+                style={i <= currentIdx ? {
+                  backgroundColor: "var(--brandPrimary)",
+                  ...(i === currentIdx ? { boxShadow: "0 0 0 4px color-mix(in srgb, var(--brandPrimary) 15%, transparent)" } : {}),
+                } : undefined}
+              >
                 {i < currentIdx ? (
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                 ) : (
@@ -117,7 +121,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
                 i <= currentIdx ? "text-gray-900" : "text-gray-400"
               }`}>{s.label}</span>
               {i < steps.length - 1 && (
-                <div className={`hidden sm:block h-px w-8 lg:w-16 mx-2 ${i < currentIdx ? "bg-indigo-600" : "bg-gray-200"}`} />
+                <div className="hidden sm:block h-px w-8 lg:w-16 mx-2" style={{ backgroundColor: i < currentIdx ? "var(--brandPrimary)" : "#e5e7eb" }} />
               )}
             </div>
           ))}
@@ -125,22 +129,48 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       </div>
 
       {/* Summary bar */}
-      <div className="mb-8 rounded-2xl bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 px-6 py-4">
+      <div className="mb-8 rounded-2xl border px-6 py-5" style={{ backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)", borderColor: "color-mix(in srgb, var(--brandPrimary) 15%, transparent)" }}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white flex-shrink-0" style={{ backgroundColor: "var(--brandPrimary)" }}>
               <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             </div>
             <div>
-              <p className="font-semibold text-gray-900">{membership.title}</p>
+              <p className="font-semibold text-gray-900">{(membership.membership_name || "").trim() || membership.title}</p>
+              {(membership.membership_level || "").trim() && (
+                <p className="text-[12px] font-medium" style={{ color: "var(--brandPrimary)" }}>{membership.membership_level}</p>
+              )}
               <p className="text-[13px] text-gray-500">{termOption.duration_months} month term</p>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold text-indigo-600 tabular-nums">${termOption.fee_total.toLocaleString()}</p>
-            <p className="text-[11px] text-gray-400">total contract</p>
+            {(() => {
+              const mode = tenant.signup_price_display_mode || "total";
+              const toWeekly = (total: number, months: number) => months ? total / ((months * 52) / 12) : null;
+              const toMonthly = (total: number, months: number) => months ? total / months : null;
+              const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+              if (mode === "weekly") {
+                const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
+                if (w) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
+              }
+              if (mode === "monthly") {
+                const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
+                if (m) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
+              }
+              return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
+            })()}
           </div>
         </div>
+        {((membership as any).summary || (membership as any).benefits) && (
+          <div className="mt-4 pt-4 border-t" style={{ borderColor: "color-mix(in srgb, var(--brandPrimary) 12%, transparent)" }}>
+            {(membership as any).summary && (
+              <p className="text-[13px] text-gray-600 leading-relaxed">{(membership as any).summary}</p>
+            )}
+            {(membership as any).benefits && (
+              <div className="mt-2 text-[12px] text-gray-500 leading-relaxed whitespace-pre-line">{(membership as any).benefits}</div>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -183,11 +213,12 @@ function NavButtons({ onBack, onNext, nextLabel, isSubmit, disabled }: { onBack?
           Back
         </button>
       ) : <div />}
-      <button onClick={onNext} disabled={disabled} className={`inline-flex items-center gap-2 rounded-xl px-7 py-3 text-[14px] font-semibold shadow-sm transition-all ${
-        isSubmit
-          ? "bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-          : "bg-indigo-600 text-white hover:bg-indigo-700"
-      }`}>
+      <button
+        onClick={onNext}
+        disabled={disabled}
+        className="inline-flex items-center gap-2 rounded-xl px-7 py-3 text-[14px] font-semibold shadow-sm transition-all text-white disabled:opacity-50"
+        style={{ backgroundColor: isSubmit ? "#059669" : "var(--brandPrimary)" }}
+      >
         {nextLabel}
         {!isSubmit && <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>}
       </button>
@@ -198,7 +229,7 @@ function NavButtons({ onBack, onNext, nextLabel, isSubmit, disabled }: { onBack?
 /* ─── Section A: Member Details ─── */
 function MemberSection({ data, onChange, onNext }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; onNext: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
-  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all";
+  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
 
   return (
     <div>
@@ -220,9 +251,9 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
           <div className="flex gap-4 mt-1">
             {["Female", "Male"].map((g) => (
               <label key={g} className={`flex items-center gap-2.5 rounded-xl border px-4 py-3 cursor-pointer transition-all min-h-[48px] ${
-                data.gender === g ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 hover:border-gray-300 text-gray-700"
-              }`}>
-                <input type="radio" name="gender" value={g} checked={data.gender === g} onChange={(e) => set("gender", e.target.value)} className="h-4 w-4 text-indigo-600" />
+                data.gender === g ? "text-gray-900" : "border-gray-200 hover:border-gray-300 text-gray-700"
+              }`} style={data.gender === g ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 8%, white)" } : undefined}>
+                <input type="radio" name="gender" value={g} checked={data.gender === g} onChange={(e) => set("gender", e.target.value)} className="h-4 w-4 accent-[var(--brandPrimary)]" />
                 <span className="text-[14px] font-medium">{g}</span>
               </label>
             ))}
@@ -247,7 +278,7 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
 /* ─── Section B: Payment Details ─── */
 function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; onNext: () => void; onBack: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
-  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all";
+  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
   const supportsGoCardless = paymentProviders.includes("gocardless");
 
@@ -282,10 +313,10 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {supportsGoCardless && (
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
-                data.payment_method === "direct_debit" ? "border-indigo-500 bg-indigo-50/50 shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
-              }`}>
+                data.payment_method === "direct_debit" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+              }`} style={data.payment_method === "direct_debit" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
                 <input type="radio" name="payment_method" value="direct_debit" checked={data.payment_method === "direct_debit"} onChange={(e) => set("payment_method", e.target.value)}
-                  className="h-5 w-5 text-indigo-600 border-gray-300" />
+                  className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div>
                   <p className="text-[14px] font-semibold text-gray-900">Direct Debit</p>
                   <p className="text-[12px] text-gray-500">Pay from bank account (GoCardless)</p>
@@ -294,10 +325,10 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
             )}
             {supportsStripe && (
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
-                data.payment_method === "card" ? "border-indigo-500 bg-indigo-50/50 shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
-              }`}>
+                data.payment_method === "card" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+              }`} style={data.payment_method === "card" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
                 <input type="radio" name="payment_method" value="card" checked={data.payment_method === "card"} onChange={(e) => set("payment_method", e.target.value)}
-                  className="h-5 w-5 text-indigo-600 border-gray-300" />
+                  className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div>
                   <p className="text-[14px] font-semibold text-gray-900">Credit / Debit Card</p>
                   <p className="text-[12px] text-gray-500">Secure Stripe checkout</p>
@@ -317,17 +348,17 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
             {frequencies.map((f) => (
               <label key={f.value} className={`flex items-center gap-4 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
                 data.payment_frequency === f.value
-                  ? "border-indigo-500 bg-indigo-50/50 shadow-sm"
+                  ? "shadow-sm"
                   : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
-              }`}>
+              }`} style={data.payment_frequency === f.value ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
                 <input type="radio" name="frequency" value={f.value} checked={data.payment_frequency === f.value} onChange={(e) => set("payment_frequency", e.target.value)}
-                  className="h-5 w-5 text-indigo-600 border-gray-300" />
+                  className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div className="flex-1">
-                  <p className={`text-[14px] font-semibold ${data.payment_frequency === f.value ? "text-indigo-900" : "text-gray-900"}`}>{f.label}</p>
+                  <p className="text-[14px] font-semibold text-gray-900">{f.label}</p>
                   <p className="text-[12px] text-gray-500 mt-0.5">{f.desc}</p>
                 </div>
                 {f.amount && (
-                  <span className={`text-[15px] font-bold tabular-nums ${data.payment_frequency === f.value ? "text-indigo-600" : "text-gray-700"}`}>
+                  <span className="text-[15px] font-bold tabular-nums" style={{ color: data.payment_frequency === f.value ? "var(--brandPrimary)" : "#374151" }}>
                     ${f.amount.toLocaleString()}
                   </span>
                 )}
@@ -345,7 +376,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
 /* ─── Section C: Bank Details ─── */
 function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; tenant: Tenant; onNext: () => void; onBack: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
-  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all";
+  const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
 
   return (
     <div>

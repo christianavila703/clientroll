@@ -11,15 +11,21 @@ interface Tenant {
   logo_url?: string;
   primary_colour: string;
   secondary_colour?: string;
+  signup_price_display_mode?: "total" | "weekly" | "monthly";
   payment_providers?: string[];
 }
 
 interface MembershipType {
   id: string;
+  membership_name?: string;
+  membership_level?: string;
   title: string;
   slug: string;
+  is_most_popular?: boolean;
+  summary?: string;
   description?: string;
   inclusions?: string;
+  benefits?: string;
   top_image_url?: string;
   total_value: number;
   term_options: TermOption[];
@@ -64,6 +70,7 @@ export default function SignupPage() {
   const [step, setStep] = useState<Step>("select");
   const [thankyou, setThankyou] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -81,8 +88,8 @@ export default function SignupPage() {
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
         setSelected(data.membership);
-        if (data.tenant?.payment_providers) {
-          setTenant((prev) => prev ? { ...prev, payment_providers: data.tenant.payment_providers } : data.tenant);
+        if (data.payment_providers && data.tenant) {
+          setTenant({ ...data.tenant, payment_providers: data.payment_providers });
         }
         setStep("detail");
       } else {
@@ -95,6 +102,8 @@ export default function SignupPage() {
         if (data.payment_providers && data.tenant) {
           setTenant({ ...data.tenant, payment_providers: data.payment_providers });
         }
+        setStep("select");
+        setSelected(null);
       }
       if (stripeState === "success") {
         setThankyou({
@@ -119,6 +128,29 @@ export default function SignupPage() {
       </div>
     );
   }
+
+  const openMembershipDetail = async (mt: MembershipType) => {
+    if (!tenantSlug) return;
+    setLoadingDetail(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/signup/${tenantSlug}/${mt.slug}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load membership details");
+      setSelected((data.membership as MembershipType) || mt);
+      if (data.tenant) {
+        setTenant({
+          ...(data.tenant as Tenant),
+          payment_providers: data.payment_providers || data.tenant.payment_providers || [],
+        });
+      }
+      setStep("detail");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load membership details");
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
 
   if (error) {
     return (
@@ -162,13 +194,18 @@ export default function SignupPage() {
           <MembershipSelect
             memberships={memberships}
             tenantSlug={tenantSlug || ""}
-            onSelect={(mt) => { setSelected(mt); setStep("detail"); }}
+            priceDisplayMode={tenant?.signup_price_display_mode || "weekly"}
+            onSelect={openMembershipDetail}
           />
+        )}
+        {loadingDetail && (
+          <div className="mt-4 text-[13px] text-gray-500">Loading membership details...</div>
         )}
         {step === "detail" && selected && (
           <MembershipDetail
             membership={selected}
             tenantSlug={tenantSlug || ""}
+            priceDisplayMode={tenant?.signup_price_display_mode || "weekly"}
             onSelectTerm={(term) => { setSelectedTerm(term); setStep("form"); }}
             onBack={() => {
               if (membershipSlug) {

@@ -113,11 +113,12 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	var input struct {
-		Timezone      *string `json:"timezone,omitempty"`
-		Slug          *string `json:"slug,omitempty"`
-		PrimaryColour *string `json:"primary_colour,omitempty"`
-		SecondaryColour *string `json:"secondary_colour,omitempty"`
-		LogoURL         *string `json:"logo_url,omitempty"`
+		Timezone                   *string `json:"timezone,omitempty"`
+		Slug                       *string `json:"slug,omitempty"`
+		PrimaryColour              *string `json:"primary_colour,omitempty"`
+		SecondaryColour            *string `json:"secondary_colour,omitempty"`
+		SignupPriceDisplayMode     *string `json:"signup_price_display_mode,omitempty"`
+		LogoURL                    *string `json:"logo_url,omitempty"`
 		DefaultThankyouHeading     *string `json:"default_thankyou_heading,omitempty"`
 		DefaultThankyouBody        *string `json:"default_thankyou_body,omitempty"`
 		DefaultThankyouImageURL    *string `json:"default_thankyou_image_url,omitempty"`
@@ -142,12 +143,23 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		nextSlug = &normalized
 	}
 
+	var nextDisplayMode *string
+	if input.SignupPriceDisplayMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*input.SignupPriceDisplayMode))
+		if mode != "total" && mode != "weekly" && mode != "monthly" {
+			writeError(w, http.StatusBadRequest, "signup_price_display_mode must be 'total', 'weekly', or 'monthly'")
+			return
+		}
+		nextDisplayMode = &mode
+	}
+
 	updateInput := models.UpdateTenantInput{
-		Timezone:      input.Timezone,
-		Slug:          nextSlug,
-		PrimaryColour: input.PrimaryColour,
-		SecondaryColour: input.SecondaryColour,
-		LogoURL:         input.LogoURL,
+		Timezone:                   input.Timezone,
+		Slug:                       nextSlug,
+		PrimaryColour:              input.PrimaryColour,
+		SecondaryColour:            input.SecondaryColour,
+		SignupPriceDisplayMode:     nextDisplayMode,
+		LogoURL:                    input.LogoURL,
 		DefaultThankyouHeading:     input.DefaultThankyouHeading,
 		DefaultThankyouBody:        input.DefaultThankyouBody,
 		DefaultThankyouImageURL:    input.DefaultThankyouImageURL,

@@ -5,10 +5,13 @@ import ImageUpload from "../common/ImageUpload";
 
 interface MembershipType {
   id: string;
+  membership_name?: string;
+  membership_level?: string;
   title: string;
   slug: string;
   description?: string;
   is_active: boolean;
+  is_most_popular?: boolean;
   intrinsic_value: number;
   total_value: number;
   sort_order: number;
@@ -16,6 +19,14 @@ interface MembershipType {
   created_at: string;
   updated_at: string;
 }
+
+const membershipDisplayTitle = (mt: Pick<MembershipType, "membership_name" | "membership_level" | "title">) => {
+  const name = (mt.membership_name || "").trim();
+  const level = (mt.membership_level || "").trim();
+  if (name && level) return `${name} - ${level}`;
+  if (name) return name;
+  return mt.title;
+};
 
 interface TermOption {
   id: string;
@@ -89,7 +100,8 @@ export default function MembershipTypesPage() {
   const filtered = types.filter((mt) => {
     if (tab === "active" && !mt.is_active) return false;
     if (tab === "draft" && mt.is_active) return false;
-    if (search && !mt.title.toLowerCase().includes(search.toLowerCase())) return false;
+    const haystack = `${membershipDisplayTitle(mt)} ${mt.membership_name || ""} ${mt.membership_level || ""}`.toLowerCase();
+    if (search && !haystack.includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -173,13 +185,19 @@ export default function MembershipTypesPage() {
               {filtered.map((mt) => (
                 <tr key={mt.id} className="cursor-pointer" onClick={() => navigate(`/memberships/${mt.id}`)}>
                   <td>
-                    <p className="font-medium text-gray-900">{mt.title}</p>
+                    <p className="font-medium text-gray-900">{(mt.membership_name || "").trim() || mt.title}</p>
+                    {(mt.membership_level || "").trim() && (
+                      <p className="text-[12px] font-medium text-indigo-600 mt-0.5">{mt.membership_level}</p>
+                    )}
                     <p className="text-[11px] text-gray-400 font-mono mt-0.5">/{mt.slug}</p>
                   </td>
                   <td>
-                    <span className={`badge ${mt.is_active ? "badge-green" : "badge-gray"}`}>
-                      {mt.is_active ? "Active" : "Draft"}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className={`badge ${mt.is_active ? "badge-green" : "badge-gray"}`}>
+                        {mt.is_active ? "Active" : "Draft"}
+                      </span>
+                      {mt.is_most_popular && <span className="badge badge-purple">Most Popular</span>}
+                    </div>
                   </td>
                   <td className="tabular-nums">${mt.intrinsic_value?.toLocaleString() || mt.total_value.toLocaleString()}</td>
                   <td className="text-gray-500">{mt.term_options?.length || 0} options</td>
@@ -201,7 +219,7 @@ export default function MembershipTypesPage() {
                         mt={mt}
                         onArchive={() => handleArchive(mt.id)}
                         onActivate={() => handleActivate(mt.id)}
-                        onDelete={() => handleDelete(mt.id, mt.title)}
+                        onDelete={() => handleDelete(mt.id, membershipDisplayTitle(mt))}
                       />
                     </div>
                   </td>
@@ -287,27 +305,31 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
 
   const [form, setForm] = useState({
-    title: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "",
+    membership_name: "", membership_level: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "", is_most_popular: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const title = form.title.trim();
-    if (!title) {
-      setError("Title is required");
+    const membershipName = form.membership_name.trim();
+    const membershipLevel = form.membership_level.trim();
+    if (!membershipName) {
+      setError("Membership name is required");
       return;
     }
     setSaving(true); setError("");
     try {
       await api.createMembershipType({
-        title,
+        title: membershipLevel ? `${membershipName} - ${membershipLevel}` : membershipName,
+        membership_name: membershipName,
+        membership_level: membershipLevel || null,
         description: form.description || "",
         inclusions: form.inclusions || "",
         total_value: toNumberOrZero(form.total_value),
         sort_order: toNumberOrZero(form.sort_order),
         top_image_url: form.top_image_url || "",
+        is_most_popular: form.is_most_popular,
       });
       onCreated();
     }
@@ -329,8 +351,12 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
       {error && <div className="mx-5 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
       <form id="create-mt-form" onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
         <div>
-          <label className="block text-[13px] font-medium text-gray-700 mb-1">Title *</label>
-          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="input-field" required />
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Name *</label>
+          <input value={form.membership_name} onChange={(e) => setForm({ ...form, membership_name: e.target.value })} className="input-field" required />
+        </div>
+        <div>
+          <label className="block text-[13px] font-medium text-gray-700 mb-1">Level</label>
+          <input value={form.membership_level} onChange={(e) => setForm({ ...form, membership_level: e.target.value })} className="input-field" placeholder="Support, Premium, Elite..." />
         </div>
         <div>
           <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
@@ -364,6 +390,15 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
             <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-[13px] text-gray-700">
+          <input
+            type="checkbox"
+            checked={form.is_most_popular}
+            onChange={(e) => setForm({ ...form, is_most_popular: e.target.checked })}
+            className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+          />
+          Mark as Most Popular
+        </label>
       </form>
     </div>
   );

@@ -12,6 +12,18 @@ import (
 	"github.com/google/uuid"
 )
 
+func buildMembershipDisplayTitle(name, level string) string {
+	name = strings.TrimSpace(name)
+	level = strings.TrimSpace(level)
+	if name == "" {
+		return level
+	}
+	if level == "" {
+		return name
+	}
+	return name + " - " + level
+}
+
 // MembershipTypeHandler handles membership type CRUD.
 type MembershipTypeHandler struct {
 	mtRepo    *repository.MembershipTypeRepo
@@ -57,11 +69,14 @@ func (h *MembershipTypeHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	var input struct {
-		Title       string  `json:"title"`
-		Slug        string  `json:"slug"`
-		Description *string `json:"description"`
-		Inclusions  *string `json:"inclusions"`
-		TopImageURL *string `json:"top_image_url"`
+		Title           string  `json:"title"`
+		MembershipName  *string `json:"membership_name"`
+		MembershipLevel *string `json:"membership_level"`
+		Slug            string  `json:"slug"`
+		Description     *string `json:"description"`
+		Inclusions      *string `json:"inclusions"`
+		TopImageURL     *string `json:"top_image_url"`
+		IsMostPopular   bool    `json:"is_most_popular"`
 		// Kept for backward compatibility with older frontends that still send it.
 		IntrinsicValue *float64 `json:"intrinsic_value"`
 		TotalValue     float64  `json:"total_value"`
@@ -71,20 +86,59 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
+	var membershipName *string
+	if input.MembershipName != nil {
+		v := strings.TrimSpace(*input.MembershipName)
+		if v != "" {
+			membershipName = &v
+		}
+	}
+	var membershipLevel *string
+	if input.MembershipLevel != nil {
+		v := strings.TrimSpace(*input.MembershipLevel)
+		if v != "" {
+			membershipLevel = &v
+		}
+	}
+	composedTitle := buildMembershipDisplayTitle(
+		func() string {
+			if membershipName == nil {
+				return ""
+			}
+			return *membershipName
+		}(),
+		func() string {
+			if membershipLevel == nil {
+				return ""
+			}
+			return *membershipLevel
+		}(),
+	)
 	input.Title = strings.TrimSpace(input.Title)
+	if composedTitle != "" {
+		input.Title = composedTitle
+	}
 	if input.Title == "" {
-		writeError(w, http.StatusBadRequest, "Title is required")
+		writeError(w, http.StatusBadRequest, "Membership name is required")
 		return
 	}
 	if input.Slug == "" {
 		input.Slug = repository.GenerateSlug(input.Title)
 	}
-	mt, err := h.mtRepo.Create(r.Context(), tenantID, input.Title, input.Slug,
+	mt, err := h.mtRepo.Create(r.Context(), tenantID, membershipName, membershipLevel, input.Title, input.Slug,
 		input.Description, input.Inclusions, input.TopImageURL, input.TotalValue, input.SortOrder)
 	if err != nil {
 		log.Printf("Error creating membership type: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership type")
 		return
+	}
+	if input.IsMostPopular {
+		if err := h.mtRepo.SetMostPopular(r.Context(), tenantID, mt.ID); err != nil {
+			log.Printf("Error setting most popular on create: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to set most popular")
+			return
+		}
+		mt, _ = h.mtRepo.FindByID(r.Context(), mt.ID, tenantID)
 	}
 	writeJSON(w, http.StatusCreated, mt)
 }
@@ -98,24 +152,113 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Title       string  `json:"title"`
-		Description *string `json:"description"`
-		Inclusions  *string `json:"inclusions"`
-		TopImageURL *string `json:"top_image_url"`
-		TotalValue  float64 `json:"total_value"`
-		SortOrder   int     `json:"sort_order"`
-		IsActive    *bool   `json:"is_active"`
+		Title           *string  `json:"title"`
+		MembershipName  *string  `json:"membership_name"`
+		MembershipLevel *string  `json:"membership_level"`
+		Slug            *string  `json:"slug"`
+		Summary         *string  `json:"summary"`
+		Description     *string  `json:"description"`
+		Inclusions      *string  `json:"inclusions"`
+		Benefits        *string  `json:"benefits"`
+		TopImageURL     *string  `json:"top_image_url"`
+		TotalValue      *float64 `json:"total_value"`
+		SortOrder       *int     `json:"sort_order"`
+		IsActive        *bool    `json:"is_active"`
+		IsMostPopular   *bool    `json:"is_most_popular"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
-	// For now just toggle active if provided
+
+	existing, findErr := h.mtRepo.FindByID(r.Context(), mtID, tenantID)
+	if findErr != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "Membership type not found")
+		return
+	}
+
+	normalize := func(v *string) *string {
+		if v == nil {
+			return nil
+		}
+		t := strings.TrimSpace(*v)
+		if t == "" {
+			return nil
+		}
+		return &t
+	}
+
+	nextName := normalize(input.MembershipName)
+	nextLevel := normalize(input.MembershipLevel)
+	nextTitle := normalize(input.Title)
+	if input.MembershipName != nil || input.MembershipLevel != nil {
+		baseName := ""
+		if nextName != nil {
+			baseName = *nextName
+		} else if existing.MembershipName != nil {
+			baseName = *existing.MembershipName
+		}
+		baseLevel := ""
+		if nextLevel != nil {
+			baseLevel = *nextLevel
+		} else if existing.MembershipLevel != nil {
+			baseLevel = *existing.MembershipLevel
+		}
+		composed := buildMembershipDisplayTitle(baseName, baseLevel)
+		if strings.TrimSpace(composed) != "" {
+			nextTitle = &composed
+		}
+	}
+
+	nextSlug := normalize(input.Slug)
+	if nextSlug == nil && nextTitle != nil {
+		generated := repository.GenerateSlug(*nextTitle)
+		if generated != "" {
+			nextSlug = &generated
+		}
+	}
+
+	if _, err := h.mtRepo.UpdateBasics(
+		r.Context(),
+		mtID,
+		tenantID,
+		nextName,
+		nextLevel,
+		nextTitle,
+		nextSlug,
+		input.Summary,
+		input.Description,
+		input.Inclusions,
+		input.Benefits,
+		input.TopImageURL,
+		input.TotalValue,
+		input.SortOrder,
+	); err != nil {
+		log.Printf("Error updating membership basics: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update")
+		return
+	}
+
 	if input.IsActive != nil {
 		if *input.IsActive {
 			_ = h.mtRepo.Activate(r.Context(), mtID, tenantID)
 		} else {
 			_ = h.mtRepo.Archive(r.Context(), mtID, tenantID)
+		}
+	}
+	if input.IsMostPopular != nil {
+		if *input.IsMostPopular {
+			if err := h.mtRepo.SetMostPopular(r.Context(), tenantID, mtID); err != nil {
+				log.Printf("Error setting most popular: %v", err)
+				writeError(w, http.StatusInternalServerError, "Failed to update")
+				return
+			}
+		} else {
+			if err := h.mtRepo.ClearMostPopular(r.Context(), tenantID, mtID); err != nil {
+				log.Printf("Error clearing most popular: %v", err)
+				writeError(w, http.StatusInternalServerError, "Failed to update")
+				return
+			}
 		}
 	}
 	mt, err := h.mtRepo.FindByID(r.Context(), mtID, tenantID)
@@ -207,14 +350,14 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		return
 	}
 	var input struct {
-		DurationMonths int      `json:"duration_months"`
-		FeeTotal       float64  `json:"fee_total"`
-		FeeWeekly      *float64 `json:"fee_weekly"`
-		FeeFortnightly *float64 `json:"fee_fortnightly"`
-		FeeMonthly     *float64 `json:"fee_monthly"`
-		FeeQuarterly   *float64 `json:"fee_quarterly"`
-		AllowUpfront   bool     `json:"allow_upfront"`
-		NumPayments    *int     `json:"num_payments"`
+		DurationMonths              int      `json:"duration_months"`
+		FeeTotal                    float64  `json:"fee_total"`
+		FeeWeekly                   *float64 `json:"fee_weekly"`
+		FeeFortnightly              *float64 `json:"fee_fortnightly"`
+		FeeMonthly                  *float64 `json:"fee_monthly"`
+		FeeQuarterly                *float64 `json:"fee_quarterly"`
+		AllowUpfront                bool     `json:"allow_upfront"`
+		NumPayments                 *int     `json:"num_payments"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
 		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
@@ -274,14 +417,14 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		return
 	}
 	var input struct {
-		DurationMonths int      `json:"duration_months"`
-		FeeTotal       float64  `json:"fee_total"`
-		FeeWeekly      *float64 `json:"fee_weekly"`
-		FeeFortnightly *float64 `json:"fee_fortnightly"`
-		FeeMonthly     *float64 `json:"fee_monthly"`
-		FeeQuarterly   *float64 `json:"fee_quarterly"`
-		AllowUpfront   bool     `json:"allow_upfront"`
-		NumPayments    *int     `json:"num_payments"`
+		DurationMonths              int      `json:"duration_months"`
+		FeeTotal                    float64  `json:"fee_total"`
+		FeeWeekly                   *float64 `json:"fee_weekly"`
+		FeeFortnightly              *float64 `json:"fee_fortnightly"`
+		FeeMonthly                  *float64 `json:"fee_monthly"`
+		FeeQuarterly                *float64 `json:"fee_quarterly"`
+		AllowUpfront                bool     `json:"allow_upfront"`
+		NumPayments                 *int     `json:"num_payments"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
 		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`

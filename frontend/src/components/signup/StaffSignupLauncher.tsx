@@ -28,6 +28,8 @@ function CopyButton({ text }: { text: string }) {
 
 interface MembershipType {
   id: string;
+  membership_name?: string;
+  membership_level?: string;
   title: string;
   slug: string;
   description?: string;
@@ -63,6 +65,9 @@ export default function StaffSignupLauncher() {
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
 
   const baseUrl = window.location.origin;
+  const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
+  const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
+  const fallbackTitle = (mt: MembershipType) => mt.title;
 
   return (
     <div>
@@ -110,10 +115,15 @@ export default function StaffSignupLauncher() {
           {types.map((mt) => (
             <div key={mt.id} className="card overflow-hidden group hover:border-indigo-200 hover:shadow-md transition-all">
               {mt.top_image_url && (
-                <img src={mt.top_image_url} alt={mt.title} className="w-full h-36 object-cover" />
+                <img src={mt.top_image_url} alt={membershipName(mt) || fallbackTitle(mt)} className="w-full h-36 object-cover" />
               )}
               <div className="px-5 py-4">
-                <h3 className="text-[15px] font-semibold text-gray-900">{mt.title}</h3>
+                <h3 className="text-[15px] font-semibold text-gray-900">{membershipName(mt) || fallbackTitle(mt)}</h3>
+                {membershipLevel(mt) && (
+                  <p className="mt-0.5 text-[13px] font-medium" style={{ color: "var(--brandPrimary, #4f46e5)" }}>
+                    {membershipLevel(mt)}
+                  </p>
+                )}
                 {mt.description && (
                   <p className="text-[12px] text-gray-500 mt-1 line-clamp-2">{mt.description}</p>
                 )}
@@ -158,7 +168,12 @@ export default function StaffSignupLauncher() {
           {types.map((mt) => (
             <div key={mt.id} className="px-5 py-3 flex items-center justify-between">
               <div>
-                <p className="text-[13px] font-medium text-gray-900">{mt.title}</p>
+                <p className="text-[13px] font-medium text-gray-900">{membershipName(mt) || fallbackTitle(mt)}</p>
+                {membershipLevel(mt) && (
+                  <p className="text-[12px] font-medium" style={{ color: "var(--brandPrimary, #4f46e5)" }}>
+                    {membershipLevel(mt)}
+                  </p>
+                )}
                 <p className="text-[11px] text-gray-400 font-mono">{baseUrl}/{tenant?.slug}/{mt.slug}</p>
               </div>
               <button onClick={() => navigator.clipboard.writeText(`${baseUrl}/${tenant?.slug}/${mt.slug}`)} className="btn-secondary text-[12px]">Copy</button>

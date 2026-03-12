@@ -3,8 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 
 interface MembershipType {
-  id: string; title: string; slug: string; description?: string;
-  inclusions?: string; top_image_url?: string; is_active: boolean;
+  id: string; title: string; membership_name?: string; membership_level?: string; slug: string;
+  summary?: string; description?: string; inclusions?: string; benefits?: string;
+  top_image_url?: string; is_active: boolean;
+  is_most_popular?: boolean;
   total_value: number; sort_order: number; term_options?: TermOption[];
 }
 interface TermOption {
@@ -21,6 +23,14 @@ interface TermOption {
 interface Bonus { id: string; title: string; value: number; image_url?: string; }
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
 
+const membershipDisplayTitle = (mt: Pick<MembershipType, "membership_name" | "membership_level" | "title">) => {
+  const name = (mt.membership_name || "").trim();
+  const level = (mt.membership_level || "").trim();
+  if (name && level) return `${name} - ${level}`;
+  if (name) return name;
+  return mt.title;
+};
+
 export default function MembershipTypeDetail() {
   const { mtId } = useParams();
   const navigate = useNavigate();
@@ -29,6 +39,11 @@ export default function MembershipTypeDetail() {
   const [allTerms, setAllTerms] = useState<Terms[]>([]);
   const [attachedTerms, setAttachedTerms] = useState<Terms[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingPopular, setUpdatingPopular] = useState(false);
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityForm, setIdentityForm] = useState({ membership_name: "", membership_level: "" });
+  const [savingContent, setSavingContent] = useState(false);
+  const [contentForm, setContentForm] = useState({ summary: "", description: "", inclusions: "", benefits: "" });
   const [tab, setTab] = useState<"terms" | "bonuses" | "tcs">("terms");
 
   const load = async () => {
@@ -43,12 +58,22 @@ export default function MembershipTypeDetail() {
         }).then(r => r.json()),
       ]);
       setMt(mtData as MembershipType);
+      const mtTyped = mtData as MembershipType;
+      setIdentityForm({
+        membership_name: mtTyped.membership_name || "",
+        membership_level: mtTyped.membership_level || "",
+      });
+      setContentForm({
+        summary: (mtTyped as any).summary || "",
+        description: mtTyped.description || "",
+        inclusions: mtTyped.inclusions || "",
+        benefits: (mtTyped as any).benefits || "",
+      });
       setAllBonuses(((bonusData as { bonuses: Bonus[] }).bonuses) || []);
       setAllTerms(((termsData as { terms: Terms[] }).terms) || []);
       setAttachedTerms((mtTermsData as { terms: Terms[] }).terms || []);
 
       // Load bonuses for each term option
-      const mtTyped = mtData as MembershipType;
       if (mtTyped.term_options) {
         for (const to of mtTyped.term_options) {
           const bonusRes = (await api.getTermOptionBonuses(to.id)) as { bonuses: Bonus[] };
@@ -65,11 +90,51 @@ export default function MembershipTypeDetail() {
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
   if (!mt) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Membership type not found</div>;
 
+  const toggleMostPopular = async (next: boolean) => {
+    setUpdatingPopular(true);
+    try {
+      await api.updateMembershipType(mt.id, { is_most_popular: next });
+      await load();
+    } catch {
+      // no-op
+    } finally {
+      setUpdatingPopular(false);
+    }
+  };
+
   const tabs = [
     { key: "terms" as const, label: "Term Options & Pricing" },
     { key: "bonuses" as const, label: "Bonuses" },
     { key: "tcs" as const, label: "Terms & Conditions" },
   ];
+
+  const saveIdentity = async () => {
+    setSavingIdentity(true);
+    try {
+      await api.updateMembershipType(mt.id, {
+        membership_name: identityForm.membership_name.trim(),
+        membership_level: identityForm.membership_level.trim(),
+      });
+      await load();
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
+
+  const saveContent = async () => {
+    setSavingContent(true);
+    try {
+      await api.updateMembershipType(mt.id, {
+        summary: contentForm.summary,
+        description: contentForm.description,
+        inclusions: contentForm.inclusions,
+        benefits: contentForm.benefits,
+      });
+      await load();
+    } finally {
+      setSavingContent(false);
+    }
+  };
 
   return (
     <div>
@@ -80,10 +145,110 @@ export default function MembershipTypeDetail() {
         </button>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="page-title">{mt.title}</h1>
+            <h1 className="page-title">{membershipDisplayTitle(mt)}</h1>
             <span className={`badge ${mt.is_active ? "badge-green" : "badge-gray"}`}>{mt.is_active ? "Active" : "Draft"}</span>
+            {mt.is_most_popular && <span className="badge badge-purple">Most Popular</span>}
           </div>
           <p className="text-[12px] text-gray-400 font-mono">/{mt.slug}</p>
+          <label className="mt-2 inline-flex items-center gap-2 text-[12px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={!!mt.is_most_popular}
+              onChange={(e) => toggleMostPopular(e.target.checked)}
+              disabled={updatingPopular}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+            />
+            {updatingPopular ? "Updating..." : "Mark as Most Popular"}
+          </label>
+        </div>
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-header">
+          <h3>Membership Identity</h3>
+        </div>
+        <div className="card-body">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Name</label>
+              <input
+                value={identityForm.membership_name}
+                onChange={(e) => setIdentityForm({ ...identityForm, membership_name: e.target.value })}
+                className="input-field"
+              />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Level</label>
+              <input
+                value={identityForm.membership_level}
+                onChange={(e) => setIdentityForm({ ...identityForm, membership_level: e.target.value })}
+                className="input-field"
+                placeholder="Support, Premium, Elite..."
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button type="button" onClick={saveIdentity} disabled={savingIdentity} className="btn-primary text-[12px]">
+              {savingIdentity ? "Saving..." : "Save name/level"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-header">
+          <h3>Content & Copy</h3>
+        </div>
+        <div className="card-body space-y-4">
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Summary</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Short 1-2 line tagline shown on membership cards and the signup form header</p>
+            <textarea
+              value={contentForm.summary}
+              onChange={(e) => setContentForm({ ...contentForm, summary: e.target.value })}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              rows={2}
+              placeholder="Gentle, therapeutic support for the lymphatic system"
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Description</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Full sales copy shown on the membership detail page under "About This Membership"</p>
+            <textarea
+              value={contentForm.description}
+              onChange={(e) => setContentForm({ ...contentForm, description: e.target.value })}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              rows={6}
+              placeholder="Detailed description of the membership, who it's for, what it does..."
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Inclusions</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Structured list of what's included — shown under "What's Included" on the detail page</p>
+            <textarea
+              value={contentForm.inclusions}
+              onChange={(e) => setContentForm({ ...contentForm, inclusions: e.target.value })}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              rows={5}
+              placeholder={"• 3 sessions per week\n• Session duration: 60–90 minutes\n• Progress tracking included"}
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Benefits</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Expected outcomes and benefits — shown on the detail page and the signup form summary</p>
+            <textarea
+              value={contentForm.benefits}
+              onChange={(e) => setContentForm({ ...contentForm, benefits: e.target.value })}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              rows={4}
+              placeholder={"• Reduced swelling and fluid retention\n• Improved mobility and comfort\n• Better quality of life"}
+            />
+          </div>
+          <div className="flex justify-end">
+            <button type="button" onClick={saveContent} disabled={savingContent} className="btn-primary text-[12px]">
+              {savingContent ? "Saving..." : "Save content"}
+            </button>
+          </div>
         </div>
       </div>
 

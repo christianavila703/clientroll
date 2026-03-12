@@ -172,6 +172,8 @@ export const api = {
   listMembershipTypes: () => request("/tenant/membership-types"),
   createMembershipType: (data: unknown) =>
     request("/tenant/membership-types", { method: "POST", body: data }),
+  updateMembershipType: (id: string, data: unknown) =>
+    request(`/tenant/membership-types/${id}`, { method: "PUT", body: data }),
   getMembershipType: (id: string) => request(`/tenant/membership-types/${id}`),
   duplicateMembershipType: (id: string) =>
     request(`/tenant/membership-types/${id}/duplicate`, { method: "POST" }),

@@ -90,21 +90,27 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Filter to active only
+	// Filter to active only and attach term options for price display
 	var active []models.MembershipType
 	for _, mt := range types {
 		if mt.IsActive {
-			active = append(active, mt)
+			full, err := h.mtRepo.FindByID(r.Context(), mt.ID, tenant.ID)
+			if err == nil && full != nil {
+				active = append(active, *full)
+			} else {
+				active = append(active, mt)
+			}
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tenant": map[string]interface{}{
-			"name":           tenant.Name,
-			"slug":           tenant.Slug,
-			"logo_url":       tenant.LogoURL,
-			"primary_colour": tenant.PrimaryColour,
-			"secondary_colour": tenant.SecondaryColour,
+			"name":                      tenant.Name,
+			"slug":                      tenant.Slug,
+			"logo_url":                  tenant.LogoURL,
+			"primary_colour":            tenant.PrimaryColour,
+			"secondary_colour":          tenant.SecondaryColour,
+			"signup_price_display_mode": tenant.SignupPriceDisplayMode,
 		},
 		"memberships":       active,
 		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
@@ -139,11 +145,12 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tenant": map[string]interface{}{
-			"name":           tenant.Name,
-			"slug":           tenant.Slug,
-			"logo_url":       tenant.LogoURL,
-			"primary_colour": tenant.PrimaryColour,
-			"secondary_colour": tenant.SecondaryColour,
+			"name":                      tenant.Name,
+			"slug":                      tenant.Slug,
+			"logo_url":                  tenant.LogoURL,
+			"primary_colour":            tenant.PrimaryColour,
+			"secondary_colour":          tenant.SecondaryColour,
+			"signup_price_display_mode": tenant.SignupPriceDisplayMode,
 		},
 		"membership":        mt,
 		"terms":             terms,
@@ -430,19 +437,19 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 // SignupSubmission is the full signup form data.
 type SignupSubmission struct {
-	Client           models.Client `json:"client"`
-	MembershipTypeID string        `json:"membership_type_id"`
-	TermOptionID     string        `json:"term_option_id"`
-	StartDate        time.Time     `json:"start_date"`
-	PaymentMethod    string        `json:"payment_method"`
-	PaymentFrequency string        `json:"payment_frequency"`
-	PaymentIntervalUnit  *string   `json:"payment_interval_unit,omitempty"`
-	PaymentIntervalCount int       `json:"payment_interval_count,omitempty"`
-	PaymentAmount    float64       `json:"payment_amount"`
-	NumPayments      *int          `json:"num_payments,omitempty"`
-	MemberSignature  string        `json:"member_signature"`
-	StaffUserID      string        `json:"staff_user_id,omitempty"`
-	StaffSignature   string        `json:"staff_signature,omitempty"`
+	Client               models.Client `json:"client"`
+	MembershipTypeID     string        `json:"membership_type_id"`
+	TermOptionID         string        `json:"term_option_id"`
+	StartDate            time.Time     `json:"start_date"`
+	PaymentMethod        string        `json:"payment_method"`
+	PaymentFrequency     string        `json:"payment_frequency"`
+	PaymentIntervalUnit  *string       `json:"payment_interval_unit,omitempty"`
+	PaymentIntervalCount int           `json:"payment_interval_count,omitempty"`
+	PaymentAmount        float64       `json:"payment_amount"`
+	NumPayments          *int          `json:"num_payments,omitempty"`
+	MemberSignature      string        `json:"member_signature"`
+	StaffUserID          string        `json:"staff_user_id,omitempty"`
+	StaffSignature       string        `json:"staff_signature,omitempty"`
 	// Bank details
 	InstitutionName   string `json:"institution_name,omitempty"`
 	BranchLocation    string `json:"branch_location,omitempty"`

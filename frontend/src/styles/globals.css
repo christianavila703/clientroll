@@ -141,6 +141,18 @@
 .ProseMirror a { color: #4f46e5; text-decoration: underline; }
 .ProseMirror hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
 
+/* Brand-color utilities for signup forms */
+.brand-focus:focus {
+  border-color: var(--brandPrimary, #6366f1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brandPrimary, #6366f1) 15%, transparent);
+}
+.group:hover .brand-hover-text {
+  color: var(--brandPrimary, #6366f1);
+}
+.brand-hover-border:hover {
+  border-color: color-mix(in srgb, var(--brandPrimary, #6366f1) 40%, transparent);
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

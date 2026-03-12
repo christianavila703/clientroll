@@ -25,8 +25,9 @@ func NewMembershipTypeRepo(db *database.Postgres) *MembershipTypeRepo {
 // List returns all membership types for a tenant.
 func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]models.MembershipType, error) {
 	query := `
-		SELECT id, tenant_id, title, slug, description, inclusions, top_image_url,
-		       is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		SELECT id, tenant_id, membership_name, membership_level, title, slug,
+		       summary, description, inclusions, benefits,
+		       top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -61,19 +62,22 @@ func (r *MembershipTypeRepo) FindBySlug(ctx context.Context, slug string, tenant
 }
 
 // Create inserts a new membership type.
-func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int) (*models.MembershipType, error) {
+func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int) (*models.MembershipType, error) {
 	query := `
-		INSERT INTO membership_types (tenant_id, title, slug, description, inclusions,
+		INSERT INTO membership_types (tenant_id, membership_name, membership_level, title, slug,
+		    summary, description, inclusions, benefits,
 		    top_image_url, intrinsic_value, total_value, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
-		RETURNING id, tenant_id, title, slug, description, inclusions, top_image_url,
-		          is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12)
+		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
+		          summary, description, inclusions, benefits,
+		          top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
 	var mt models.MembershipType
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, title, slug, description,
-		inclusions, topImageURL, totalValue, sortOrder).Scan(r.scanFields(&mt)...)
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipName, membershipLevel, title, slug,
+		nil, description, inclusions, nil,
+		topImageURL, totalValue, sortOrder).Scan(r.scanFields(&mt)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership type: %w", err)
 	}
@@ -90,7 +94,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 	newSlug := source.Slug + "-copy"
 	newTitle := source.Title + " (Copy)"
 
-	mt, err := r.Create(ctx, tenantID, newTitle, newSlug,
+	mt, err := r.Create(ctx, tenantID, source.MembershipName, source.MembershipLevel, newTitle, newSlug,
 		source.Description, source.Inclusions, source.TopImageURL,
 		source.TotalValue, source.SortOrder+1)
 	if err != nil {
@@ -199,14 +203,14 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 // A new type with the same name/slug can be created afterwards.
 func (r *MembershipTypeRepo) SoftDelete(ctx context.Context, id, tenantID uuid.UUID) error {
 	_, err := r.db.Pool.Exec(ctx,
-		"UPDATE membership_types SET deleted_at = NOW(), is_active = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
+		"UPDATE membership_types SET deleted_at = NOW(), is_active = false, is_most_popular = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
 	return err
 }
 
 // Archive sets is_active = false (soft delete). Existing memberships are unaffected.
 func (r *MembershipTypeRepo) Archive(ctx context.Context, id, tenantID uuid.UUID) error {
 	_, err := r.db.Pool.Exec(ctx,
-		"UPDATE membership_types SET is_active = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
+		"UPDATE membership_types SET is_active = false, is_most_popular = false, updated_at = NOW() WHERE id=$1 AND tenant_id=$2", id, tenantID)
 	return err
 }
 
@@ -299,8 +303,9 @@ func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeI
 
 func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...interface{}) (*models.MembershipType, error) {
 	query := `
-		SELECT id, tenant_id, title, slug, description, inclusions, top_image_url,
-		       is_active, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		SELECT id, tenant_id, membership_name, membership_level, title, slug,
+		       summary, description, inclusions, benefits,
+		       top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
@@ -318,11 +323,102 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 
 func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType) []interface{} {
 	return []interface{}{
-		&mt.ID, &mt.TenantID, &mt.Title, &mt.Slug, &mt.Description,
-		&mt.Inclusions, &mt.TopImageURL, &mt.IsActive, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
+		&mt.ID, &mt.TenantID, &mt.MembershipName, &mt.MembershipLevel, &mt.Title, &mt.Slug,
+		&mt.Summary, &mt.Description, &mt.Inclusions, &mt.Benefits,
+		&mt.TopImageURL, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}
+}
+
+// SetMostPopular marks one membership type as most popular for a tenant.
+func (r *MembershipTypeRepo) SetMostPopular(ctx context.Context, tenantID, id uuid.UUID) error {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin set most popular: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var groupKey string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(membership_name, ''), title)
+		FROM membership_types
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+	`, tenantID, id).Scan(&groupKey); err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("membership type not found")
+		}
+		return fmt.Errorf("load most popular group: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE membership_types
+		SET is_most_popular = false
+		WHERE tenant_id = $1
+		  AND deleted_at IS NULL
+		  AND COALESCE(NULLIF(membership_name, ''), title) = $2
+	`, tenantID, groupKey); err != nil {
+		return fmt.Errorf("clear most popular flags for group: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE membership_types SET is_most_popular = true WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL", tenantID, id); err != nil {
+		return fmt.Errorf("set most popular flag: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit set most popular: %w", err)
+	}
+	return nil
+}
+
+// ClearMostPopular removes the most-popular flag from a membership type.
+func (r *MembershipTypeRepo) ClearMostPopular(ctx context.Context, tenantID, id uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE membership_types SET is_most_popular = false, updated_at = NOW() WHERE tenant_id = $1 AND id = $2", tenantID, id)
+	if err != nil {
+		return fmt.Errorf("clear most popular: %w", err)
+	}
+	return nil
+}
+
+// UpdateBasics updates editable core fields for a membership type.
+func (r *MembershipTypeRepo) UpdateBasics(
+	ctx context.Context,
+	id, tenantID uuid.UUID,
+	membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL *string,
+	totalValue *float64,
+	sortOrder *int,
+) (*models.MembershipType, error) {
+	query := `
+		UPDATE membership_types SET
+			membership_name = COALESCE($3, membership_name),
+			membership_level = COALESCE($4, membership_level),
+			title = COALESCE($5, title),
+			slug = COALESCE($6, slug),
+			summary = COALESCE($7, summary),
+			description = COALESCE($8, description),
+			inclusions = COALESCE($9, inclusions),
+			benefits = COALESCE($10, benefits),
+			top_image_url = COALESCE($11, top_image_url),
+			total_value = COALESCE($12, total_value),
+			intrinsic_value = COALESCE($12, intrinsic_value),
+			sort_order = COALESCE($13, sort_order),
+			updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2
+		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
+		          summary, description, inclusions, benefits,
+		          top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
+		          created_at, updated_at`
+
+	var mt models.MembershipType
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, totalValue, sortOrder).
+		Scan(r.scanFields(&mt)...)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("updating membership type basics: %w", err)
+	}
+	return &mt, nil
 }
 
 func (r *MembershipTypeRepo) scanMany(rows pgx.Rows) ([]models.MembershipType, error) {

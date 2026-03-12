@@ -5,7 +5,8 @@ import ImageUpload from "../common/ImageUpload";
 interface AgreementData {
   company_name?: string;
   business_name?: string;
-  abn_acn?: string;
+  abn?: string;
+  acn?: string;
   trading_name?: string;
   address?: string;
   state?: string;
@@ -105,7 +106,8 @@ function AgreementSettings() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Company Name" value={data.company_name} onChange={(v) => updateField("company_name", v)} />
         <Field label="Business Name" value={data.business_name} onChange={(v) => updateField("business_name", v)} />
-        <Field label="ABN/ACN" value={data.abn_acn} onChange={(v) => updateField("abn_acn", v)} />
+        <Field label="ABN" value={data.abn} onChange={(v) => updateField("abn", v)} />
+        <Field label="ACN" value={data.acn} onChange={(v) => updateField("acn", v)} />
         <Field label="Trading Name" value={data.trading_name} onChange={(v) => updateField("trading_name", v)} />
         <Field label="Address" value={data.address} onChange={(v) => updateField("address", v)} className="sm:col-span-2" />
         <Field label="State" value={data.state} onChange={(v) => updateField("state", v)} />
@@ -134,6 +136,7 @@ function TenantSettings() {
       setData({
         slug: t.slug || "",
         timezone: t.timezone || "Australia/Brisbane",
+        signup_price_display_mode: t.signup_price_display_mode || "weekly",
         primary_colour: t.primary_colour || "#6366f1",
         secondary_colour: t.secondary_colour || "",
         logo_url: t.logo_url || "",
@@ -208,6 +211,19 @@ function TenantSettings() {
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Timezone</label>
             <select value={data.timezone || ""} onChange={(e) => setData({ ...data, timezone: e.target.value })} className="input-field max-w-xs">
               {timezones.map((tz) => <option key={tz} value={tz}>{tz.replace("_", " ")}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Signup price display</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Controls how pricing is shown on the public join page.</p>
+            <select
+              value={data.signup_price_display_mode || "weekly"}
+              onChange={(e) => setData({ ...data, signup_price_display_mode: e.target.value })}
+              className="input-field max-w-xs"
+            >
+              <option value="total">Total value</option>
+              <option value="weekly">Weekly value</option>
+              <option value="monthly">Monthly value</option>
             </select>
           </div>
           <div>
