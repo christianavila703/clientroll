@@ -74,6 +74,21 @@ func (r *ClientRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (*mod
 	return &c, nil
 }
 
+// FindByEmail returns an existing client matching email within a tenant.
+func (r *ClientRepo) FindByEmail(ctx context.Context, tenantID uuid.UUID, email string) (*models.Client, error) {
+	query := `SELECT ` + clientFields + ` FROM clients WHERE tenant_id = $1 AND LOWER(email) = LOWER($2) AND deleted_at IS NULL LIMIT 1`
+
+	var c models.Client
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, email).Scan(r.scanFields(&c)...)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding client by email: %w", err)
+	}
+	return &c, nil
+}
+
 // Create inserts a new client.
 func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `

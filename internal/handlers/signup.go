@@ -254,21 +254,38 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create or find client
-	client, err := h.clientRepo.Create(r.Context(), tenant.ID, &input.Client)
-	if err != nil {
-		log.Printf("Error creating client during signup: %v", err)
-		writeError(w, http.StatusInternalServerError, "Failed to create client record")
-		return
+	// Look up existing client by email, or create new
+	var client *models.Client
+	if input.Client.Email != nil && *input.Client.Email != "" {
+		client, err = h.clientRepo.FindByEmail(r.Context(), tenant.ID, *input.Client.Email)
+		if err != nil {
+			log.Printf("Error looking up client by email: %v", err)
+		}
 	}
-	if h.dispatcher != nil {
-		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.ClientCreated, tenant.ID, map[string]interface{}{
-			"client_id": client.ID,
-			"name":      client.Name,
-			"email":     client.Email,
-			"phone":     client.Phone,
-			"source":    "signup",
-		}))
+	if client != nil {
+		// Update existing client's details with latest info from signup
+		client, err = h.clientRepo.Update(r.Context(), client.ID, tenant.ID, &input.Client)
+		if err != nil {
+			log.Printf("Error updating existing client during signup: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to update client record")
+			return
+		}
+	} else {
+		client, err = h.clientRepo.Create(r.Context(), tenant.ID, &input.Client)
+		if err != nil {
+			log.Printf("Error creating client during signup: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to create client record")
+			return
+		}
+		if h.dispatcher != nil {
+			h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.ClientCreated, tenant.ID, map[string]interface{}{
+				"client_id": client.ID,
+				"name":      client.Name,
+				"email":     client.Email,
+				"phone":     client.Phone,
+				"source":    "signup",
+			}))
+		}
 	}
 
 	// Parse IDs
