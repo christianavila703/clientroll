@@ -219,6 +219,27 @@ func DisputeAlertEmail(adminName, clientName string, amount float64, reason stri
 	}
 }
 
+// MembershipAgreementEmail — sent to client with signed agreement PDF attached.
+func MembershipAgreementEmail(clientName, membershipTitle, companyName string) SendInput {
+	html := wrap(fmt.Sprintf(`
+  <h1 style="font-size:20px;font-weight:600;color:#111827;margin:0 0 8px;">Your Membership Agreement</h1>
+  <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 24px;">
+    Hi %s, please find your signed membership agreement for <strong>%s</strong> with <strong>%s</strong> attached to this email as a PDF.
+  </p>
+  <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 24px;">
+    Please save this document for your records. It contains a complete copy of your signed agreement including
+    all terms and conditions, your authorisation signature, and membership details.
+  </p>
+  <p style="font-size:13px;color:#9ca3af;line-height:1.5;margin:0;">If you have any questions about your membership, please contact %s directly.</p>`,
+		clientName, membershipTitle, companyName, companyName))
+
+	return SendInput{
+		Subject: fmt.Sprintf("Your signed membership agreement — %s", membershipTitle),
+		HTML:    html,
+		Text:    fmt.Sprintf("Hi %s, your signed membership agreement for %s with %s is attached as a PDF.", clientName, membershipTitle, companyName),
+	}
+}
+
 // MembershipExpiringEmail — sent to client when membership is nearing end of term.
 func MembershipExpiringEmail(clientName, membershipTitle, expiryDate, companyName string) SendInput {
 	html := wrap(fmt.Sprintf(`

@@ -61,10 +61,15 @@ func (r *SettingsRepo) GetAgreementSettings(ctx context.Context, tenantID uuid.U
 
 // UpsertAgreementSettings creates or updates agreement settings.
 func (r *SettingsRepo) UpsertAgreementSettings(ctx context.Context, tenantID uuid.UUID, input AgreementSettings) (*AgreementSettings, error) {
+	abnACN := input.ABNACN
+	if abnACN == nil || *abnACN == "" {
+		abnACN = input.ABN
+	}
+
 	query := `
 		INSERT INTO agreement_settings (tenant_id, company_name, business_name, abn, acn, abn_acn,
 		    trading_name, address, state, postcode, email, phone)
-		VALUES ($1, $2, $3, $4, $5, COALESCE($6, $4), $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (tenant_id) DO UPDATE SET
 		    company_name = COALESCE($2, agreement_settings.company_name),
 		    business_name = COALESCE($3, agreement_settings.business_name),
@@ -83,7 +88,7 @@ func (r *SettingsRepo) UpsertAgreementSettings(ctx context.Context, tenantID uui
 
 	var s AgreementSettings
 	err := r.db.Pool.QueryRow(ctx, query, tenantID,
-		input.CompanyName, input.BusinessName, input.ABN, input.ACN, input.ABNACN,
+		input.CompanyName, input.BusinessName, input.ABN, input.ACN, abnACN,
 		input.TradingName, input.Address, input.State,
 		input.Postcode, input.Email, input.Phone,
 	).Scan(

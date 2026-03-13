@@ -629,9 +629,31 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: Membership; fmtShort: (d
           <div className="text-right">
             <p className="text-[20px] font-bold text-gray-900 tabular-nums">${m.payment_amount?.toFixed(2) || "0.00"}</p>
             <p className="text-[12px] text-gray-400">{membershipFrequencyLabel(m)}</p>
-            {m.status === "active" && onCancel && (
-              <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700 mt-1">Cancel</button>
-            )}
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={async () => {
+                  const token = localStorage.getItem("access_token");
+                  const res = await fetch(`/api/tenant/memberships/${m.membership_id}/agreement.pdf`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (!res.ok) { alert("No agreement found for this membership"); return; }
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `Agreement-${m.membership_id.slice(0,8)}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+                className="text-[11px] text-indigo-500 hover:text-indigo-700"
+                title="Download signed agreement PDF"
+              >Agreement PDF</button>
+              {m.status === "active" && onCancel && (
+                <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700">Cancel</button>
+              )}
+            </div>
           </div>
         </div>
 

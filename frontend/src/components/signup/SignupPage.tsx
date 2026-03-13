@@ -58,6 +58,14 @@ interface Bonus {
   value: number;
 }
 
+interface TermsDoc {
+  id: string;
+  title: string;
+  content: string;
+  version: number;
+  is_active: boolean;
+}
+
 type Step = "select" | "detail" | "form" | "thankyou";
 
 export default function SignupPage() {
@@ -67,6 +75,7 @@ export default function SignupPage() {
   const [memberships, setMemberships] = useState<MembershipType[]>([]);
   const [selected, setSelected] = useState<MembershipType | null>(null);
   const [selectedTerm, setSelectedTerm] = useState<TermOption | null>(null);
+  const [terms, setTerms] = useState<TermsDoc[]>([]);
   const [step, setStep] = useState<Step>("select");
   const [thankyou, setThankyou] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
@@ -88,6 +97,7 @@ export default function SignupPage() {
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
         setSelected(data.membership);
+        setTerms(data.terms || []);
         if (data.payment_providers && data.tenant) {
           setTenant({ ...data.tenant, payment_providers: data.payment_providers });
         }
@@ -138,6 +148,7 @@ export default function SignupPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load membership details");
       setSelected((data.membership as MembershipType) || mt);
+      setTerms(data.terms || []);
       if (data.tenant) {
         setTenant({
           ...(data.tenant as Tenant),
@@ -225,6 +236,7 @@ export default function SignupPage() {
             termOption={selectedTerm}
             tenantSlug={tenantSlug || ""}
             paymentProviders={tenant.payment_providers || []}
+            terms={terms.filter((t) => t.is_active)}
             onComplete={(ty) => { setThankyou(ty); setStep("thankyou"); }}
             onBack={() => setStep("detail")}
           />
@@ -235,4 +247,4 @@ export default function SignupPage() {
   );
 }
 
-export type { Tenant, MembershipType, TermOption, Bonus };
+export type { Tenant, MembershipType, TermOption, Bonus, TermsDoc };

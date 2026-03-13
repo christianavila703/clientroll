@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,6 +47,18 @@ func (m *MailerSendProvider) Send(ctx context.Context, input SendInput) (string,
 		"subject": input.Subject,
 		"html":    input.HTML,
 		"text":    input.Text,
+	}
+
+	if len(input.Attachments) > 0 {
+		var atts []map[string]string
+		for _, a := range input.Attachments {
+			atts = append(atts, map[string]string{
+				"filename":    a.Filename,
+				"content":     base64.StdEncoding.EncodeToString(a.Content),
+				"disposition": "attachment",
+			})
+		}
+		body["attachments"] = atts
 	}
 
 	jsonBody, err := json.Marshal(body)

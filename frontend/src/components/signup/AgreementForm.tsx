@@ -1,6 +1,6 @@
 import { useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
-import type { Tenant, MembershipType, TermOption } from "./SignupPage";
+import type { Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
 interface Props {
   tenant: Tenant;
@@ -8,13 +8,14 @@ interface Props {
   termOption: TermOption;
   tenantSlug: string;
   paymentProviders: string[];
+  terms?: TermsDoc[];
   onComplete: (thankyou: Record<string, unknown>) => void;
   onBack: () => void;
 }
 
-type FormStep = "member" | "payment" | "bank" | "sign";
+type FormStep = "member" | "payment" | "bank" | "terms" | "sign";
 
-export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, onComplete, onBack }: Props) {
+export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], onComplete, onBack }: Props) {
   const supportsStripe = paymentProviders.includes("stripe");
   const supportsGoCardless = paymentProviders.includes("gocardless");
   const defaultMethod = supportsGoCardless ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
@@ -37,8 +38,11 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     account_holder_name: "", account_number: "", bsb: "",
   });
   const [memberSignature, setMemberSignature] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState<Set<string>>(new Set());
+  const [sendAgreementEmail, setSendAgreementEmail] = useState(true);
 
   const usesBankStep = payment.payment_method !== "card";
+  const hasTerms = terms.length > 0;
   const steps: { key: FormStep; label: string; icon: string }[] = [
     { key: "member", label: "Your Details", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
     { key: "payment", label: "Payment", icon: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" },
@@ -46,6 +50,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   ];
   if (usesBankStep) {
     steps.splice(2, 0, { key: "bank", label: "Bank Details", icon: "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" })
+  }
+  if (hasTerms) {
+    const signIdx = steps.findIndex((s) => s.key === "sign");
+    steps.splice(signIdx, 0, { key: "terms", label: "Terms", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" });
   }
 
   const currentIdx = steps.findIndex((s) => s.key === formStep);
@@ -62,15 +70,18 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          client: { ...member, birth_date: member.birth_date || null },
+          client: { ...member, birth_date: member.birth_date ? member.birth_date + "T00:00:00Z" : null },
           membership_type_id: membership.id, term_option_id: termOption.id,
-          start_date: payment.start_date, payment_method: payment.payment_method,
+          start_date: payment.start_date ? payment.start_date + "T00:00:00Z" : new Date().toISOString(),
+          payment_method: payment.payment_method,
           payment_frequency: payment.payment_frequency,
           payment_amount: paymentAmount,
           payment_interval_unit: isCustomSchedule ? termOption.custom_schedule_interval_unit : undefined,
           payment_interval_count: isCustomSchedule ? termOption.custom_schedule_interval_count : undefined,
           num_payments: isCustomSchedule ? termOption.custom_schedule_num_payments : termOption.num_payments,
           member_signature: memberSignature,
+          accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
+          send_agreement_email: sendAgreementEmail,
           ...(payment.payment_method === "direct_debit" ? bank : {}),
         }),
       });
@@ -184,9 +195,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="px-8 py-8 sm:px-10 sm:py-10">
           {formStep === "member" && <MemberSection data={member} onChange={setMember} onNext={() => setFormStep("payment")} />}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} onNext={() => setFormStep(payment.payment_method === "card" ? "sign" : "bank")} onBack={() => setFormStep("member")} />}
-          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep("sign")} onBack={() => setFormStep("payment")} />}
-          {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} submitting={submitting} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
+          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
+          {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
+          {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
         </div>
       </div>
     </div>
@@ -368,7 +380,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
         </div>
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "card" ? "Sign Agreement" : "Bank Details"} />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "card" ? "Continue" : "Bank Details"} />
     </div>
   );
 }
@@ -400,13 +412,75 @@ function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<
         </p>
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Sign Agreement" />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Continue" />
     </div>
   );
 }
 
-/* ─── Section D: Signature ─── */
-function SignSection({ signature, onSign, onSubmit, onBack, submitting }: { signature: string; onSign: (s: string) => void; onSubmit: () => void; onBack: () => void; submitting: boolean }) {
+/* ─── Section D: Terms & Conditions ─── */
+function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
+  terms: TermsDoc[];
+  accepted: Set<string>;
+  onAcceptChange: (s: Set<string>) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const allAccepted = terms.every((t) => accepted.has(t.id));
+
+  const toggleTerm = (id: string) => {
+    const next = new Set(accepted);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onAcceptChange(next);
+  };
+
+  return (
+    <div>
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-gray-900">Terms & Conditions</h2>
+        <p className="text-[14px] text-gray-500 mt-1">
+          Please read and accept the following terms before signing.
+        </p>
+      </div>
+
+      <div className="space-y-6">
+        {terms.map((t) => (
+          <div key={t.id} className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+              <h3 className="text-[15px] font-semibold text-gray-900">{t.title}</h3>
+              {t.version > 1 && <span className="text-[11px] text-gray-400 ml-2">v{t.version}</span>}
+            </div>
+            <div
+              className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed tc-content"
+              dangerouslySetInnerHTML={{ __html: t.content }}
+            />
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={accepted.has(t.id)}
+                  onChange={() => toggleTerm(t.id)}
+                  className="mt-0.5 h-5 w-5 rounded border-gray-300 accent-[var(--brandPrimary)]"
+                />
+                <span className="text-[13px] text-gray-700 font-medium">
+                  I have read and agree to the <strong>{t.title}</strong>
+                </span>
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Sign Agreement" disabled={!allAccepted} />
+    </div>
+  );
+}
+
+/* ─── Section E: Signature ─── */
+function SignSection({ signature, onSign, onSubmit, onBack, submitting, sendEmail, onSendEmailChange }: {
+  signature: string; onSign: (s: string) => void; onSubmit: () => void; onBack: () => void; submitting: boolean;
+  sendEmail: boolean; onSendEmailChange: (v: boolean) => void;
+}) {
   return (
     <div>
       <div className="mb-8">
@@ -435,6 +509,21 @@ function SignSection({ signature, onSign, onSubmit, onBack, submitting }: { sign
             Signature captured successfully
           </div>
         )}
+      </div>
+
+      <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-5">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sendEmail}
+            onChange={(e) => onSendEmailChange(e.target.checked)}
+            className="mt-0.5 h-5 w-5 rounded border-gray-300 accent-[var(--brandPrimary)]"
+          />
+          <div>
+            <span className="text-[13px] font-medium text-gray-700">Send me a copy of this agreement by email</span>
+            <p className="text-[11px] text-gray-400 mt-0.5">A signed copy of the full agreement will be emailed to you for your records.</p>
+          </div>
+        </label>
       </div>
 
       <NavButtons onBack={onBack} onNext={onSubmit} nextLabel={submitting ? "Submitting..." : "Submit Agreement"} isSubmit disabled={submitting || !signature} />

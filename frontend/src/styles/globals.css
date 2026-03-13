@@ -153,6 +153,24 @@
   border-color: color-mix(in srgb, var(--brandPrimary, #6366f1) 40%, transparent);
 }
 
+/* T&C content formatting */
+.tc-content h1 { font-size: 1.25em; font-weight: 700; margin: 1em 0 0.5em; color: #111827; }
+.tc-content h2 { font-size: 1.1em; font-weight: 700; margin: 1em 0 0.5em; color: #111827; }
+.tc-content h3 { font-size: 1em; font-weight: 600; margin: 0.8em 0 0.4em; color: #111827; }
+.tc-content p { margin: 0.5em 0; }
+.tc-content br { display: block; content: ""; margin-top: 0.25em; }
+.tc-content ul, .tc-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+.tc-content ul { list-style-type: disc; }
+.tc-content ol { list-style-type: decimal; }
+.tc-content li { margin: 0.25em 0; }
+.tc-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+.tc-content strong { font-weight: 600; color: #1f2937; }
+.tc-content a { color: #4f46e5; text-decoration: underline; }
+.tc-content blockquote { border-left: 3px solid #e5e7eb; padding-left: 1em; margin: 0.5em 0; color: #6b7280; }
+.tc-content table { width: 100%; border-collapse: collapse; margin: 0.5em 0; }
+.tc-content th, .tc-content td { border: 1px solid #e5e7eb; padding: 0.4em 0.6em; text-align: left; }
+.tc-content th { background: #f9fafb; font-weight: 600; }
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
