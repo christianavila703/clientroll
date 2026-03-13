@@ -80,8 +80,10 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
-	if err != nil || creds == nil || creds.APISecretEncrypted == "" {
-		writeError(w, http.StatusServiceUnavailable, "Stripe webhook not configured")
+	if err != nil || creds == nil || !creds.IsActive || creds.APISecretEncrypted == "" {
+		// Acknowledge unconfigured/inactive tenant webhooks to avoid provider retry storms.
+		// This can happen when an endpoint exists in Stripe but tenant setup is incomplete.
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	secret, err := h.encryptor.Decrypt(creds.APISecretEncrypted)
