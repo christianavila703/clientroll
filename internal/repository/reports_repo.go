@@ -130,12 +130,17 @@ func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.
 		SELECT mt.title,
 		       COALESCE(SUM(p.amount), 0) AS revenue,
 		       COUNT(DISTINCT m.id) AS member_count
-		FROM membership_types mt
-		LEFT JOIN memberships m ON m.membership_type_id = mt.id AND m.tenant_id = mt.tenant_id
+		FROM memberships m
+		JOIN membership_types mt ON mt.id = m.membership_type_id AND mt.tenant_id = m.tenant_id
+		JOIN clients c ON c.id = m.client_id
 		LEFT JOIN payments p ON p.membership_id = m.id AND p.status = 'succeeded'
 		WHERE mt.tenant_id = $1
+		  AND mt.is_active = TRUE
+		  AND mt.deleted_at IS NULL
+		  AND m.status = 'active'
+		  AND c.deleted_at IS NULL
 		GROUP BY mt.title
-		ORDER BY revenue DESC`
+		ORDER BY member_count DESC, revenue DESC, mt.title ASC`
 
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
 	if err != nil {
