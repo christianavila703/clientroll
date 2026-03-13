@@ -132,16 +132,12 @@ func (s *StripeBillingProvider) GetSubscriptionStatus(ctx context.Context, subsc
 		Status: string(sub.Status),
 	}
 
-	if sub.CurrentPeriodEnd > 0 {
-		st.CurrentPeriodEnd = time.Unix(sub.CurrentPeriodEnd, 0).UTC().Format("2006-01-02")
-	}
-
 	if sub.Items != nil && len(sub.Items.Data) > 0 {
 		item := sub.Items.Data[0]
-		if item.Quantity != nil {
-			st.MemberCount = int(*item.Quantity)
+		if item.CurrentPeriodEnd > 0 {
+			st.CurrentPeriodEnd = time.Unix(item.CurrentPeriodEnd, 0).UTC().Format("2006-01-02")
 		}
-		// Calculate monthly amount from price unit amount * quantity.
+		st.MemberCount = int(item.Quantity)
 		if item.Price != nil && item.Price.UnitAmount != 0 {
 			st.MonthlyAmount = (float64(item.Price.UnitAmount) / 100.0) * float64(st.MemberCount)
 		}
