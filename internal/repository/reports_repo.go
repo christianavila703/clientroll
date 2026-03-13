@@ -48,10 +48,15 @@ func NewReportsRepo(db *database.Postgres) *ReportsRepo {
 func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUID) (*DashboardSummary, error) {
 	var s DashboardSummary
 
-	// Active members
-	r.db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active'",
-		tenantID).Scan(&s.ActiveMembers)
+	// Active members: distinct non-deleted clients with at least one active membership.
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT m.client_id)
+		FROM memberships m
+		JOIN clients c ON c.id = m.client_id
+		WHERE m.tenant_id = $1
+		  AND m.status = 'active'
+		  AND c.deleted_at IS NULL
+	`, tenantID).Scan(&s.ActiveMembers)
 
 	// This month revenue
 	now := time.Now()
@@ -239,8 +244,15 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	prevMonthStart := monthStart.AddDate(0, -1, 0)
 
-	// Active members
-	r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active'", tenantID).Scan(&rpt.ActiveMembers)
+	// Active members: distinct non-deleted clients with at least one active membership.
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT m.client_id)
+		FROM memberships m
+		JOIN clients c ON c.id = m.client_id
+		WHERE m.tenant_id = $1
+		  AND m.status = 'active'
+		  AND c.deleted_at IS NULL
+	`, tenantID).Scan(&rpt.ActiveMembers)
 
 	// Total clients
 	r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM clients WHERE tenant_id=$1", tenantID).Scan(&rpt.TotalClients)
