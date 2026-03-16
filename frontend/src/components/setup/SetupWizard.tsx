@@ -83,12 +83,12 @@ export default function SetupWizard({ onClose }: Props) {
             </div>
 
             {/* Progress */}
-            <div className="flex gap-1">
+            <div className="flex gap-1.5">
               {STEPS.map((s, i) => (
                 <button
                   key={s.key}
                   onClick={() => { setError(""); setSuccess(""); setStep(i); }}
-                  className="flex-1 group"
+                  className="flex-1 min-w-0 group text-center"
                 >
                   <div
                     className={`h-1.5 rounded-full transition-colors ${
@@ -96,7 +96,7 @@ export default function SetupWizard({ onClose }: Props) {
                     }`}
                   />
                   <span
-                    className={`block text-[10px] mt-1.5 font-medium transition-colors ${
+                    className={`mt-2 flex h-8 items-start justify-center px-1 text-[10px] leading-tight font-medium transition-colors ${
                       i === step ? "text-indigo-600" : i < step ? "text-gray-500" : "text-gray-400"
                     }`}
                   >
