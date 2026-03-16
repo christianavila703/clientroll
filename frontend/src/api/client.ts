@@ -130,6 +130,8 @@ export const api = {
   getAgreementSettings: () => request("/tenant/settings/agreement"),
   updateAgreementSettings: (data: unknown) =>
     request("/tenant/settings/agreement", { method: "PUT", body: data }),
+  lookupBusinessByName: (name: string) =>
+    request(`/tenant/settings/business-lookup?name=${encodeURIComponent(name)}`),
   getTenantSettings: () => request("/tenant/settings/tenant"),
   updateTenantSettings: (data: unknown) =>
     request("/tenant/settings/tenant", { method: "PUT", body: data }),

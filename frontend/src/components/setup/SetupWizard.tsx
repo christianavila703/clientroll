@@ -177,6 +177,7 @@ export default function SetupWizard({ onClose }: Props) {
 function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: string) => void }) {
   const [data, setData] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -196,6 +197,38 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
 
   const update = (field: string, value: string) => setData((prev) => ({ ...prev, [field]: value }));
 
+  const handleLookupBusiness = async () => {
+    const company = (data.company_name || "").trim();
+    if (!company) {
+      onError("Enter company name first");
+      return;
+    }
+    setLookingUp(true);
+    try {
+      const res = await api.lookupBusinessByName(company) as {
+        results?: Array<{ name: string; abn: string; acn?: string; state?: string; postcode?: string }>;
+      };
+      const first = res.results?.[0];
+      if (!first) {
+        onError("No ABN matches found");
+        return;
+      }
+      setData((prev) => ({
+        ...prev,
+        company_name: prev.company_name || first.name,
+        abn: first.abn || prev.abn || "",
+        acn: first.acn || prev.acn || "",
+        state: prev.state || first.state || "",
+        postcode: prev.postcode || first.postcode || "",
+      }));
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Lookup failed");
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
   if (!loaded) return <LoadingSpinner />;
 
   return (
@@ -204,9 +237,17 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
         These details appear on membership agreements your clients sign.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <WizardField label="Company Name" value={data.company_name} onChange={(v) => update("company_name", v)} />
+        <div>
+          <WizardField label="Company Name" value={data.company_name} onChange={(v) => update("company_name", v)} />
+          <div className="mt-1">
+            <button type="button" onClick={handleLookupBusiness} disabled={lookingUp} className="btn-secondary text-[11px] px-2 py-1">
+              {lookingUp ? "Looking up..." : "Lookup ABN/ACN"}
+            </button>
+          </div>
+        </div>
         <WizardField label="Business Name" value={data.business_name} onChange={(v) => update("business_name", v)} />
-        <WizardField label="ABN/ACN" value={data.abn_acn} onChange={(v) => update("abn_acn", v)} />
+        <WizardField label="ABN" value={data.abn} onChange={(v) => update("abn", v)} />
+        <WizardField label="ACN" value={data.acn} onChange={(v) => update("acn", v)} />
         <WizardField label="Trading Name" value={data.trading_name} onChange={(v) => update("trading_name", v)} />
         <WizardField label="Address" value={data.address} onChange={(v) => update("address", v)} className="sm:col-span-2" />
         <WizardField label="State" value={data.state} onChange={(v) => update("state", v)} />

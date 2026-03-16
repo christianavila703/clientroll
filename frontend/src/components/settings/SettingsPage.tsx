@@ -56,6 +56,7 @@ export default function SettingsPage() {
 function AgreementSettings() {
   const [data, setData] = useState<AgreementData>({});
   const [saving, setSaving] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -82,6 +83,39 @@ function AgreementSettings() {
     setData((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleLookupBusiness = async () => {
+    const company = (data.company_name || "").trim();
+    if (!company) {
+      setMessage("Enter company name first");
+      return;
+    }
+    setLookingUp(true);
+    setMessage("");
+    try {
+      const res = await api.lookupBusinessByName(company) as {
+        results?: Array<{ name: string; abn: string; acn?: string; state?: string; postcode?: string }>;
+      };
+      const first = res.results?.[0];
+      if (!first) {
+        setMessage("No ABN matches found");
+        return;
+      }
+      setData((prev) => ({
+        ...prev,
+        company_name: prev.company_name || first.name,
+        abn: first.abn || prev.abn,
+        acn: first.acn || prev.acn,
+        state: prev.state || first.state || "",
+        postcode: prev.postcode || first.postcode || "",
+      }));
+      setMessage(`Found ${first.name}`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Lookup failed");
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
   return (
     <div className="card px-5 py-4">
       <h2 className="text-base font-semibold text-gray-900 mb-4">
@@ -104,7 +138,14 @@ function AgreementSettings() {
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Company Name" value={data.company_name} onChange={(v) => updateField("company_name", v)} />
+        <div>
+          <Field label="Company Name" value={data.company_name} onChange={(v) => updateField("company_name", v)} />
+          <div className="mt-1">
+            <button type="button" onClick={handleLookupBusiness} disabled={lookingUp} className="btn-secondary text-[11px] px-2 py-1">
+              {lookingUp ? "Looking up..." : "Lookup ABN/ACN"}
+            </button>
+          </div>
+        </div>
         <Field label="Business Name" value={data.business_name} onChange={(v) => updateField("business_name", v)} />
         <Field label="ABN" value={data.abn} onChange={(v) => updateField("abn", v)} />
         <Field label="ACN" value={data.acn} onChange={(v) => updateField("acn", v)} />

@@ -1,10 +1,16 @@
 package handlers
 
 import (
+	"fmt"
+	"html"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
@@ -31,9 +37,108 @@ func NewSettingsHandler(sr *repository.SettingsRepo, tr *repository.TenantRepo) 
 func (h *SettingsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/settings/agreement", h.GetAgreementSettings)
 	r.Put("/settings/agreement", h.UpdateAgreementSettings)
+	r.Get("/settings/business-lookup", h.LookupBusiness)
 	r.Get("/settings/tenant", h.GetTenantSettings)
 	r.Put("/settings/tenant", h.UpdateTenantSettings)
 	r.Post("/complete-setup", h.CompleteSetup)
+}
+
+type businessLookupResult struct {
+	Name     string `json:"name"`
+	ABN      string `json:"abn"`
+	ACN      string `json:"acn,omitempty"`
+	State    string `json:"state,omitempty"`
+	Postcode string `json:"postcode,omitempty"`
+	Score    int    `json:"score,omitempty"`
+}
+
+var abrCompressedItemRegex = regexp.MustCompile(`name="Results_NameItems\[\d+\]\.Compressed" type="hidden" value="([^"]+)"`)
+var abrCompanyNameHintRegex = regexp.MustCompile(`\b(PTY|LTD|LIMITED|PROPRIETARY|CORPORATION|CORP)\b`)
+
+// LookupBusiness searches ABN Lookup by company name and returns candidate ABN/ACN values.
+func (h *SettingsHandler) LookupBusiness(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if len(name) < 2 {
+		writeError(w, http.StatusBadRequest, "name must be at least 2 characters")
+		return
+	}
+
+	searchURL := fmt.Sprintf("https://abr.business.gov.au/Search/ResultsActive?SearchText=%s", url.QueryEscape(name))
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(searchURL)
+	if err != nil {
+		log.Printf("Business lookup request failed: %v", err)
+		writeError(w, http.StatusBadGateway, "Failed to lookup business")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "Business lookup unavailable")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to read business lookup response")
+		return
+	}
+
+	matches := abrCompressedItemRegex.FindAllStringSubmatch(string(body), 10)
+	results := make([]businessLookupResult, 0, len(matches))
+	seenABN := map[string]struct{}{}
+
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		raw := html.UnescapeString(m[1])
+		parts := strings.Split(raw, ",")
+		if len(parts) < 13 {
+			continue
+		}
+
+		abnDigits := strings.TrimSpace(parts[0])
+		abn := strings.TrimSpace(parts[1])
+		if abn == "" && len(abnDigits) == 11 {
+			abn = fmt.Sprintf("%s %s %s %s", abnDigits[:2], abnDigits[2:5], abnDigits[5:8], abnDigits[8:11])
+		}
+		if abn == "" {
+			continue
+		}
+		if _, exists := seenABN[abn]; exists {
+			continue
+		}
+		seenABN[abn] = struct{}{}
+
+		entityName := strings.TrimSpace(parts[5])
+		state := strings.TrimSpace(parts[11])
+		postcode := strings.TrimSpace(parts[12])
+		score := 0
+		if len(parts) > 13 {
+			if s, convErr := strconv.Atoi(strings.TrimSpace(parts[13])); convErr == nil {
+				score = s
+			}
+		}
+
+		acn := ""
+		// For company-style entities, ACN is commonly the trailing 9 digits of ABN.
+		if len(abnDigits) == 11 && abrCompanyNameHintRegex.MatchString(strings.ToUpper(entityName)) {
+			acnDigits := abnDigits[2:]
+			acn = fmt.Sprintf("%s %s %s", acnDigits[:3], acnDigits[3:6], acnDigits[6:9])
+		}
+
+		results = append(results, businessLookupResult{
+			Name:     entityName,
+			ABN:      abn,
+			ACN:      acn,
+			State:    state,
+			Postcode: postcode,
+			Score:    score,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 }
 
 // GetAgreementSettings returns the agreement settings (Section A).
