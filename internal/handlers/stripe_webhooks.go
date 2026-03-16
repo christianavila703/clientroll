@@ -161,11 +161,15 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	if err1 != nil || err2 != nil || err3 != nil {
 		return
 	}
+	currencyCode := strings.ToUpper(strings.TrimSpace(metadata["currency_code"]))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
 	providerRef := sess.ID
 	if sess.PaymentIntent != nil && sess.PaymentIntent.ID != "" {
 		providerRef = sess.PaymentIntent.ID
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, time.Now().UTC(), providerRef)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef)
 	if err != nil {
 		log.Printf("stripe webhook create payment failed: %v", err)
 		return
@@ -197,7 +201,7 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 	if err1 != nil || err2 != nil || err3 != nil {
 		return
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, time.Now().UTC(), sess.ID)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, "AUD", time.Now().UTC(), sess.ID)
 	if err != nil {
 		return
 	}
@@ -232,7 +236,11 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 		amount = float64(inv.AmountDue) / 100.0
 	}
 	providerRef := inv.ID
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, time.Now().UTC(), providerRef)
+	currencyCode := strings.ToUpper(string(inv.Currency))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef)
 	if err != nil {
 		return
 	}
@@ -384,10 +392,10 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 	switch event.Type {
 	case "charge.refunded":
 		var charge struct {
-			ID            string      `json:"id"`
-			PaymentIntent interface{} `json:"payment_intent"`
-			Invoice       interface{} `json:"invoice"`
-			AmountRefunded int64      `json:"amount_refunded"`
+			ID             string      `json:"id"`
+			PaymentIntent  interface{} `json:"payment_intent"`
+			Invoice        interface{} `json:"invoice"`
+			AmountRefunded int64       `json:"amount_refunded"`
 		}
 		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
 			return

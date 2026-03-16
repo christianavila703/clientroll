@@ -15,6 +15,8 @@ interface AgreementData {
   phone?: string;
 }
 
+const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">("agreement");
 
@@ -167,24 +169,51 @@ function AgreementSettings() {
 }
 
 function TenantSettings() {
-  const [data, setData] = useState<Record<string, string>>({});
+  const [data, setData] = useState<{
+    slug: string;
+    timezone: string;
+    signup_price_display_mode: string;
+    primary_colour: string;
+    secondary_colour: string;
+    logo_url: string;
+    default_thankyou_heading: string;
+    default_thankyou_body: string;
+    default_thankyou_image_url: string;
+    default_thankyou_redirect_url: string;
+    enabled_currencies: string[];
+  }>({
+    slug: "",
+    timezone: "Australia/Brisbane",
+    signup_price_display_mode: "weekly",
+    primary_colour: "#6366f1",
+    secondary_colour: "",
+    logo_url: "",
+    default_thankyou_heading: "",
+    default_thankyou_body: "",
+    default_thankyou_image_url: "",
+    default_thankyou_redirect_url: "",
+    enabled_currencies: ["AUD"],
+  });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     api.getTenantSettings().then((res) => {
-      const t = res as Record<string, string>;
+      const t = res as Record<string, unknown>;
       setData({
-        slug: t.slug || "",
-        timezone: t.timezone || "Australia/Brisbane",
-        signup_price_display_mode: t.signup_price_display_mode || "weekly",
-        primary_colour: t.primary_colour || "#6366f1",
-        secondary_colour: t.secondary_colour || "",
-        logo_url: t.logo_url || "",
-        default_thankyou_heading: t.default_thankyou_heading || "",
-        default_thankyou_body: t.default_thankyou_body || "",
-        default_thankyou_image_url: t.default_thankyou_image_url || "",
-        default_thankyou_redirect_url: t.default_thankyou_redirect_url || "",
+        slug: String(t.slug || ""),
+        timezone: String(t.timezone || "Australia/Brisbane"),
+        signup_price_display_mode: String(t.signup_price_display_mode || "weekly"),
+        primary_colour: String(t.primary_colour || "#6366f1"),
+        secondary_colour: String(t.secondary_colour || ""),
+        logo_url: String(t.logo_url || ""),
+        default_thankyou_heading: String(t.default_thankyou_heading || ""),
+        default_thankyou_body: String(t.default_thankyou_body || ""),
+        default_thankyou_image_url: String(t.default_thankyou_image_url || ""),
+        default_thankyou_redirect_url: String(t.default_thankyou_redirect_url || ""),
+        enabled_currencies: Array.isArray(t.enabled_currencies)
+          ? Array.from(new Set((t.enabled_currencies as unknown[]).map((c) => String(c).toUpperCase()))).filter(Boolean)
+          : ["AUD"],
       });
     }).catch((e) => { console.error(e); setMessage("Failed to load organisation settings"); });
   }, []);
@@ -206,6 +235,19 @@ function TenantSettings() {
     "Pacific/Auckland", "America/New_York", "America/Chicago", "America/Los_Angeles",
     "Europe/London", "Europe/Berlin", "Asia/Singapore", "Asia/Tokyo",
   ];
+
+  const toggleCurrency = (code: string, checked: boolean) => {
+    setData((prev) => {
+      const next = new Set(prev.enabled_currencies || []);
+      if (checked) {
+        next.add(code);
+      } else if (code !== "AUD") {
+        next.delete(code);
+      }
+      next.add("AUD");
+      return { ...prev, enabled_currencies: Array.from(next) };
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -266,6 +308,24 @@ function TenantSettings() {
               <option value="weekly">Weekly value</option>
               <option value="monthly">Monthly value</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Enabled currencies</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">These currencies are available when creating membership types. AUD is always enabled.</p>
+            <div className="flex flex-wrap gap-2">
+              {AVAILABLE_CURRENCIES.map((code) => (
+                <label key={code} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[12px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={(data.enabled_currencies || []).includes(code)}
+                    disabled={code === "AUD"}
+                    onChange={(e) => toggleCurrency(code, e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+                  />
+                  {code}
+                </label>
+              ))}
+            </div>
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Brand colour</label>

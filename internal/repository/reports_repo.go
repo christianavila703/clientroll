@@ -12,15 +12,23 @@ import (
 
 // ReportData holds aggregated data for financial reports.
 type MonthlyRevenue struct {
-	Month    string  `json:"month"`
-	Revenue  float64 `json:"revenue"`
-	Expected float64 `json:"expected"`
+	Month        string  `json:"month"`
+	CurrencyCode string  `json:"currency_code,omitempty"`
+	Revenue      float64 `json:"revenue"`
+	Expected     float64 `json:"expected"`
 }
 
 type MembershipBreakdown struct {
-	TypeTitle string  `json:"type_title"`
-	Revenue   float64 `json:"revenue"`
-	Count     int     `json:"count"`
+	TypeTitle    string  `json:"type_title"`
+	CurrencyCode string  `json:"currency_code,omitempty"`
+	Revenue      float64 `json:"revenue"`
+	Count        int     `json:"count"`
+}
+
+type CurrencyTotal struct {
+	CurrencyCode string  `json:"currency_code"`
+	Revenue      float64 `json:"revenue"`
+	Payments     int     `json:"payments"`
 }
 
 type DashboardSummary struct {
@@ -128,6 +136,7 @@ func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID)
 func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.UUID) ([]MembershipBreakdown, error) {
 	query := `
 		SELECT mt.title,
+		       COALESCE(mt.currency_code, 'AUD') AS currency_code,
 		       COALESCE(SUM(p.amount), 0) AS revenue,
 		       COUNT(DISTINCT m.id) AS member_count
 		FROM memberships m
@@ -139,7 +148,7 @@ func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.
 		  AND mt.deleted_at IS NULL
 		  AND m.status = 'active'
 		  AND c.deleted_at IS NULL
-		GROUP BY mt.title
+		GROUP BY mt.title, COALESCE(mt.currency_code, 'AUD')
 		ORDER BY member_count DESC, revenue DESC, mt.title ASC`
 
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
@@ -151,7 +160,7 @@ func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.
 	var items []MembershipBreakdown
 	for rows.Next() {
 		var b MembershipBreakdown
-		if err := rows.Scan(&b.TypeTitle, &b.Revenue, &b.Count); err != nil {
+		if err := rows.Scan(&b.TypeTitle, &b.CurrencyCode, &b.Revenue, &b.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, b)
@@ -185,6 +194,7 @@ type ComprehensiveReport struct {
 	MembershipBreakdown []MembershipBreakdown `json:"membership_breakdown"`
 	PaymentStatuses     map[string]int        `json:"payment_statuses"`
 	FrequencyBreakdown  []FrequencyBreakdown  `json:"frequency_breakdown"`
+	RevenueByCurrency   []CurrencyTotal       `json:"revenue_by_currency"`
 	TopClients          []TopClient           `json:"top_clients"`
 	UpcomingExpirations []UpcomingExpiry      `json:"upcoming_expirations"`
 	RecentFailures      []RecentFailure       `json:"recent_failures"`
@@ -307,6 +317,26 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 
 	// Monthly revenue (12 months)
 	rpt.MonthlyRevenue, _ = r.GetMonthlyRevenue(ctx, tenantID)
+
+	// Revenue totals by currency.
+	rowsCurrency, err := r.db.Pool.Query(ctx, `
+		SELECT COALESCE(currency_code, 'AUD') AS currency_code,
+		       COALESCE(SUM(amount), 0) AS revenue,
+		       COUNT(*) AS payments
+		FROM payments
+		WHERE tenant_id = $1
+		  AND status = 'succeeded'
+		GROUP BY COALESCE(currency_code, 'AUD')
+		ORDER BY currency_code
+	`, tenantID)
+	if err == nil {
+		defer rowsCurrency.Close()
+		for rowsCurrency.Next() {
+			var c CurrencyTotal
+			rowsCurrency.Scan(&c.CurrencyCode, &c.Revenue, &c.Payments)
+			rpt.RevenueByCurrency = append(rpt.RevenueByCurrency, c)
+		}
+	}
 
 	// Monthly signups (12 months)
 	rows1, err := r.db.Pool.Query(ctx, `SELECT TO_CHAR(created_at, 'YYYY-MM'), COUNT(*) FROM memberships WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '12 months' GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY 1`, tenantID)

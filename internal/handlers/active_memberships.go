@@ -54,16 +54,16 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
 
 	var input struct {
-		ClientID         string  `json:"client_id"`
-		MembershipTypeID string  `json:"membership_type_id"`
-		TermOptionID     string  `json:"term_option_id"`
-		StartDate        string  `json:"start_date"`
-		PaymentMethod    string  `json:"payment_method"`
-		PaymentFrequency string  `json:"payment_frequency"`
+		ClientID             string  `json:"client_id"`
+		MembershipTypeID     string  `json:"membership_type_id"`
+		TermOptionID         string  `json:"term_option_id"`
+		StartDate            string  `json:"start_date"`
+		PaymentMethod        string  `json:"payment_method"`
+		PaymentFrequency     string  `json:"payment_frequency"`
 		PaymentIntervalUnit  string  `json:"payment_interval_unit,omitempty"`
 		PaymentIntervalCount int     `json:"payment_interval_count,omitempty"`
-		PaymentAmount    float64 `json:"payment_amount"`
-		NumPayments      *int    `json:"num_payments,omitempty"`
+		PaymentAmount        float64 `json:"payment_amount"`
+		NumPayments          *int    `json:"num_payments,omitempty"`
 		// Bank details for GoCardless mandate setup
 		AccountHolderName string `json:"account_holder_name,omitempty"`
 		AccountNumber     string `json:"account_number,omitempty"`
@@ -133,8 +133,22 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		return
 	}
 
+	mt, err := h.mtRepo.FindByID(r.Context(), mtID, tenantID)
+	if err != nil || mt == nil {
+		writeError(w, http.StatusNotFound, "Membership type not found")
+		return
+	}
+	membershipCurrency := strings.ToUpper(strings.TrimSpace(mt.CurrencyCode))
+	if membershipCurrency == "" {
+		membershipCurrency = "AUD"
+	}
+	if input.PaymentMethod == "direct_debit" && membershipCurrency != "AUD" {
+		writeError(w, http.StatusBadRequest, "Direct debit currently supports AUD memberships only")
+		return
+	}
+
 	m, err := h.memberRepo.Create(r.Context(), tenantID, clientID, mtID, toID,
-		startDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		startDate, input.PaymentMethod, input.PaymentFrequency, membershipCurrency, input.PaymentAmount,
 		func() *string {
 			if input.PaymentIntervalUnit == "" {
 				return nil
@@ -325,6 +339,7 @@ type ActiveMembershipRow struct {
 	PaymentFrequency  *string  `json:"payment_frequency"`
 	PaymentAmount     *float64 `json:"payment_amount"`
 	PaymentMethod     *string  `json:"payment_method"`
+	CurrencyCode      string   `json:"currency_code"`
 	Status            string   `json:"status"`
 	StartDate         string   `json:"start_date"`
 	EndDate           string   `json:"end_date"`
@@ -358,6 +373,7 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 			m.payment_frequency,
 			m.payment_amount,
 			m.payment_method,
+			m.currency_code,
 			m.status,
 			TO_CHAR(m.start_date, 'YYYY-MM-DD'),
 			TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD'),
@@ -399,7 +415,7 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 		if err := rows.Scan(
 			&row.MembershipID, &row.ClientID, &row.ClientName, &row.ClientEmail, &row.ClientPhone,
 			&row.MembershipType, &row.TermMonths, &row.PaymentFrequency,
-			&row.PaymentAmount, &row.PaymentMethod, &row.Status, &row.StartDate, &row.EndDate,
+			&row.PaymentAmount, &row.PaymentMethod, &row.CurrencyCode, &row.Status, &row.StartDate, &row.EndDate,
 			&row.MandateID, &row.SubscriptionID,
 			&row.LastPaymentDate, &row.LastPaymentAmt, &row.LastPaymentStatus,
 			&row.TotalPaid, &row.TotalExpected, &row.FailedCount,

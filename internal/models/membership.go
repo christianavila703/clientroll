@@ -19,6 +19,7 @@ type MembershipType struct {
 	Inclusions          *string   `json:"inclusions"`
 	Benefits            *string   `json:"benefits"`
 	TopImageURL         *string   `json:"top_image_url"`
+	CurrencyCode        string    `json:"currency_code"`
 	IsActive            bool      `json:"is_active"`
 	IsMostPopular       bool      `json:"is_most_popular"`
 	IntrinsicValue      float64   `json:"intrinsic_value"`

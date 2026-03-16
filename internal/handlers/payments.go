@@ -32,26 +32,27 @@ func (h *PaymentHandler) RegisterRoutes(r chi.Router) {
 
 // EnrichedPayment is a payment row with joined client/membership data.
 type EnrichedPayment struct {
-	PaymentID         string   `json:"payment_id"`
-	ClientID          string   `json:"client_id"`
-	ClientName        string   `json:"client_name"`
-	ClientEmail       *string  `json:"client_email"`
-	MembershipType    string   `json:"membership_type"`
-	MembershipID      string   `json:"membership_id"`
-	TermMonths        int      `json:"term_months"`
-	Amount            float64  `json:"amount"`
-	Status            string   `json:"status"`
-	DueDate           string   `json:"due_date"`
-	PaidDate          *string  `json:"paid_date"`
-	FailureReason     *string  `json:"failure_reason"`
-	RetryCount        int      `json:"retry_count"`
-	ProviderReference *string  `json:"provider_reference"`
-	PaymentMethod     *string  `json:"payment_method"`
-	TotalPaid         float64  `json:"total_paid"`
-	TotalExpected     float64  `json:"total_expected"`
-	MembershipEnd     string   `json:"membership_end"`
-	MembershipStatus  string   `json:"membership_status"`
-	PaymentFrequency  *string  `json:"payment_frequency"`
+	PaymentID         string  `json:"payment_id"`
+	ClientID          string  `json:"client_id"`
+	ClientName        string  `json:"client_name"`
+	ClientEmail       *string `json:"client_email"`
+	MembershipType    string  `json:"membership_type"`
+	MembershipID      string  `json:"membership_id"`
+	TermMonths        int     `json:"term_months"`
+	Amount            float64 `json:"amount"`
+	CurrencyCode      string  `json:"currency_code"`
+	Status            string  `json:"status"`
+	DueDate           string  `json:"due_date"`
+	PaidDate          *string `json:"paid_date"`
+	FailureReason     *string `json:"failure_reason"`
+	RetryCount        int     `json:"retry_count"`
+	ProviderReference *string `json:"provider_reference"`
+	PaymentMethod     *string `json:"payment_method"`
+	TotalPaid         float64 `json:"total_paid"`
+	TotalExpected     float64 `json:"total_expected"`
+	MembershipEnd     string  `json:"membership_end"`
+	MembershipStatus  string  `json:"membership_status"`
+	PaymentFrequency  *string `json:"payment_frequency"`
 }
 
 // List returns all payments for the tenant with enriched data.
@@ -69,6 +70,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 			m.id::text,
 			mto.duration_months,
 			p.amount,
+			p.currency_code,
 			p.status,
 			TO_CHAR(p.due_date, 'YYYY-MM-DD'),
 			CASE WHEN p.paid_date IS NOT NULL THEN TO_CHAR(p.paid_date, 'YYYY-MM-DD') ELSE NULL END,
@@ -112,7 +114,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&row.PaymentID, &row.ClientID, &row.ClientName, &row.ClientEmail,
 			&row.MembershipType, &row.MembershipID, &row.TermMonths,
-			&row.Amount, &row.Status, &row.DueDate, &row.PaidDate,
+			&row.Amount, &row.CurrencyCode, &row.Status, &row.DueDate, &row.PaidDate,
 			&row.FailureReason, &row.RetryCount,
 			&row.ProviderReference, &row.PaymentMethod,
 			&row.TotalPaid, &row.TotalExpected,

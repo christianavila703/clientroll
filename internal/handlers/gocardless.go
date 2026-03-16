@@ -802,7 +802,11 @@ func (h *GoCardlessHandler) reconcileExternalPayment(ctx context.Context, tenant
 	}
 	amount := float64(paymentInfo.Amount) / 100.0
 
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membership.ID, membership.ClientID, amount, dueDate, gcPaymentID)
+	currencyCode := strings.ToUpper(strings.TrimSpace(membership.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membership.ID, membership.ClientID, amount, currencyCode, dueDate, gcPaymentID)
 	if err != nil {
 		return nil, err
 	}
@@ -942,10 +946,14 @@ func (h *GoCardlessHandler) CreatePayment(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "amount must be positive")
 		return
 	}
+	currencyCode := strings.ToUpper(strings.TrimSpace(membership.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
 	gcPaymentID, err := prov.CreatePayment(r.Context(), payment.CreatePaymentInput{
 		MandateID:   *membership.GoCardlessMandateID,
 		Amount:      amountMinor,
-		Currency:    "AUD",
+		Currency:    currencyCode,
 		Description: "Membership payment",
 		ChargeDate:  dueDate,
 		Reference:   membershipID.String() + "-" + dueDate.Format("20060102"),
@@ -956,7 +964,7 @@ func (h *GoCardlessHandler) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	pay, err := h.paymentRepo.Create(r.Context(), tenantID, membershipID, membership.ClientID, input.Amount, dueDate, gcPaymentID)
+	pay, err := h.paymentRepo.Create(r.Context(), tenantID, membershipID, membership.ClientID, input.Amount, currencyCode, dueDate, gcPaymentID)
 	if err != nil {
 		log.Printf("PaymentRepo.Create: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to save payment")

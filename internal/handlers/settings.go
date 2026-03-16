@@ -21,6 +21,16 @@ import (
 )
 
 var tenantSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$`)
+var currencyCodeRegex = regexp.MustCompile(`^[A-Z]{3}$`)
+var allowedTenantCurrencies = map[string]struct{}{
+	"AUD": {},
+	"USD": {},
+	"EUR": {},
+	"GBP": {},
+	"NZD": {},
+	"CAD": {},
+	"SGD": {},
+}
 
 // SettingsHandler handles tenant settings endpoints.
 type SettingsHandler struct {
@@ -219,16 +229,17 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	var input struct {
-		Timezone                   *string `json:"timezone,omitempty"`
-		Slug                       *string `json:"slug,omitempty"`
-		PrimaryColour              *string `json:"primary_colour,omitempty"`
-		SecondaryColour            *string `json:"secondary_colour,omitempty"`
-		SignupPriceDisplayMode     *string `json:"signup_price_display_mode,omitempty"`
-		LogoURL                    *string `json:"logo_url,omitempty"`
-		DefaultThankyouHeading     *string `json:"default_thankyou_heading,omitempty"`
-		DefaultThankyouBody        *string `json:"default_thankyou_body,omitempty"`
-		DefaultThankyouImageURL    *string `json:"default_thankyou_image_url,omitempty"`
-		DefaultThankyouRedirectURL *string `json:"default_thankyou_redirect_url,omitempty"`
+		Timezone                   *string  `json:"timezone,omitempty"`
+		Slug                       *string  `json:"slug,omitempty"`
+		EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
+		PrimaryColour              *string  `json:"primary_colour,omitempty"`
+		SecondaryColour            *string  `json:"secondary_colour,omitempty"`
+		SignupPriceDisplayMode     *string  `json:"signup_price_display_mode,omitempty"`
+		LogoURL                    *string  `json:"logo_url,omitempty"`
+		DefaultThankyouHeading     *string  `json:"default_thankyou_heading,omitempty"`
+		DefaultThankyouBody        *string  `json:"default_thankyou_body,omitempty"`
+		DefaultThankyouImageURL    *string  `json:"default_thankyou_image_url,omitempty"`
+		DefaultThankyouRedirectURL *string  `json:"default_thankyou_redirect_url,omitempty"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -259,9 +270,38 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		nextDisplayMode = &mode
 	}
 
+	var nextEnabledCurrencies []string
+	if input.EnabledCurrencies != nil {
+		seen := map[string]struct{}{}
+		nextEnabledCurrencies = make([]string, 0, len(input.EnabledCurrencies)+1)
+		for _, raw := range input.EnabledCurrencies {
+			code := strings.ToUpper(strings.TrimSpace(raw))
+			if code == "" {
+				continue
+			}
+			if !currencyCodeRegex.MatchString(code) {
+				writeError(w, http.StatusBadRequest, "enabled_currencies must contain ISO-4217 uppercase currency codes")
+				return
+			}
+			if _, ok := allowedTenantCurrencies[code]; !ok {
+				writeError(w, http.StatusBadRequest, "unsupported currency in enabled_currencies")
+				return
+			}
+			if _, ok := seen[code]; ok {
+				continue
+			}
+			seen[code] = struct{}{}
+			nextEnabledCurrencies = append(nextEnabledCurrencies, code)
+		}
+		if _, ok := seen["AUD"]; !ok {
+			nextEnabledCurrencies = append([]string{"AUD"}, nextEnabledCurrencies...)
+		}
+	}
+
 	updateInput := models.UpdateTenantInput{
 		Timezone:                   input.Timezone,
 		Slug:                       nextSlug,
+		EnabledCurrencies:          nextEnabledCurrencies,
 		PrimaryColour:              input.PrimaryColour,
 		SecondaryColour:            input.SecondaryColour,
 		SignupPriceDisplayMode:     nextDisplayMode,

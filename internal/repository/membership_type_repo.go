@@ -27,7 +27,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -62,22 +62,22 @@ func (r *MembershipTypeRepo) FindBySlug(ctx context.Context, slug string, tenant
 }
 
 // Create inserts a new membership type.
-func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int) (*models.MembershipType, error) {
+func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int, currencyCode string) (*models.MembershipType, error) {
 	query := `
 		INSERT INTO membership_types (tenant_id, membership_name, membership_level, title, slug,
 		    summary, description, inclusions, benefits,
-		    top_image_url, intrinsic_value, total_value, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12)
+		    top_image_url, currency_code, intrinsic_value, total_value, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
 	var mt models.MembershipType
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipName, membershipLevel, title, slug,
 		nil, description, inclusions, nil,
-		topImageURL, totalValue, sortOrder).Scan(r.scanFields(&mt)...)
+		topImageURL, currencyCode, totalValue, sortOrder).Scan(r.scanFields(&mt)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership type: %w", err)
 	}
@@ -96,7 +96,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 
 	mt, err := r.Create(ctx, tenantID, source.MembershipName, source.MembershipLevel, newTitle, newSlug,
 		source.Description, source.Inclusions, source.TopImageURL,
-		source.TotalValue, source.SortOrder+1)
+		source.TotalValue, source.SortOrder+1, source.CurrencyCode)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +305,7 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
@@ -325,7 +325,7 @@ func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType) []interface{}
 	return []interface{}{
 		&mt.ID, &mt.TenantID, &mt.MembershipName, &mt.MembershipLevel, &mt.Title, &mt.Slug,
 		&mt.Summary, &mt.Description, &mt.Inclusions, &mt.Benefits,
-		&mt.TopImageURL, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
+		&mt.TopImageURL, &mt.CurrencyCode, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}
@@ -384,6 +384,7 @@ func (r *MembershipTypeRepo) UpdateBasics(
 	ctx context.Context,
 	id, tenantID uuid.UUID,
 	membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL *string,
+	currencyCode *string,
 	totalValue *float64,
 	sortOrder *int,
 ) (*models.MembershipType, error) {
@@ -398,19 +399,20 @@ func (r *MembershipTypeRepo) UpdateBasics(
 			inclusions = COALESCE($9, inclusions),
 			benefits = COALESCE($10, benefits),
 			top_image_url = COALESCE($11, top_image_url),
-			total_value = COALESCE($12, total_value),
-			intrinsic_value = COALESCE($12, intrinsic_value),
-			sort_order = COALESCE($13, sort_order),
+			currency_code = COALESCE($12, currency_code),
+			total_value = COALESCE($13, total_value),
+			intrinsic_value = COALESCE($13, intrinsic_value),
+			sort_order = COALESCE($14, sort_order),
 			updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
 	var mt models.MembershipType
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, totalValue, sortOrder).
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, totalValue, sortOrder).
 		Scan(r.scanFields(&mt)...)
 	if err != nil {
 		if err == pgx.ErrNoRows {

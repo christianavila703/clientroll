@@ -12,6 +12,7 @@ type Tenant struct {
 	Name                       string     `json:"name"`
 	Slug                       string     `json:"slug"`
 	Timezone                   string     `json:"timezone"`
+	EnabledCurrencies          []string   `json:"enabled_currencies"`
 	IsActive                   bool       `json:"is_active"`
 	LogoURL                    *string    `json:"logo_url"`
 	PrimaryColour              string     `json:"primary_colour"`
@@ -35,16 +36,17 @@ type CreateTenantInput struct {
 
 // UpdateTenantInput is the input for updating a tenant.
 type UpdateTenantInput struct {
-	Name                       *string `json:"name,omitempty"`
-	Slug                       *string `json:"slug,omitempty"`
-	Timezone                   *string `json:"timezone,omitempty"`
-	IsActive                   *bool   `json:"is_active,omitempty"`
-	PrimaryColour              *string `json:"primary_colour,omitempty"`
-	SecondaryColour            *string `json:"secondary_colour,omitempty"`
-	SignupPriceDisplayMode     *string `json:"signup_price_display_mode,omitempty"`
-	LogoURL                    *string `json:"logo_url,omitempty"`
-	DefaultThankyouHeading     *string `json:"default_thankyou_heading,omitempty"`
-	DefaultThankyouBody        *string `json:"default_thankyou_body,omitempty"`
-	DefaultThankyouImageURL    *string `json:"default_thankyou_image_url,omitempty"`
-	DefaultThankyouRedirectURL *string `json:"default_thankyou_redirect_url,omitempty"`
+	Name                       *string  `json:"name,omitempty"`
+	Slug                       *string  `json:"slug,omitempty"`
+	Timezone                   *string  `json:"timezone,omitempty"`
+	EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
+	IsActive                   *bool    `json:"is_active,omitempty"`
+	PrimaryColour              *string  `json:"primary_colour,omitempty"`
+	SecondaryColour            *string  `json:"secondary_colour,omitempty"`
+	SignupPriceDisplayMode     *string  `json:"signup_price_display_mode,omitempty"`
+	LogoURL                    *string  `json:"logo_url,omitempty"`
+	DefaultThankyouHeading     *string  `json:"default_thankyou_heading,omitempty"`
+	DefaultThankyouBody        *string  `json:"default_thankyou_body,omitempty"`
+	DefaultThankyouImageURL    *string  `json:"default_thankyou_image_url,omitempty"`
+	DefaultThankyouRedirectURL *string  `json:"default_thankyou_redirect_url,omitempty"`
 }

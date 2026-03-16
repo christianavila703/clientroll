@@ -10,6 +10,7 @@ interface MembershipType {
   title: string;
   slug: string;
   description?: string;
+  currency_code?: string;
   is_active: boolean;
   is_most_popular?: boolean;
   intrinsic_value: number;
@@ -199,7 +200,7 @@ export default function MembershipTypesPage() {
                       {mt.is_most_popular && <span className="badge badge-purple">Most Popular</span>}
                     </div>
                   </td>
-                  <td className="tabular-nums">${mt.intrinsic_value?.toLocaleString() || mt.total_value.toLocaleString()}</td>
+                  <td className="tabular-nums">{mt.currency_code || "AUD"} ${mt.intrinsic_value?.toLocaleString() || mt.total_value.toLocaleString()}</td>
                   <td className="text-gray-500">{mt.term_options?.length || 0} options</td>
                   <td className="text-gray-500">
                     {new Date(mt.updated_at || mt.created_at).toLocaleDateString("en-AU", {
@@ -304,11 +305,23 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   type NumericField = number | "";
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
 
+  const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
   const [form, setForm] = useState({
-    membership_name: "", membership_level: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "", is_most_popular: false,
+    membership_name: "", membership_level: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "", is_most_popular: false, currency_code: "AUD",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.getTenantSettings()
+      .then((res) => {
+        const list = (res as { enabled_currencies?: string[] }).enabled_currencies || ["AUD"];
+        const normalized = Array.from(new Set(list.map((c) => String(c).toUpperCase()))).filter(Boolean);
+        if (!normalized.includes("AUD")) normalized.unshift("AUD");
+        setEnabledCurrencies(normalized);
+      })
+      .catch(() => setEnabledCurrencies(["AUD"]));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -330,6 +343,7 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
         sort_order: toNumberOrZero(form.sort_order),
         top_image_url: form.top_image_url || "",
         is_most_popular: form.is_most_popular,
+        currency_code: form.currency_code || "AUD",
       });
       onCreated();
     }
@@ -388,6 +402,16 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
             <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Currency</label>
+            <select
+              value={form.currency_code}
+              onChange={(e) => setForm({ ...form, currency_code: e.target.value })}
+              className="input-field"
+            >
+              {enabledCurrencies.map((code) => <option key={code} value={code}>{code}</option>)}
+            </select>
           </div>
         </div>
         <label className="flex items-center gap-2 text-[13px] text-gray-700">

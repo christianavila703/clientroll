@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"clientroll/internal/middleware"
@@ -11,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+var isoCurrencyRegex = regexp.MustCompile(`^[A-Z]{3}$`)
 
 func buildMembershipDisplayTitle(name, level string) string {
 	name = strings.TrimSpace(name)
@@ -73,6 +76,7 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MembershipName  *string `json:"membership_name"`
 		MembershipLevel *string `json:"membership_level"`
 		Slug            string  `json:"slug"`
+		CurrencyCode    string  `json:"currency_code"`
 		Description     *string `json:"description"`
 		Inclusions      *string `json:"inclusions"`
 		TopImageURL     *string `json:"top_image_url"`
@@ -125,8 +129,16 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if input.Slug == "" {
 		input.Slug = repository.GenerateSlug(input.Title)
 	}
+	input.CurrencyCode = strings.ToUpper(strings.TrimSpace(input.CurrencyCode))
+	if input.CurrencyCode == "" {
+		input.CurrencyCode = "AUD"
+	}
+	if !isoCurrencyRegex.MatchString(input.CurrencyCode) {
+		writeError(w, http.StatusBadRequest, "currency_code must be a 3-letter ISO code")
+		return
+	}
 	mt, err := h.mtRepo.Create(r.Context(), tenantID, membershipName, membershipLevel, input.Title, input.Slug,
-		input.Description, input.Inclusions, input.TopImageURL, input.TotalValue, input.SortOrder)
+		input.Description, input.Inclusions, input.TopImageURL, input.TotalValue, input.SortOrder, input.CurrencyCode)
 	if err != nil {
 		log.Printf("Error creating membership type: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership type")
@@ -161,6 +173,7 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Inclusions      *string  `json:"inclusions"`
 		Benefits        *string  `json:"benefits"`
 		TopImageURL     *string  `json:"top_image_url"`
+		CurrencyCode    *string  `json:"currency_code"`
 		TotalValue      *float64 `json:"total_value"`
 		SortOrder       *int     `json:"sort_order"`
 		IsActive        *bool    `json:"is_active"`
@@ -218,6 +231,19 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var nextCurrency *string
+	if input.CurrencyCode != nil {
+		normalized := strings.ToUpper(strings.TrimSpace(*input.CurrencyCode))
+		if normalized == "" {
+			normalized = "AUD"
+		}
+		if !isoCurrencyRegex.MatchString(normalized) {
+			writeError(w, http.StatusBadRequest, "currency_code must be a 3-letter ISO code")
+			return
+		}
+		nextCurrency = &normalized
+	}
+
 	if _, err := h.mtRepo.UpdateBasics(
 		r.Context(),
 		mtID,
@@ -231,6 +257,7 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		input.Inclusions,
 		input.Benefits,
 		input.TopImageURL,
+		nextCurrency,
 		input.TotalValue,
 		input.SortOrder,
 	); err != nil {

@@ -292,10 +292,15 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	mtID, _ := uuid.Parse(input.MembershipTypeID)
 	toID, _ := uuid.Parse(input.TermOptionID)
 	staffID := parseOptionalUUID(input.StaffUserID)
+	mtForCreate, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+	membershipCurrency := "AUD"
+	if mtForCreate != nil && strings.TrimSpace(mtForCreate.CurrencyCode) != "" {
+		membershipCurrency = strings.ToUpper(strings.TrimSpace(mtForCreate.CurrencyCode))
+	}
 
 	// Create membership
 	membership, err := h.memberRepo.Create(r.Context(), tenant.ID, client.ID, mtID, toID,
-		input.StartDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		input.StartDate, input.PaymentMethod, input.PaymentFrequency, membershipCurrency, input.PaymentAmount,
 		input.PaymentIntervalUnit, input.PaymentIntervalCount, input.NumPayments,
 		input.MemberSignature, staffID, input.StaffSignature)
 	if err != nil {
@@ -316,13 +321,13 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// --- Stripe card checkout path ---
 	if input.PaymentMethod == "card" {
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
 			return
 		}
-		mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+		mt := mtForCreate
 		thankyou := buildThankyouResponse(tenant, mt)
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"membership":   membership,
@@ -336,6 +341,10 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// --- GoCardless direct debit path ---
 	gcMandateID := ""
 	if input.PaymentMethod == "direct_debit" {
+		if membershipCurrency != "AUD" {
+			writeError(w, http.StatusBadRequest, "Direct debit currently supports AUD memberships only")
+			return
+		}
 		if strings.TrimSpace(input.BSB) == "" || strings.TrimSpace(input.AccountNumber) == "" {
 			writeError(w, http.StatusBadRequest, "BSB and account number are required for direct debit")
 			return
@@ -427,7 +436,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Create GoCardless subscription for recurring payments.
-		mtForSub, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+		mtForSub := mtForCreate
 		subName := "Membership"
 		if mtForSub != nil {
 			subName = mtForSub.Title
@@ -459,7 +468,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine thank you page
-	mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+	mt := mtForCreate
 	thankyou := buildThankyouResponse(tenant, mt)
 
 	// Create agreement snapshot for legal custody
@@ -613,7 +622,7 @@ func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID 
 	return providers
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -653,6 +662,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			"client_id":      client.ID.String(),
 			"membership_id":  membership.ID.String(),
 			"payment_amount": strconv.FormatFloat(amount, 'f', 2, 64),
+			"currency_code":  currencyCode,
 			"payment_freq":   frequency,
 		},
 	}
@@ -669,6 +679,9 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 				Name: stripe.String("Membership - " + tenant.Name),
 			},
 		},
+	}
+	if strings.TrimSpace(currencyCode) != "" {
+		lineItem.PriceData.Currency = stripe.String(strings.ToLower(currencyCode))
 	}
 	if mode == stripe.CheckoutSessionModeSubscription {
 		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
@@ -734,9 +747,9 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 		ClientID:     client.ID,
 
 		// Client details
-		ClientName:  client.Name,
-		ClientEmail: client.Email,
-		ClientPhone: client.Phone,
+		ClientName:          client.Name,
+		ClientEmail:         client.Email,
+		ClientPhone:         client.Phone,
 		MemberSignatureData: &input.MemberSignature,
 		MemberSignedAt:      &now,
 	}
@@ -744,9 +757,15 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 	// Client address
 	if client.Address != nil {
 		addr := *client.Address
-		if client.Suburb != nil { addr += ", " + *client.Suburb }
-		if client.State != nil { addr += " " + *client.State }
-		if client.Postcode != nil { addr += " " + *client.Postcode }
+		if client.Suburb != nil {
+			addr += ", " + *client.Suburb
+		}
+		if client.State != nil {
+			addr += " " + *client.State
+		}
+		if client.Postcode != nil {
+			addr += " " + *client.Postcode
+		}
 		snap.ClientAddress = &addr
 	}
 	// Client DOB, gender, emergency
@@ -821,18 +840,28 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 		snap.OrgABN = agreementSettings.ABN
 		snap.OrgACN = agreementSettings.ACN
 		orgAddr := ""
-		if agreementSettings.Address != nil { orgAddr = *agreementSettings.Address }
-		if agreementSettings.State != nil { orgAddr += " " + *agreementSettings.State }
-		if agreementSettings.Postcode != nil { orgAddr += " " + *agreementSettings.Postcode }
+		if agreementSettings.Address != nil {
+			orgAddr = *agreementSettings.Address
+		}
+		if agreementSettings.State != nil {
+			orgAddr += " " + *agreementSettings.State
+		}
+		if agreementSettings.Postcode != nil {
+			orgAddr += " " + *agreementSettings.Postcode
+		}
 		orgAddr = strings.TrimSpace(orgAddr)
-		if orgAddr != "" { snap.OrgAddress = &orgAddr }
+		if orgAddr != "" {
+			snap.OrgAddress = &orgAddr
+		}
 		snap.OrgEmail = agreementSettings.Email
 		snap.OrgPhone = agreementSettings.Phone
 	}
 
 	// Metadata
 	ipAddr := r.Header.Get("X-Forwarded-For")
-	if ipAddr == "" { ipAddr = r.RemoteAddr }
+	if ipAddr == "" {
+		ipAddr = r.RemoteAddr
+	}
 	snap.IPAddress = &ipAddr
 	ua := r.Header.Get("User-Agent")
 	snap.UserAgent = &ua
@@ -841,9 +870,13 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 	var termsInputs []repository.AcceptedTermInput
 	for _, tidStr := range input.AcceptedTermsIDs {
 		tid, err := uuid.Parse(tidStr)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		tc, err := h.termsRepo.FindByID(r.Context(), tid, tenant.ID)
-		if err != nil || tc == nil { continue }
+		if err != nil || tc == nil {
+			continue
+		}
 		termsInputs = append(termsInputs, repository.AcceptedTermInput{
 			TermsID:     tc.ID,
 			Title:       tc.Title,
@@ -864,11 +897,28 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 }
 
 func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.AcceptedTermInput, tenant *models.Tenant) string {
-	deref := func(s *string) string { if s != nil { return *s }; return "" }
-	derefF := func(f *float64) string { if f != nil { return fmt.Sprintf("$%.2f", *f) }; return "—" }
-	derefI := func(i *int) string { if i != nil { return fmt.Sprintf("%d", *i) }; return "—" }
+	deref := func(s *string) string {
+		if s != nil {
+			return *s
+		}
+		return ""
+	}
+	derefF := func(f *float64) string {
+		if f != nil {
+			return fmt.Sprintf("$%.2f", *f)
+		}
+		return "—"
+	}
+	derefI := func(i *int) string {
+		if i != nil {
+			return fmt.Sprintf("%d", *i)
+		}
+		return "—"
+	}
 	row := func(label, value string) string {
-		if value == "" || value == "—" { return "" }
+		if value == "" || value == "—" {
+			return ""
+		}
 		return fmt.Sprintf(`<tr><td>%s</td><td>%s</td></tr>`, label, value)
 	}
 
@@ -934,7 +984,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 	// ─── 2. Membership Details ───
 	b.WriteString(`<h2>2. Membership Details</h2><table class="d">`)
 	title := snap.MembershipTypeTitle
-	if snap.MembershipName != nil && *snap.MembershipName != "" { title = *snap.MembershipName }
+	if snap.MembershipName != nil && *snap.MembershipName != "" {
+		title = *snap.MembershipName
+	}
 	b.WriteString(row("Membership", title))
 	if snap.MembershipLevel != nil && *snap.MembershipLevel != "" {
 		b.WriteString(row("Level", *snap.MembershipLevel))
@@ -974,11 +1026,21 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 	hasFees := snap.FeeWeekly != nil || snap.FeeFortnightly != nil || snap.FeeMonthly != nil || snap.FeeQuarterly != nil
 	if hasFees {
 		b.WriteString(`<h3>Available Fee Options</h3><table class="d">`)
-		if snap.FeeWeekly != nil { b.WriteString(fmt.Sprintf(`<tr><td>Weekly</td><td>$%.2f per week</td></tr>`, *snap.FeeWeekly)) }
-		if snap.FeeFortnightly != nil { b.WriteString(fmt.Sprintf(`<tr><td>Fortnightly</td><td>$%.2f per fortnight</td></tr>`, *snap.FeeFortnightly)) }
-		if snap.FeeMonthly != nil { b.WriteString(fmt.Sprintf(`<tr><td>Monthly</td><td>$%.2f per month</td></tr>`, *snap.FeeMonthly)) }
-		if snap.FeeQuarterly != nil { b.WriteString(fmt.Sprintf(`<tr><td>Quarterly</td><td>$%.2f per quarter</td></tr>`, *snap.FeeQuarterly)) }
-		if snap.AllowUpfront { b.WriteString(`<tr><td>Upfront Payment</td><td>Available — full term payable in advance</td></tr>`) }
+		if snap.FeeWeekly != nil {
+			b.WriteString(fmt.Sprintf(`<tr><td>Weekly</td><td>$%.2f per week</td></tr>`, *snap.FeeWeekly))
+		}
+		if snap.FeeFortnightly != nil {
+			b.WriteString(fmt.Sprintf(`<tr><td>Fortnightly</td><td>$%.2f per fortnight</td></tr>`, *snap.FeeFortnightly))
+		}
+		if snap.FeeMonthly != nil {
+			b.WriteString(fmt.Sprintf(`<tr><td>Monthly</td><td>$%.2f per month</td></tr>`, *snap.FeeMonthly))
+		}
+		if snap.FeeQuarterly != nil {
+			b.WriteString(fmt.Sprintf(`<tr><td>Quarterly</td><td>$%.2f per quarter</td></tr>`, *snap.FeeQuarterly))
+		}
+		if snap.AllowUpfront {
+			b.WriteString(`<tr><td>Upfront Payment</td><td>Available — full term payable in advance</td></tr>`)
+		}
 		b.WriteString(`</table>`)
 	}
 
@@ -986,7 +1048,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 	if snap.CustomScheduleLabel != nil && *snap.CustomScheduleLabel != "" {
 		b.WriteString(`<h3>Custom Payment Schedule</h3><table class="d">`)
 		b.WriteString(row("Schedule", *snap.CustomScheduleLabel))
-		if snap.CustomScheduleAmount != nil { b.WriteString(fmt.Sprintf(`<tr><td>Amount per Payment</td><td>$%.2f</td></tr>`, *snap.CustomScheduleAmount)) }
+		if snap.CustomScheduleAmount != nil {
+			b.WriteString(fmt.Sprintf(`<tr><td>Amount per Payment</td><td>$%.2f</td></tr>`, *snap.CustomScheduleAmount))
+		}
 		if snap.CustomScheduleIntervalUnit != nil && snap.CustomScheduleIntervalCount != nil {
 			b.WriteString(row("Interval", fmt.Sprintf("Every %d %s(s)", *snap.CustomScheduleIntervalCount, *snap.CustomScheduleIntervalUnit)))
 		}
@@ -998,7 +1062,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 	b.WriteString(`<h2>4. Payment Schedule</h2>`)
 	if snap.PaymentAmount != nil && *snap.PaymentAmount > 0 {
 		startDate, _ := time.Parse("2006-01-02", snap.StartDate)
-		if startDate.IsZero() { startDate = time.Now() }
+		if startDate.IsZero() {
+			startDate = time.Now()
+		}
 
 		numPay := 0
 		if snap.NumPayments != nil && *snap.NumPayments > 0 {
@@ -1022,7 +1088,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 					intervalUnit, intervalCount = "month", 1
 				}
 			}
-			if intervalCount < 1 { intervalCount = 1 }
+			if intervalCount < 1 {
+				intervalCount = 1
+			}
 
 			b.WriteString(`<table class="sched"><thead><tr><th>#</th><th>Due Date</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>`)
 			runningTotal := 0.0
@@ -1041,7 +1109,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 				if runningTotal+thisAmt > snap.TotalFee {
 					thisAmt = snap.TotalFee - runningTotal
 				}
-				if thisAmt <= 0 { break }
+				if thisAmt <= 0 {
+					break
+				}
 				runningTotal += thisAmt
 				b.WriteString(fmt.Sprintf(`<tr><td>%d</td><td>%s</td><td>$%.2f</td><td>$%.2f</td></tr>`,
 					i+1, dueDate.Format("02 Jan 2006"), thisAmt, runningTotal))
@@ -1066,7 +1136,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 
 	// ─── 6. Declaration & Signatures ───
 	sectionNum := 5
-	if len(terms) > 0 { sectionNum = 6 }
+	if len(terms) > 0 {
+		sectionNum = 6
+	}
 	b.WriteString(fmt.Sprintf(`<h2>%d. Declaration & Signatures</h2>`, sectionNum))
 	b.WriteString(`<div class="legal-notice">
 		<strong>Declaration:</strong> By signing this agreement, the Member confirms that:<br>

@@ -19,6 +19,7 @@ type Payment struct {
 	MembershipID      uuid.UUID  `json:"membership_id"`
 	ClientID          uuid.UUID  `json:"client_id"`
 	Amount            float64    `json:"amount"`
+	CurrencyCode      string     `json:"currency_code"`
 	Status            string     `json:"status"`
 	ProviderReference *string    `json:"provider_reference"`
 	DueDate           time.Time  `json:"due_date"`
@@ -39,7 +40,7 @@ func NewPaymentRepo(db *database.Postgres) *PaymentRepo {
 	return &PaymentRepo{db: db}
 }
 
-const paymentFields = `id, tenant_id, membership_id, client_id, amount, status,
+const paymentFields = `id, tenant_id, membership_id, client_id, amount, currency_code, status,
 	provider_reference, due_date, paid_date, failure_reason, failure_code,
 	retry_count, created_at`
 
@@ -80,12 +81,12 @@ func (r *PaymentRepo) ListByClient(ctx context.Context, clientID, tenantID uuid.
 }
 
 // Create inserts a payment record.
-func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, clientID uuid.UUID, amount float64, dueDate time.Time, providerRef string) (*Payment, error) {
-	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, due_date, provider_reference)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING ` + paymentFields
+func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, clientID uuid.UUID, amount float64, currencyCode string, dueDate time.Time, providerRef string) (*Payment, error) {
+	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, currency_code, due_date, provider_reference)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ` + paymentFields
 
 	var p Payment
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, dueDate, providerRef).Scan(r.scanFields(&p)...)
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, currencyCode, dueDate, providerRef).Scan(r.scanFields(&p)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating payment: %w", err)
 	}
@@ -93,16 +94,16 @@ func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, client
 }
 
 // CreateIfNotExists inserts a payment, or returns the existing payment for provider reference.
-func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, tenantID, membershipID, clientID uuid.UUID, amount float64, dueDate time.Time, providerRef string) (*Payment, bool, error) {
-	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, due_date, provider_reference)
-		VALUES ($1, $2, $3, $4, $5, $6)
+func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, tenantID, membershipID, clientID uuid.UUID, amount float64, currencyCode string, dueDate time.Time, providerRef string) (*Payment, bool, error) {
+	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, currency_code, due_date, provider_reference)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (tenant_id, provider_reference) WHERE provider_reference IS NOT NULL
 		DO UPDATE SET updated_at = NOW()
 		RETURNING ` + paymentFields + `, (xmax = 0) AS inserted`
 
 	var p Payment
 	var inserted bool
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, dueDate, providerRef).Scan(append(r.scanFields(&p), &inserted)...)
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, currencyCode, dueDate, providerRef).Scan(append(r.scanFields(&p), &inserted)...)
 	if err != nil {
 		return nil, false, fmt.Errorf("create or get payment: %w", err)
 	}
@@ -194,7 +195,7 @@ func (r *PaymentRepo) CountByStatus(ctx context.Context, tenantID uuid.UUID) (ma
 
 func (r *PaymentRepo) scanFields(p *Payment) []interface{} {
 	return []interface{}{
-		&p.ID, &p.TenantID, &p.MembershipID, &p.ClientID, &p.Amount, &p.Status,
+		&p.ID, &p.TenantID, &p.MembershipID, &p.ClientID, &p.Amount, &p.CurrencyCode, &p.Status,
 		&p.ProviderReference, &p.DueDate, &p.PaidDate, &p.FailureReason,
 		&p.FailureCode, &p.RetryCount, &p.CreatedAt,
 	}

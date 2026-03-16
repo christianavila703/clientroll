@@ -5,6 +5,7 @@ import api from "../../api/client";
 interface MembershipType {
   id: string; title: string; membership_name?: string; membership_level?: string; slug: string;
   summary?: string; description?: string; inclusions?: string; benefits?: string;
+  currency_code?: string;
   top_image_url?: string; is_active: boolean;
   is_most_popular?: boolean;
   total_value: number; sort_order: number; term_options?: TermOption[];
@@ -41,7 +42,8 @@ export default function MembershipTypeDetail() {
   const [loading, setLoading] = useState(true);
   const [updatingPopular, setUpdatingPopular] = useState(false);
   const [savingIdentity, setSavingIdentity] = useState(false);
-  const [identityForm, setIdentityForm] = useState({ membership_name: "", membership_level: "" });
+  const [identityForm, setIdentityForm] = useState({ membership_name: "", membership_level: "", currency_code: "AUD" });
+  const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
   const [savingContent, setSavingContent] = useState(false);
   const [contentForm, setContentForm] = useState({ summary: "", description: "", inclusions: "", benefits: "" });
   const [tab, setTab] = useState<"terms" | "bonuses" | "tcs">("terms");
@@ -62,6 +64,7 @@ export default function MembershipTypeDetail() {
       setIdentityForm({
         membership_name: mtTyped.membership_name || "",
         membership_level: mtTyped.membership_level || "",
+        currency_code: mtTyped.currency_code || "AUD",
       });
       setContentForm({
         summary: (mtTyped as any).summary || "",
@@ -85,7 +88,17 @@ export default function MembershipTypeDetail() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [mtId]);
+  useEffect(() => {
+    load();
+    api.getTenantSettings()
+      .then((res) => {
+        const list = (res as { enabled_currencies?: string[] }).enabled_currencies || ["AUD"];
+        const normalized = Array.from(new Set(list.map((c) => String(c).toUpperCase()))).filter(Boolean);
+        if (!normalized.includes("AUD")) normalized.unshift("AUD");
+        setEnabledCurrencies(normalized);
+      })
+      .catch(() => setEnabledCurrencies(["AUD"]));
+  }, [mtId]);
 
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
   if (!mt) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Membership type not found</div>;
@@ -114,6 +127,7 @@ export default function MembershipTypeDetail() {
       await api.updateMembershipType(mt.id, {
         membership_name: identityForm.membership_name.trim(),
         membership_level: identityForm.membership_level.trim(),
+        currency_code: identityForm.currency_code || "AUD",
       });
       await load();
     } finally {
@@ -168,7 +182,7 @@ export default function MembershipTypeDetail() {
           <h3>Membership Identity</h3>
         </div>
         <div className="card-body">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Name</label>
               <input
@@ -185,6 +199,16 @@ export default function MembershipTypeDetail() {
                 className="input-field"
                 placeholder="Support, Premium, Elite..."
               />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                value={identityForm.currency_code}
+                onChange={(e) => setIdentityForm({ ...identityForm, currency_code: e.target.value })}
+                className="input-field"
+              >
+                {enabledCurrencies.map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
             </div>
           </div>
           <div className="mt-3 flex justify-end">

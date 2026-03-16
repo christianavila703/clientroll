@@ -14,6 +14,7 @@ const STEPS = [
   { key: "membership", label: "Membership", required: false },
   { key: "terms", label: "Terms & Conditions", required: false },
 ] as const;
+const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
 
 type StepKey = (typeof STEPS)[number]["key"];
 
@@ -175,7 +176,19 @@ export default function SetupWizard({ onClose }: Props) {
 
 /* ─── Step 1: Agreement Details ─── */
 function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: string) => void }) {
-  const [data, setData] = useState<Record<string, string>>({});
+  const [data, setData] = useState<{
+    slug: string;
+    primary_colour: string;
+    secondary_colour: string;
+    logo_url: string;
+    enabled_currencies: string[];
+  }>({
+    slug: "",
+    primary_colour: "#6366f1",
+    secondary_colour: "",
+    logo_url: "",
+    enabled_currencies: ["AUD"],
+  });
   const [saving, setSaving] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -273,12 +286,15 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
   useEffect(() => {
     api.getTenantSettings()
       .then((res) => {
-        const t = res as Record<string, string>;
+        const t = res as Record<string, unknown>;
         setData({
-          slug: t.slug || "",
-          primary_colour: t.primary_colour || "#6366f1",
-          secondary_colour: t.secondary_colour || "",
-          logo_url: t.logo_url || "",
+          slug: String(t.slug || ""),
+          primary_colour: String(t.primary_colour || "#6366f1"),
+          secondary_colour: String(t.secondary_colour || ""),
+          logo_url: String(t.logo_url || ""),
+          enabled_currencies: Array.isArray(t.enabled_currencies)
+            ? Array.from(new Set((t.enabled_currencies as unknown[]).map((c) => String(c).toUpperCase()))).filter(Boolean)
+            : ["AUD"],
         });
         setLoaded(true);
       })
@@ -295,6 +311,15 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
   };
 
   const joinUrl = data.slug ? `${window.location.origin}/join/${data.slug}` : "";
+  const toggleCurrency = (code: string, checked: boolean) => {
+    setData((prev) => {
+      const next = new Set(prev.enabled_currencies || []);
+      if (checked) next.add(code);
+      if (!checked && code !== "AUD") next.delete(code);
+      next.add("AUD");
+      return { ...prev, enabled_currencies: Array.from(next) };
+    });
+  };
 
   if (!loaded) return <LoadingSpinner />;
 
@@ -373,6 +398,23 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
             className="input-field max-w-[120px] font-mono text-[13px]"
             placeholder="#4f46e5"
           />
+        </div>
+      </div>
+      <div>
+        <label className="block text-[13px] font-medium text-gray-700 mb-1">Enabled currencies</label>
+        <div className="flex flex-wrap gap-2">
+          {AVAILABLE_CURRENCIES.map((code) => (
+            <label key={code} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[12px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={(data.enabled_currencies || []).includes(code)}
+                disabled={code === "AUD"}
+                onChange={(e) => toggleCurrency(code, e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+              />
+              {code}
+            </label>
+          ))}
         </div>
       </div>
 

@@ -28,6 +28,7 @@ func (r *MembershipRepo) Create(
 	tenantID, clientID, membershipTypeID, termOptionID uuid.UUID,
 	startDate time.Time,
 	paymentMethod, paymentFrequency string,
+	currencyCode string,
 	paymentAmount float64,
 	paymentIntervalUnit *string,
 	paymentIntervalCount int,
@@ -58,23 +59,23 @@ func (r *MembershipRepo) Create(
 
 	query := `
 		INSERT INTO memberships (tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments,
 		    status, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', $13, $14, $15, $16, $17)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'active', $14, $15, $16, $17, $18)
 		RETURNING id, tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at`
 
 	var m models.Membership
 	err = r.db.Pool.QueryRow(ctx, query,
 		tenantID, clientID, membershipTypeID, termOptionID,
-		startDate, endDate, paymentMethod, paymentFrequency, paymentIntervalUnit, paymentIntervalCount, paymentAmount, numPayments,
+		startDate, endDate, paymentMethod, paymentFrequency, currencyCode, paymentIntervalUnit, paymentIntervalCount, paymentAmount, numPayments,
 		memberSignature, memberSignedAt, staffUserID, staffSignature, staffSignedAt,
 	).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
-		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
 		&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status, &m.GoCardlessMandateID, &m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
@@ -88,7 +89,7 @@ func (r *MembershipRepo) Create(
 func (r *MembershipRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (*models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE id = $1 AND tenant_id = $2`
@@ -96,7 +97,7 @@ func (r *MembershipRepo) FindByID(ctx context.Context, id, tenantID uuid.UUID) (
 	var m models.Membership
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
-		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
 		&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
 		&m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
@@ -146,7 +147,7 @@ func (r *MembershipRepo) UpdateStatus(ctx context.Context, membershipID, tenantI
 func (r *MembershipRepo) FindBySubscriptionID(ctx context.Context, tenantID uuid.UUID, subscriptionID string) (*models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE tenant_id = $1 AND gocardless_subscription_id = $2`
@@ -154,7 +155,7 @@ func (r *MembershipRepo) FindBySubscriptionID(ctx context.Context, tenantID uuid
 	var m models.Membership
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, subscriptionID).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
-		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
 		&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
 		&m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
@@ -172,7 +173,7 @@ func (r *MembershipRepo) FindBySubscriptionID(ctx context.Context, tenantID uuid
 func (r *MembershipRepo) FindByMandateID(ctx context.Context, tenantID uuid.UUID, mandateID string) (*models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE tenant_id = $1 AND gocardless_mandate_id = $2`
@@ -180,7 +181,7 @@ func (r *MembershipRepo) FindByMandateID(ctx context.Context, tenantID uuid.UUID
 	var m models.Membership
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, mandateID).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
-		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
 		&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
 		&m.MemberSignature, &m.MemberSignedAt,
 		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
@@ -198,7 +199,7 @@ func (r *MembershipRepo) FindByMandateID(ctx context.Context, tenantID uuid.UUID
 func (r *MembershipRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]models.Membership, error) {
 	query := `
 		SELECT id, tenant_id, client_id, membership_type_id, term_option_id,
-		    start_date, min_term_end_date, payment_method, payment_frequency, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
+		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, gocardless_subscription_id, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at, created_at, updated_at
 		FROM memberships WHERE tenant_id = $1`
@@ -221,7 +222,7 @@ func (r *MembershipRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, s
 		var m models.Membership
 		if err := rows.Scan(
 			&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
-			&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+			&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
 			&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
 			&m.MemberSignature, &m.MemberSignedAt,
 			&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,

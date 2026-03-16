@@ -12,7 +12,8 @@ interface Report {
   monthly_revenue: { month: string; revenue: number }[];
   monthly_signups: { month: string; count: number }[];
   monthly_churn: { month: string; count: number }[];
-  membership_breakdown: { type_title: string; revenue: number; count: number }[];
+  membership_breakdown: { type_title: string; currency_code?: string; revenue: number; count: number }[];
+  revenue_by_currency: { currency_code: string; revenue: number; payments: number }[];
   payment_statuses: Record<string, number>;
   frequency_breakdown: { frequency: string; count: number; revenue: number }[];
   top_clients: { client_id: string; client_name: string; total_paid: number; memberships: number }[];
@@ -39,6 +40,7 @@ function normalizeReport(raw: any): Report {
     monthly_signups: Array.isArray(raw?.monthly_signups) ? raw.monthly_signups : [],
     monthly_churn: Array.isArray(raw?.monthly_churn) ? raw.monthly_churn : [],
     membership_breakdown: Array.isArray(raw?.membership_breakdown) ? raw.membership_breakdown : [],
+    revenue_by_currency: Array.isArray(raw?.revenue_by_currency) ? raw.revenue_by_currency : [],
     payment_statuses: raw?.payment_statuses && typeof raw.payment_statuses === "object" ? raw.payment_statuses : {},
     frequency_breakdown: Array.isArray(raw?.frequency_breakdown) ? raw.frequency_breakdown : [],
     top_clients: Array.isArray(raw?.top_clients) ? raw.top_clients : [],
@@ -168,6 +170,19 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
           {data.monthly_revenue.length > 0 ? <ReactECharts option={revenueChart} style={{ height: 280 }} /> : <Empty />}
         </div>
       </div>
+      {(data.revenue_by_currency || []).length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="card-header"><h3>Revenue by Currency</h3></div>
+          <div className="divide-y divide-gray-100">
+            {data.revenue_by_currency.map((row) => (
+              <div key={row.currency_code} className="px-5 py-2.5 flex items-center justify-between">
+                <span className="text-[13px] font-medium text-gray-900">{row.currency_code}</span>
+                <span className="text-[13px] text-gray-700 tabular-nums">${row.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span className="text-[11px] text-gray-400">({row.payments} payments)</span></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Alerts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -335,7 +350,7 @@ function MembershipsTab({ data }: { data: Report }) {
               <div key={i} className="px-5 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ background: COLOURS[i % COLOURS.length] }} />
-                  <span className="text-[13px] text-gray-900">{b.type_title}</span>
+                  <span className="text-[13px] text-gray-900">{b.type_title}{b.currency_code ? ` (${b.currency_code})` : ""}</span>
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{b.count} members</span>

@@ -174,6 +174,7 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 						*chargedMembershipID,
 						clientID,
 						input.Amount,
+						"AUD",
 						chargeDate,
 						gcID,
 					); perr != nil {
@@ -395,6 +396,7 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 			membershipID,
 			clientID,
 			input.Amount,
+			"AUD",
 			chargeDate,
 			gcPaymentID,
 		); perr != nil {
