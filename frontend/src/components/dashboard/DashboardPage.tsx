@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import api from "../../api/client";
 
@@ -166,11 +166,25 @@ export default function DashboardPage() {
     }],
   };
 
+  const outletContext = useOutletContext<{ showWizard?: boolean; openWizard?: () => void } | undefined>();
+
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Overview</h1>
       </div>
+
+      {outletContext?.showWizard && (
+        <div className="mb-5 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-[13px] font-medium text-indigo-900">You haven't finished setting up your account</p>
+            <p className="text-[12px] text-indigo-700/80 mt-0.5">Complete the setup wizard to get the most out of ClientRoll.</p>
+          </div>
+          <button onClick={outletContext.openWizard} className="btn-primary text-[12px] whitespace-nowrap ml-4">
+            Continue Setup
+          </button>
+        </div>
+      )}
 
       {loadError && (
         <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">

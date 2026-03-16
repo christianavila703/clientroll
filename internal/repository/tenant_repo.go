@@ -27,7 +27,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
-		       created_at, updated_at
+		       setup_completed_at, created_at, updated_at
 		FROM tenants WHERE id = $1`
 
 	var t models.Tenant
@@ -36,7 +36,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -53,7 +53,7 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
-		       created_at, updated_at
+		       setup_completed_at, created_at, updated_at
 		FROM tenants WHERE slug = $1`
 
 	var t models.Tenant
@@ -62,7 +62,7 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -81,7 +81,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
-		          created_at, updated_at`
+		          setup_completed_at, created_at, updated_at`
 
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, input.Name, input.Slug, input.Timezone).Scan(
@@ -89,7 +89,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating tenant: %w", err)
@@ -103,7 +103,7 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 		SELECT id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
-		       created_at, updated_at
+		       setup_completed_at, created_at, updated_at
 		FROM tenants ORDER BY created_at DESC`
 
 	rows, err := r.db.Pool.Query(ctx, query)
@@ -120,7 +120,7 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 			&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 			&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 			&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
-			&t.CreatedAt, &t.UpdatedAt,
+			&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning tenant: %w", err)
 		}
@@ -150,7 +150,7 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
-		          created_at, updated_at`
+		          setup_completed_at, created_at, updated_at`
 
 	var t models.Tenant
 	err := r.db.Pool.QueryRow(ctx, query, id,
@@ -162,10 +162,37 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("updating tenant: %w", err)
+	}
+	return &t, nil
+}
+
+// CompleteSetup marks a tenant's setup as completed.
+func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.Tenant, error) {
+	query := `
+		UPDATE tenants SET setup_completed_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND setup_completed_at IS NULL
+		RETURNING id, name, slug, timezone, is_active, logo_url, primary_colour, secondary_colour,
+		          default_thankyou_heading, default_thankyou_body,
+		          default_thankyou_image_url, default_thankyou_redirect_url,
+		          setup_completed_at, created_at, updated_at`
+
+	var t models.Tenant
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.IsActive,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
+		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
+		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
+		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return r.FindByID(ctx, id)
+		}
+		return nil, fmt.Errorf("completing tenant setup: %w", err)
 	}
 	return &t, nil
 }

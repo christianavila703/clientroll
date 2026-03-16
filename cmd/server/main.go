@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -231,29 +233,63 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Use(tenantMW.SetTenantContext)
 			r.Use(auditMW.LogWrites)
 
-			// Current user (works for both tenant and platform admin sessions)
-			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-				userID := middleware.GetUserID(r.Context())
-				tenantID := middleware.GetTenantID(r.Context())
-				role := middleware.GetRole(r.Context())
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, `{"user_id":"%s","tenant_id":"%s","role":"%s"}`, userID, tenantID, role)
-			})
+		// Current user (works for both tenant and platform admin sessions)
+		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+			userID := middleware.GetUserID(r.Context())
+			tenantIDStr := middleware.GetTenantID(r.Context())
+			role := middleware.GetRole(r.Context())
+
+			var setupCompletedAt *string
+			if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
+				if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
+					ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
+					setupCompletedAt = &ts
+				}
+			}
+
+			resp := map[string]interface{}{
+				"user_id":            userID,
+				"tenant_id":          tenantIDStr,
+				"role":               role,
+				"setup_completed_at": setupCompletedAt,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				log.Printf("Error encoding /me response: %v", err)
+			}
+		})
 
 			// Tenant-scoped routes (require tenant context)
 			r.Route("/tenant", func(r chi.Router) {
 				r.Use(tenantMW.RequireTenant)
 
-				// Current user
-				r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-					userID := middleware.GetUserID(r.Context())
-					tenantID := middleware.GetTenantID(r.Context())
-					role := middleware.GetRole(r.Context())
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprintf(w, `{"user_id":"%s","tenant_id":"%s","role":"%s"}`, userID, tenantID, role)
-				})
+			// Current user
+			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r.Context())
+				tenantIDStr := middleware.GetTenantID(r.Context())
+				role := middleware.GetRole(r.Context())
+
+				var setupCompletedAt *string
+				if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
+					if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
+						ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
+						setupCompletedAt = &ts
+					}
+				}
+
+				resp := map[string]interface{}{
+					"user_id":            userID,
+					"tenant_id":          tenantIDStr,
+					"role":               role,
+					"setup_completed_at": setupCompletedAt,
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					log.Printf("Error encoding /tenant/me response: %v", err)
+				}
+			})
 
 				// Settings (Phase 3)
 				settingsHandler.RegisterRoutes(r)

@@ -33,6 +33,7 @@ func (h *SettingsHandler) RegisterRoutes(r chi.Router) {
 	r.Put("/settings/agreement", h.UpdateAgreementSettings)
 	r.Get("/settings/tenant", h.GetTenantSettings)
 	r.Put("/settings/tenant", h.UpdateTenantSettings)
+	r.Post("/complete-setup", h.CompleteSetup)
 }
 
 // GetAgreementSettings returns the agreement settings (Section A).
@@ -170,6 +171,24 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		log.Printf("Error updating tenant settings: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update settings")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, tenant)
+}
+
+// CompleteSetup marks the tenant's onboarding wizard as done.
+func (h *SettingsHandler) CompleteSetup(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+
+	tenant, err := h.tenantRepo.CompleteSetup(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error completing tenant setup: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to complete setup")
 		return
 	}
 

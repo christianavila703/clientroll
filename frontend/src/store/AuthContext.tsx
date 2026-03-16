@@ -16,6 +16,7 @@ interface User {
   last_name?: string;
   name?: string;
   role: string;
+  setup_completed_at?: string | null;
 }
 
 interface AuthState {
@@ -23,6 +24,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   isPlatformAdmin: boolean;
+  needsSetup: boolean;
+  markSetupComplete: () => void;
   login: (email: string, password: string) => Promise<void>;
   platformLogin: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -41,12 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       api
         .me()
         .then((data: unknown) => {
-          const d = data as { user_id: string; tenant_id: string; role: string };
+          const d = data as { user_id: string; tenant_id: string; role: string; setup_completed_at?: string | null };
           setUser({
             id: d.user_id,
             tenant_id: d.tenant_id,
             email: "",
             role: d.role,
+            setup_completed_at: d.setup_completed_at ?? null,
           });
         })
         .catch(() => {
@@ -100,6 +104,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const markSetupComplete = useCallback(() => {
+    setUser((prev) => prev ? { ...prev, setup_completed_at: new Date().toISOString() } : prev);
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.logout();
@@ -118,6 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         isPlatformAdmin: user?.role === "platform_admin",
+        needsSetup: !!user && !user.setup_completed_at && user.role !== "platform_admin",
+        markSetupComplete,
         login,
         platformLogin,
         logout,

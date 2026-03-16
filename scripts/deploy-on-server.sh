@@ -58,6 +58,11 @@ elif [[ -f "$SOURCE_REPO/.env" ]]; then
   set +a
 fi
 
+if [[ -n "${DATABASE_URL:-}" ]] && [[ -f "$SOURCE_REPO/scripts/db-backup.sh" ]]; then
+  echo "Creating pre-deploy DB backup..."
+  SOURCE_REPO="$SOURCE_REPO" DEPLOY_PATH="$DEPLOY_PATH" "$SOURCE_REPO/scripts/db-backup.sh" || true
+fi
+
 echo "Running migrations..."
 if [[ -n "${DATABASE_URL:-}" ]]; then
   go run ./cmd/migrate up || true

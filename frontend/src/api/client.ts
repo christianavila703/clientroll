@@ -133,6 +133,8 @@ export const api = {
   getTenantSettings: () => request("/tenant/settings/tenant"),
   updateTenantSettings: (data: unknown) =>
     request("/tenant/settings/tenant", { method: "PUT", body: data }),
+  completeSetup: () =>
+    request("/tenant/complete-setup", { method: "POST" }),
 
   // Staff
   listStaff: () => request("/tenant/staff"),

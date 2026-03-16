@@ -8,21 +8,22 @@ import (
 
 // Tenant represents a tenant/organisation in the platform.
 type Tenant struct {
-	ID                         uuid.UUID `json:"id"`
-	Name                       string    `json:"name"`
-	Slug                       string    `json:"slug"`
-	Timezone                   string    `json:"timezone"`
-	IsActive                   bool      `json:"is_active"`
-	LogoURL                    *string   `json:"logo_url"`
-	PrimaryColour              string    `json:"primary_colour"`
-	SecondaryColour            *string   `json:"secondary_colour"`
-	SignupPriceDisplayMode     string    `json:"signup_price_display_mode"`
-	DefaultThankyouHeading     *string   `json:"default_thankyou_heading"`
-	DefaultThankyouBody        *string   `json:"default_thankyou_body"`
-	DefaultThankyouImageURL    *string   `json:"default_thankyou_image_url"`
-	DefaultThankyouRedirectURL *string   `json:"default_thankyou_redirect_url"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	ID                         uuid.UUID  `json:"id"`
+	Name                       string     `json:"name"`
+	Slug                       string     `json:"slug"`
+	Timezone                   string     `json:"timezone"`
+	IsActive                   bool       `json:"is_active"`
+	LogoURL                    *string    `json:"logo_url"`
+	PrimaryColour              string     `json:"primary_colour"`
+	SecondaryColour            *string    `json:"secondary_colour"`
+	SignupPriceDisplayMode     string     `json:"signup_price_display_mode"`
+	DefaultThankyouHeading     *string    `json:"default_thankyou_heading"`
+	DefaultThankyouBody        *string    `json:"default_thankyou_body"`
+	DefaultThankyouImageURL    *string    `json:"default_thankyou_image_url"`
+	DefaultThankyouRedirectURL *string    `json:"default_thankyou_redirect_url"`
+	SetupCompletedAt           *time.Time `json:"setup_completed_at"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 }
 
 // CreateTenantInput is the input for creating a new tenant.
