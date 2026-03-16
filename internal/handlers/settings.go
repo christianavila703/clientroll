@@ -64,6 +64,9 @@ type businessLookupResult struct {
 
 var abrCompressedItemRegex = regexp.MustCompile(`name="Results_NameItems\[\d+\]\.Compressed" type="hidden" value="([^"]+)"`)
 var abrCompanyNameHintRegex = regexp.MustCompile(`\b(PTY|LTD|LIMITED|PROPRIETARY|CORPORATION|CORP)\b`)
+var abrTableRowRegex = regexp.MustCompile(`(?is)<tr[^>]*>\s*<td[^>]*>\s*<a[^>]*href="/ABN/View\?abn=\d+"[^>]*>\s*([0-9 ]{11,20})\s*</a>.*?</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>`)
+var abrLocationPostcodeStateRegex = regexp.MustCompile(`\b(\d{4})\s+([A-Z]{2,3})\b`)
+var abrLocationStatePostcodeRegex = regexp.MustCompile(`\b([A-Z]{2,3})\s+(\d{4})\b`)
 
 // LookupBusiness searches ABN Lookup by company name and returns candidate ABN/ACN values.
 func (h *SettingsHandler) LookupBusiness(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +149,59 @@ func (h *SettingsHandler) LookupBusiness(w http.ResponseWriter, r *http.Request)
 			Postcode: postcode,
 			Score:    score,
 		})
+	}
+
+	// Fallback parser for ABR's current table-based result markup.
+	if len(results) == 0 {
+		rowMatches := abrTableRowRegex.FindAllStringSubmatch(string(body), 20)
+		results = make([]businessLookupResult, 0, len(rowMatches))
+		for _, row := range rowMatches {
+			if len(row) < 5 {
+				continue
+			}
+			abnDigits := strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' {
+					return r
+				}
+				return -1
+			}, strings.TrimSpace(html.UnescapeString(row[1])))
+			if len(abnDigits) != 11 {
+				continue
+			}
+			abn := fmt.Sprintf("%s %s %s %s", abnDigits[:2], abnDigits[2:5], abnDigits[5:8], abnDigits[8:11])
+			if _, exists := seenABN[abn]; exists {
+				continue
+			}
+			seenABN[abn] = struct{}{}
+
+			entityName := strings.TrimSpace(html.UnescapeString(row[2]))
+			nameType := strings.ToUpper(strings.TrimSpace(html.UnescapeString(row[3])))
+			location := strings.TrimSpace(html.UnescapeString(row[4]))
+
+			state, postcode := "", ""
+			if m := abrLocationPostcodeStateRegex.FindStringSubmatch(location); len(m) == 3 {
+				postcode = m[1]
+				state = m[2]
+			} else if m := abrLocationStatePostcodeRegex.FindStringSubmatch(location); len(m) == 3 {
+				state = m[1]
+				postcode = m[2]
+			}
+
+			acn := ""
+			if (abrCompanyNameHintRegex.MatchString(strings.ToUpper(entityName)) || strings.Contains(nameType, "ENTITY")) && len(abnDigits) == 11 {
+				acnDigits := abnDigits[2:]
+				acn = fmt.Sprintf("%s %s %s", acnDigits[:3], acnDigits[3:6], acnDigits[6:9])
+			}
+
+			results = append(results, businessLookupResult{
+				Name:     entityName,
+				ABN:      abn,
+				ACN:      acn,
+				State:    state,
+				Postcode: postcode,
+				Score:    0,
+			})
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
