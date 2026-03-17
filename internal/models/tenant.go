@@ -13,6 +13,7 @@ type Tenant struct {
 	Slug                       string     `json:"slug"`
 	Timezone                   string     `json:"timezone"`
 	EnabledCurrencies          []string   `json:"enabled_currencies"`
+	EnabledPaymentFrequencies  []string   `json:"enabled_payment_frequencies"`
 	IsActive                   bool       `json:"is_active"`
 	LogoURL                    *string    `json:"logo_url"`
 	PrimaryColour              string     `json:"primary_colour"`
@@ -40,6 +41,7 @@ type UpdateTenantInput struct {
 	Slug                       *string  `json:"slug,omitempty"`
 	Timezone                   *string  `json:"timezone,omitempty"`
 	EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
+	EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
 	IsActive                   *bool    `json:"is_active,omitempty"`
 	PrimaryColour              *string  `json:"primary_colour,omitempty"`
 	SecondaryColour            *string  `json:"secondary_colour,omitempty"`

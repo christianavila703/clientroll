@@ -14,6 +14,14 @@ import (
 )
 
 var isoCurrencyRegex = regexp.MustCompile(`^[A-Z]{3}$`)
+var allowedMembershipPaymentFrequencies = map[string]struct{}{
+	"upfront":         {},
+	"weekly":          {},
+	"fortnightly":     {},
+	"monthly":         {},
+	"quarterly":       {},
+	"custom_schedule": {},
+}
 
 func buildMembershipDisplayTitle(name, level string) string {
 	name = strings.TrimSpace(name)
@@ -164,20 +172,21 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Title           *string  `json:"title"`
-		MembershipName  *string  `json:"membership_name"`
-		MembershipLevel *string  `json:"membership_level"`
-		Slug            *string  `json:"slug"`
-		Summary         *string  `json:"summary"`
-		Description     *string  `json:"description"`
-		Inclusions      *string  `json:"inclusions"`
-		Benefits        *string  `json:"benefits"`
-		TopImageURL     *string  `json:"top_image_url"`
-		CurrencyCode    *string  `json:"currency_code"`
-		TotalValue      *float64 `json:"total_value"`
-		SortOrder       *int     `json:"sort_order"`
-		IsActive        *bool    `json:"is_active"`
-		IsMostPopular   *bool    `json:"is_most_popular"`
+		Title                     *string   `json:"title"`
+		MembershipName            *string   `json:"membership_name"`
+		MembershipLevel           *string   `json:"membership_level"`
+		Slug                      *string   `json:"slug"`
+		Summary                   *string   `json:"summary"`
+		Description               *string   `json:"description"`
+		Inclusions                *string   `json:"inclusions"`
+		Benefits                  *string   `json:"benefits"`
+		TopImageURL               *string   `json:"top_image_url"`
+		CurrencyCode              *string   `json:"currency_code"`
+		TotalValue                *float64  `json:"total_value"`
+		SortOrder                 *int      `json:"sort_order"`
+		EnabledPaymentFrequencies *[]string `json:"enabled_payment_frequencies"`
+		IsActive                  *bool     `json:"is_active"`
+		IsMostPopular             *bool     `json:"is_most_popular"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
@@ -244,6 +253,32 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		nextCurrency = &normalized
 	}
 
+	var nextEnabledPaymentFrequencies *[]string
+	if input.EnabledPaymentFrequencies != nil {
+		seen := map[string]struct{}{}
+		normalized := make([]string, 0, len(*input.EnabledPaymentFrequencies))
+		for _, raw := range *input.EnabledPaymentFrequencies {
+			frequency := strings.ToLower(strings.TrimSpace(raw))
+			if frequency == "" {
+				continue
+			}
+			if _, ok := allowedMembershipPaymentFrequencies[frequency]; !ok {
+				writeError(w, http.StatusBadRequest, "unsupported value in enabled_payment_frequencies")
+				return
+			}
+			if _, ok := seen[frequency]; ok {
+				continue
+			}
+			seen[frequency] = struct{}{}
+			normalized = append(normalized, frequency)
+		}
+		if len(normalized) == 0 {
+			writeError(w, http.StatusBadRequest, "enabled_payment_frequencies must include at least one frequency when provided")
+			return
+		}
+		nextEnabledPaymentFrequencies = &normalized
+	}
+
 	if _, err := h.mtRepo.UpdateBasics(
 		r.Context(),
 		mtID,
@@ -260,6 +295,7 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		nextCurrency,
 		input.TotalValue,
 		input.SortOrder,
+		nextEnabledPaymentFrequencies,
 	); err != nil {
 		log.Printf("Error updating membership basics: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update")

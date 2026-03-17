@@ -29,20 +29,21 @@ import (
 // SignupHandler handles the public membership signup flow.
 // These endpoints are accessible without authentication (resolved via tenant slug).
 type SignupHandler struct {
-	tenantRepo      *repository.TenantRepo
-	mtRepo          *repository.MembershipTypeRepo
-	bonusRepo       *repository.BonusRepo
-	termsRepo       *repository.TermsRepo
-	clientRepo      *repository.ClientRepo
-	memberRepo      *repository.MembershipRepo
-	settingsRepo    *repository.SettingsRepo
-	credRepo        *repository.TenantCredentialRepo
-	bankDetailsRepo *repository.BankDetailsRepo
-	agreementRepo   *repository.AgreementSnapshotRepo
-	encryptor       *database.Encryptor
-	emailSvc        email.Provider
-	dispatcher      *events.Dispatcher
-	cfg             *config.Config
+	tenantRepo        *repository.TenantRepo
+	mtRepo            *repository.MembershipTypeRepo
+	bonusRepo         *repository.BonusRepo
+	termsRepo         *repository.TermsRepo
+	clientRepo        *repository.ClientRepo
+	memberRepo        *repository.MembershipRepo
+	settingsRepo      *repository.SettingsRepo
+	credRepo          *repository.TenantCredentialRepo
+	bankDetailsRepo   *repository.BankDetailsRepo
+	agreementRepo     *repository.AgreementSnapshotRepo
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
+	encryptor         *database.Encryptor
+	emailSvc          email.Provider
+	dispatcher        *events.Dispatcher
+	cfg               *config.Config
 }
 
 // NewSignupHandler creates a new signup handler.
@@ -57,6 +58,7 @@ func NewSignupHandler(
 	credR *repository.TenantCredentialRepo,
 	bdr *repository.BankDetailsRepo,
 	agr *repository.AgreementSnapshotRepo,
+	etr *repository.TenantEmailTemplateRepo,
 	enc *database.Encryptor,
 	es email.Provider,
 	appCfg *config.Config,
@@ -64,7 +66,7 @@ func NewSignupHandler(
 	return &SignupHandler{
 		tenantRepo: tr, mtRepo: mt, bonusRepo: br, termsRepo: terms,
 		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
-		credRepo: credR, bankDetailsRepo: bdr, agreementRepo: agr,
+		credRepo: credR, bankDetailsRepo: bdr, agreementRepo: agr, emailTemplateRepo: etr,
 		encryptor: enc, emailSvc: es, cfg: appCfg,
 	}
 }
@@ -113,12 +115,13 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tenant": map[string]interface{}{
-			"name":                      tenant.Name,
-			"slug":                      tenant.Slug,
-			"logo_url":                  tenant.LogoURL,
-			"primary_colour":            tenant.PrimaryColour,
-			"secondary_colour":          tenant.SecondaryColour,
-			"signup_price_display_mode": tenant.SignupPriceDisplayMode,
+			"name":                        tenant.Name,
+			"slug":                        tenant.Slug,
+			"logo_url":                    tenant.LogoURL,
+			"primary_colour":              tenant.PrimaryColour,
+			"secondary_colour":            tenant.SecondaryColour,
+			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
+			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
 		},
 		"memberships":       active,
 		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
@@ -153,12 +156,13 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tenant": map[string]interface{}{
-			"name":                      tenant.Name,
-			"slug":                      tenant.Slug,
-			"logo_url":                  tenant.LogoURL,
-			"primary_colour":            tenant.PrimaryColour,
-			"secondary_colour":          tenant.SecondaryColour,
-			"signup_price_display_mode": tenant.SignupPriceDisplayMode,
+			"name":                        tenant.Name,
+			"slug":                        tenant.Slug,
+			"logo_url":                    tenant.LogoURL,
+			"primary_colour":              tenant.PrimaryColour,
+			"secondary_colour":            tenant.SecondaryColour,
+			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
+			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
 		},
 		"membership":        mt,
 		"terms":             terms,
@@ -485,11 +489,13 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		tenID := tenant.ID
 		payAmt := input.PaymentAmount
 		go func() {
+			templateKey := "membership_confirmation"
 			emailInput := email.MembershipConfirmationEmail(clientName, mtTitle, 0, payAmt, tenantName)
 			emailInput.To = clientEmail
 			if sendAgreement && snapshotID != "" && h.agreementRepo != nil {
 				snap, _ := h.agreementRepo.FindByMembership(context.Background(), memID, tenID)
 				if snap != nil && snap.AgreementHTML != nil {
+					templateKey = "membership_agreement"
 					emailInput = email.MembershipAgreementEmail(clientName, mtTitle, tenantName)
 					emailInput.To = clientEmail
 					pdfBytes, pdfErr := pdfpkg.HTMLToPDF(*snap.AgreementHTML)
@@ -503,6 +509,10 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 						}}
 					}
 				}
+			}
+			if !h.isEmailTemplateEnabled(context.Background(), tenID, templateKey) {
+				log.Printf("signup.email skipped tenant=%s template=%s membership=%s", tenID, templateKey, memID)
+				return
 			}
 			if _, err := h.emailSvc.Send(context.Background(), emailInput); err != nil {
 				log.Printf("Error sending membership confirmation to %s: %v", clientEmail, err)
@@ -609,6 +619,18 @@ func parseOptionalUUID(s string) *uuid.UUID {
 		return nil
 	}
 	return &id
+}
+
+func (h *SignupHandler) isEmailTemplateEnabled(ctx context.Context, tenantID uuid.UUID, templateKey string) bool {
+	if h.emailTemplateRepo == nil {
+		return true
+	}
+	enabled, err := h.emailTemplateRepo.IsEnabled(ctx, tenantID, templateKey)
+	if err != nil {
+		log.Printf("signup.email toggle check failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		return true
+	}
+	return enabled
 }
 
 func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID uuid.UUID) []string {

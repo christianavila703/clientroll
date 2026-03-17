@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -15,6 +17,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+var isoServiceCurrencyRegex = regexp.MustCompile(`^[A-Z]{3}$`)
+
+var allowedServiceCurrencies = map[string]struct{}{
+	"AUD": {},
+	"USD": {},
+	"EUR": {},
+	"GBP": {},
+	"NZD": {},
+	"CAD": {},
+	"SGD": {},
+}
 
 type ServiceHandler struct {
 	serviceRepo *repository.ServiceRepo
@@ -54,17 +68,30 @@ func (h *ServiceHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ServiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	var input struct {
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
-		Price       float64 `json:"price"`
-		TaxRate     float64 `json:"tax_rate"`
-		SortOrder   int     `json:"sort_order"`
+		Name         string  `json:"name"`
+		Description  *string `json:"description"`
+		Price        float64 `json:"price"`
+		CurrencyCode string  `json:"currency_code"`
+		TaxRate      float64 `json:"tax_rate"`
+		SortOrder    int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.Name == "" {
 		writeError(w, http.StatusBadRequest, "Name is required")
 		return
 	}
-	svc, err := h.serviceRepo.Create(r.Context(), tenantID, input.Name, input.Description, input.Price, input.TaxRate, input.SortOrder)
+	currencyCode := strings.ToUpper(strings.TrimSpace(input.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	if !isoServiceCurrencyRegex.MatchString(currencyCode) {
+		writeError(w, http.StatusBadRequest, "currency_code must be ISO-4217 uppercase")
+		return
+	}
+	if _, ok := allowedServiceCurrencies[currencyCode]; !ok {
+		writeError(w, http.StatusBadRequest, "unsupported currency_code")
+		return
+	}
+	svc, err := h.serviceRepo.Create(r.Context(), tenantID, input.Name, input.Description, input.Price, currencyCode, input.TaxRate, input.SortOrder)
 	if err != nil {
 		log.Printf("Error creating service: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create service")
@@ -77,18 +104,31 @@ func (h *ServiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	svcID, _ := uuid.Parse(chi.URLParam(r, "serviceID"))
 	var input struct {
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
-		Price       float64 `json:"price"`
-		TaxRate     float64 `json:"tax_rate"`
-		IsActive    bool    `json:"is_active"`
-		SortOrder   int     `json:"sort_order"`
+		Name         string  `json:"name"`
+		Description  *string `json:"description"`
+		Price        float64 `json:"price"`
+		CurrencyCode string  `json:"currency_code"`
+		TaxRate      float64 `json:"tax_rate"`
+		IsActive     bool    `json:"is_active"`
+		SortOrder    int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
-	svc, err := h.serviceRepo.Update(r.Context(), svcID, tenantID, input.Name, input.Description, input.Price, input.TaxRate, input.IsActive, input.SortOrder)
+	currencyCode := strings.ToUpper(strings.TrimSpace(input.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	if !isoServiceCurrencyRegex.MatchString(currencyCode) {
+		writeError(w, http.StatusBadRequest, "currency_code must be ISO-4217 uppercase")
+		return
+	}
+	if _, ok := allowedServiceCurrencies[currencyCode]; !ok {
+		writeError(w, http.StatusBadRequest, "unsupported currency_code")
+		return
+	}
+	svc, err := h.serviceRepo.Update(r.Context(), svcID, tenantID, input.Name, input.Description, input.Price, currencyCode, input.TaxRate, input.IsActive, input.SortOrder)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update service")
 		return

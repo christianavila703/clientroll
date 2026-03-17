@@ -24,6 +24,13 @@ func normalizeTenantEnabledCurrencies(codes []string) []string {
 	return codes
 }
 
+func normalizeTenantEnabledPaymentFrequencies(freqs []string) []string {
+	if len(freqs) == 0 {
+		return []string{"upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"}
+	}
+	return freqs
+}
+
 // NewTenantRepo creates a new tenant repository.
 func NewTenantRepo(db *database.Postgres) *TenantRepo {
 	return &TenantRepo{db: db}
@@ -32,7 +39,7 @@ func NewTenantRepo(db *database.Postgres) *TenantRepo {
 // FindByID returns a tenant by ID.
 func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -40,8 +47,9 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 
 	var t models.Tenant
 	var enabledRaw []byte
+	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -55,13 +63,15 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 	}
 	_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 	t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+	_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+	t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 	return &t, nil
 }
 
 // FindBySlug returns a tenant by slug.
 func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -69,8 +79,9 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 
 	var t models.Tenant
 	var enabledRaw []byte
+	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, slug).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -84,6 +95,8 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 	}
 	_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 	t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+	_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+	t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 	return &t, nil
 }
 
@@ -92,15 +105,16 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	query := `
 		INSERT INTO tenants (name, slug, timezone)
 		VALUES ($1, $2, $3)
-		RETURNING id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
 
 	var t models.Tenant
 	var enabledRaw []byte
+	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, input.Name, input.Slug, input.Timezone).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -111,13 +125,15 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	}
 	_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 	t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+	_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+	t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 	return &t, nil
 }
 
 // List returns all tenants (for platform admin).
 func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -133,8 +149,9 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	for rows.Next() {
 		var t models.Tenant
 		var enabledRaw []byte
+		var enabledPaymentFrequenciesRaw []byte
 		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
+			&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
 			&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 			&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 			&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -144,6 +161,8 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 		}
 		_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 		t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+		_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+		t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 		tenants = append(tenants, t)
 	}
 	return tenants, rows.Err()
@@ -169,16 +188,22 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 				WHEN $14::jsonb IS NULL THEN enabled_currencies
 				ELSE $14::jsonb
 			END,
+			enabled_payment_frequencies = CASE
+				WHEN $15::jsonb IS NULL THEN enabled_payment_frequencies
+				ELSE $15::jsonb
+			END,
 			updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
 
 	var t models.Tenant
 	var enabledRaw []byte
+	var enabledPaymentFrequenciesRaw []byte
 	var enabledJSON []byte
+	var enabledPaymentFrequenciesJSON []byte
 	if input.EnabledCurrencies != nil {
 		b, err := json.Marshal(input.EnabledCurrencies)
 		if err != nil {
@@ -186,12 +211,19 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 		}
 		enabledJSON = b
 	}
+	if input.EnabledPaymentFrequencies != nil {
+		b, err := json.Marshal(input.EnabledPaymentFrequencies)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling enabled payment frequencies: %w", err)
+		}
+		enabledPaymentFrequenciesJSON = b
+	}
 	err := r.db.Pool.QueryRow(ctx, query, id,
 		input.Name, input.Timezone, input.IsActive, input.PrimaryColour,
 		input.SecondaryColour, input.LogoURL,
-		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL, input.SignupPriceDisplayMode, input.Slug, enabledJSON,
+		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL, input.SignupPriceDisplayMode, input.Slug, enabledJSON, enabledPaymentFrequenciesJSON,
 	).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -202,6 +234,8 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 	}
 	_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 	t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+	_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+	t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 	return &t, nil
 }
 
@@ -210,16 +244,17 @@ func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.T
 	query := `
 		UPDATE tenants SET setup_completed_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND setup_completed_at IS NULL
-		RETURNING id, name, slug, timezone, enabled_currencies, is_active, logo_url, primary_colour, secondary_colour,
+		RETURNING id, name, slug, timezone, enabled_currencies, enabled_payment_frequencies, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
 
 	var t models.Tenant
 	var enabledRaw []byte
+	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &t.IsActive,
-		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.IsActive,
+		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
 		&t.SetupCompletedAt, &t.CreatedAt, &t.UpdatedAt,
@@ -232,5 +267,7 @@ func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.T
 	}
 	_ = json.Unmarshal(enabledRaw, &t.EnabledCurrencies)
 	t.EnabledCurrencies = normalizeTenantEnabledCurrencies(t.EnabledCurrencies)
+	_ = json.Unmarshal(enabledPaymentFrequenciesRaw, &t.EnabledPaymentFrequencies)
+	t.EnabledPaymentFrequencies = normalizeTenantEnabledPaymentFrequencies(t.EnabledPaymentFrequencies)
 	return &t, nil
 }

@@ -5,11 +5,12 @@ interface Props {
   membership: MembershipType;
   tenantSlug: string;
   priceDisplayMode: "total" | "weekly" | "monthly";
+  enabledPaymentFrequencies: string[];
   onSelectTerm: (term: TermOption) => void;
   onBack: () => void;
 }
 
-export default function MembershipDetail({ membership, tenantSlug, priceDisplayMode, onSelectTerm, onBack }: Props) {
+export default function MembershipDetail({ membership, tenantSlug, priceDisplayMode, enabledPaymentFrequencies, onSelectTerm, onBack }: Props) {
   const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
   const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
   const fallbackTitle = (mt: MembershipType) => mt.title;
@@ -42,8 +43,23 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
     .filter((v): v is number => typeof v === "number" && v > 0)
     .sort((a, b) => a - b)[0];
   const monthlyValue = monthlyFromTerm ?? monthlyFallback ?? null;
-  const showWeekly = priceDisplayMode === "weekly" && weeklyValue !== null;
-  const showMonthly = priceDisplayMode === "monthly" && monthlyValue !== null;
+  const effectiveEnabledFrequencies =
+    membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
+      ? membership.enabled_payment_frequencies
+      : enabledPaymentFrequencies;
+  const frequencySet = new Set((effectiveEnabledFrequencies || []).map((f) => String(f).toLowerCase()));
+  const resolvedDisplayMode: "total" | "weekly" | "monthly" =
+    priceDisplayMode === "weekly" && frequencySet.has("weekly") && weeklyValue !== null
+      ? "weekly"
+      : priceDisplayMode === "monthly" && frequencySet.has("monthly") && monthlyValue !== null
+      ? "monthly"
+      : frequencySet.has("monthly") && monthlyValue !== null
+      ? "monthly"
+      : frequencySet.has("weekly") && weeklyValue !== null
+      ? "weekly"
+      : "total";
+  const showWeekly = resolvedDisplayMode === "weekly";
+  const showMonthly = resolvedDisplayMode === "monthly";
 
   useEffect(() => {
     if (currentTerm) {
@@ -206,19 +222,19 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                       )}
                     </div>
                     <div className="mt-1 text-xl font-medium text-gray-900 tabular-nums">
-                      {priceDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months))
+                      {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months))
                         ? `$${formatMoney(term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || 0)}`
-                        : priceDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months))
+                        : resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months))
                         ? `$${formatMoney(term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || 0)}`
                         : `$${term.fee_total.toLocaleString()}`}
                     </div>
-                    {priceDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months)) && (
+                    {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months)) && (
                       <p className="text-[12px] text-gray-500 mt-1">per week</p>
                     )}
-                    {priceDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months)) && (
+                    {resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months)) && (
                       <p className="text-[12px] text-gray-500 mt-1">per month</p>
                     )}
-                    {priceDisplayMode === "total" && term.fee_monthly && (
+                    {resolvedDisplayMode === "total" && term.fee_monthly && (
                       <p className="text-[12px] text-gray-500 mt-1">
                         or ${term.fee_monthly.toLocaleString()}/month
                       </p>

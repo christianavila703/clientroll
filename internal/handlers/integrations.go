@@ -120,12 +120,23 @@ func (h *IntegrationsHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		if env != "live" && env != "sandbox" {
 			env = "sandbox"
 		}
+		existing, _ := h.credRepo.GetByProvider(r.Context(), tenantID, provider)
 		if input.APIKey == "" {
-			existing, _ := h.credRepo.GetByProvider(r.Context(), tenantID, provider)
 			if existing != nil && existing.APIKeyEncrypted != "" {
 				encKey = existing.APIKeyEncrypted
 			} else {
-				writeError(w, http.StatusBadRequest, "API key is required for GoCardless")
+				// Allow saving inactive state even before credentials are configured.
+				if input.IsActive {
+					writeError(w, http.StatusBadRequest, "API key is required to activate GoCardless")
+					return
+				}
+				encKey = ""
+			}
+		}
+		// If currently active but no key was ever configured, prevent impossible state.
+		if input.IsActive && encKey == "" {
+			if existing == nil || existing.APIKeyEncrypted == "" {
+				writeError(w, http.StatusBadRequest, "API key is required to activate GoCardless")
 				return
 			}
 		}

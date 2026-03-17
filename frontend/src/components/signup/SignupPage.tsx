@@ -12,6 +12,7 @@ interface Tenant {
   primary_colour: string;
   secondary_colour?: string;
   signup_price_display_mode?: "total" | "weekly" | "monthly";
+  enabled_payment_frequencies?: string[];
   payment_providers?: string[];
 }
 
@@ -27,6 +28,7 @@ interface MembershipType {
   inclusions?: string;
   benefits?: string;
   top_image_url?: string;
+  enabled_payment_frequencies?: string[];
   total_value: number;
   term_options: TermOption[];
 }
@@ -217,6 +219,7 @@ export default function SignupPage() {
             membership={selected}
             tenantSlug={tenantSlug || ""}
             priceDisplayMode={tenant?.signup_price_display_mode || "weekly"}
+            enabledPaymentFrequencies={tenant?.enabled_payment_frequencies || ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"]}
             onSelectTerm={(term) => { setSelectedTerm(term); setStep("form"); }}
             onBack={() => {
               if (membershipSlug) {

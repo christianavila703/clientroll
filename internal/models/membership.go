@@ -8,30 +8,32 @@ import (
 
 // MembershipType represents a type of membership offered by a tenant.
 type MembershipType struct {
-	ID                  uuid.UUID `json:"id"`
-	TenantID            uuid.UUID `json:"tenant_id"`
-	MembershipName      *string   `json:"membership_name"`
-	MembershipLevel     *string   `json:"membership_level"`
-	Title               string    `json:"title"`
-	Slug                string    `json:"slug"`
-	Summary             *string   `json:"summary"`
-	Description         *string   `json:"description"`
-	Inclusions          *string   `json:"inclusions"`
-	Benefits            *string   `json:"benefits"`
-	TopImageURL         *string   `json:"top_image_url"`
-	CurrencyCode        string    `json:"currency_code"`
-	IsActive            bool      `json:"is_active"`
-	IsMostPopular       bool      `json:"is_most_popular"`
-	IntrinsicValue      float64   `json:"intrinsic_value"`
-	TotalValue          float64   `json:"total_value"`
-	SortOrder           int       `json:"sort_order"`
-	UseCustomThankyou   bool      `json:"use_custom_thankyou"`
-	ThankyouHeading     *string   `json:"thankyou_heading"`
-	ThankyouBody        *string   `json:"thankyou_body"`
-	ThankyouImageURL    *string   `json:"thankyou_image_url"`
-	ThankyouRedirectURL *string   `json:"thankyou_redirect_url"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	TenantID        uuid.UUID `json:"tenant_id"`
+	MembershipName  *string   `json:"membership_name"`
+	MembershipLevel *string   `json:"membership_level"`
+	Title           string    `json:"title"`
+	Slug            string    `json:"slug"`
+	Summary         *string   `json:"summary"`
+	Description     *string   `json:"description"`
+	Inclusions      *string   `json:"inclusions"`
+	Benefits        *string   `json:"benefits"`
+	TopImageURL     *string   `json:"top_image_url"`
+	CurrencyCode    string    `json:"currency_code"`
+	// If set, this overrides tenant-level enabled payment frequencies for this membership.
+	EnabledPaymentFrequencies []string  `json:"enabled_payment_frequencies,omitempty"`
+	IsActive                  bool      `json:"is_active"`
+	IsMostPopular             bool      `json:"is_most_popular"`
+	IntrinsicValue            float64   `json:"intrinsic_value"`
+	TotalValue                float64   `json:"total_value"`
+	SortOrder                 int       `json:"sort_order"`
+	UseCustomThankyou         bool      `json:"use_custom_thankyou"`
+	ThankyouHeading           *string   `json:"thankyou_heading"`
+	ThankyouBody              *string   `json:"thankyou_body"`
+	ThankyouImageURL          *string   `json:"thankyou_image_url"`
+	ThankyouRedirectURL       *string   `json:"thankyou_redirect_url"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 	// Joined data
 	TermOptions []TermOption `json:"term_options,omitempty"`
 }

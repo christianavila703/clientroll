@@ -6,6 +6,7 @@ interface MembershipType {
   id: string; title: string; membership_name?: string; membership_level?: string; slug: string;
   summary?: string; description?: string; inclusions?: string; benefits?: string;
   currency_code?: string;
+  enabled_payment_frequencies?: string[];
   top_image_url?: string; is_active: boolean;
   is_most_popular?: boolean;
   total_value: number; sort_order: number; term_options?: TermOption[];
@@ -23,6 +24,14 @@ interface TermOption {
 }
 interface Bonus { id: string; title: string; value: number; image_url?: string; }
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
+const AVAILABLE_PAYMENT_FREQUENCIES = [
+  { key: "upfront", label: "Upfront" },
+  { key: "weekly", label: "Weekly" },
+  { key: "fortnightly", label: "Fortnightly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+  { key: "custom_schedule", label: "Custom instalments" },
+];
 
 const membershipDisplayTitle = (mt: Pick<MembershipType, "membership_name" | "membership_level" | "title">) => {
   const name = (mt.membership_name || "").trim();
@@ -42,7 +51,13 @@ export default function MembershipTypeDetail() {
   const [loading, setLoading] = useState(true);
   const [updatingPopular, setUpdatingPopular] = useState(false);
   const [savingIdentity, setSavingIdentity] = useState(false);
-  const [identityForm, setIdentityForm] = useState({ membership_name: "", membership_level: "", currency_code: "AUD" });
+  const [identityForm, setIdentityForm] = useState({
+    membership_name: "",
+    membership_level: "",
+    currency_code: "AUD",
+    use_tenant_default_payment_frequencies: true,
+    enabled_payment_frequencies: ["weekly"] as string[],
+  });
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
   const [savingContent, setSavingContent] = useState(false);
   const [contentForm, setContentForm] = useState({ summary: "", description: "", inclusions: "", benefits: "" });
@@ -65,6 +80,10 @@ export default function MembershipTypeDetail() {
         membership_name: mtTyped.membership_name || "",
         membership_level: mtTyped.membership_level || "",
         currency_code: mtTyped.currency_code || "AUD",
+        use_tenant_default_payment_frequencies: !(mtTyped.enabled_payment_frequencies && mtTyped.enabled_payment_frequencies.length > 0),
+        enabled_payment_frequencies: (mtTyped.enabled_payment_frequencies && mtTyped.enabled_payment_frequencies.length > 0)
+          ? mtTyped.enabled_payment_frequencies
+          : ["weekly"],
       });
       setContentForm({
         summary: (mtTyped as any).summary || "",
@@ -128,6 +147,9 @@ export default function MembershipTypeDetail() {
         membership_name: identityForm.membership_name.trim(),
         membership_level: identityForm.membership_level.trim(),
         currency_code: identityForm.currency_code || "AUD",
+        enabled_payment_frequencies: identityForm.use_tenant_default_payment_frequencies
+          ? null
+          : identityForm.enabled_payment_frequencies,
       });
       await load();
     } finally {
@@ -210,6 +232,48 @@ export default function MembershipTypeDetail() {
                 {enabledCurrencies.map((code) => <option key={code} value={code}>{code}</option>)}
               </select>
             </div>
+          </div>
+          <div className="mt-4">
+            <label className="flex items-center gap-2 text-[13px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={identityForm.use_tenant_default_payment_frequencies}
+                onChange={(e) =>
+                  setIdentityForm((prev) => ({
+                    ...prev,
+                    use_tenant_default_payment_frequencies: e.target.checked,
+                  }))
+                }
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+              />
+              Use tenant default signup payment frequencies
+            </label>
+            {!identityForm.use_tenant_default_payment_frequencies && (
+              <div className="mt-2">
+                <label className="block text-[12px] font-medium text-gray-700 mb-1">Per-membership frequency override</label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_PAYMENT_FREQUENCIES.map((item) => (
+                    <label key={item.key} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[12px] text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={identityForm.enabled_payment_frequencies.includes(item.key)}
+                        onChange={(e) => {
+                          setIdentityForm((prev) => {
+                            const next = new Set(prev.enabled_payment_frequencies);
+                            if (e.target.checked) next.add(item.key);
+                            else next.delete(item.key);
+                            if (next.size === 0) next.add("weekly");
+                            return { ...prev, enabled_payment_frequencies: Array.from(next) };
+                          });
+                        }}
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+                      />
+                      {item.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="mt-3 flex justify-end">
             <button type="button" onClick={saveIdentity} disabled={savingIdentity} className="btn-primary text-[12px]">

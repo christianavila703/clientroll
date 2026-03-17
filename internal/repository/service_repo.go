@@ -12,16 +12,17 @@ import (
 )
 
 type Service struct {
-	ID          uuid.UUID  `json:"id"`
-	TenantID    uuid.UUID  `json:"tenant_id"`
-	Name        string     `json:"name"`
-	Description *string    `json:"description"`
-	Price       float64    `json:"price"`
-	TaxRate     float64    `json:"tax_rate"`
-	IsActive    bool       `json:"is_active"`
-	SortOrder   int        `json:"sort_order"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	TenantID     uuid.UUID `json:"tenant_id"`
+	Name         string    `json:"name"`
+	Description  *string   `json:"description"`
+	Price        float64   `json:"price"`
+	CurrencyCode string    `json:"currency_code"`
+	TaxRate      float64   `json:"tax_rate"`
+	IsActive     bool      `json:"is_active"`
+	SortOrder    int       `json:"sort_order"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type ServiceCharge struct {
@@ -49,7 +50,7 @@ func NewServiceRepo(db *database.Postgres) *ServiceRepo {
 
 func (r *ServiceRepo) List(ctx context.Context, tenantID uuid.UUID) ([]Service, error) {
 	rows, err := r.db.Pool.Query(ctx,
-		`SELECT id, tenant_id, name, description, price, tax_rate, is_active, sort_order, created_at, updated_at
+		`SELECT id, tenant_id, name, description, price, currency_code, tax_rate, is_active, sort_order, created_at, updated_at
 		 FROM services WHERE tenant_id=$1 ORDER BY sort_order, name`, tenantID)
 	if err != nil {
 		return nil, err
@@ -58,7 +59,7 @@ func (r *ServiceRepo) List(ctx context.Context, tenantID uuid.UUID) ([]Service, 
 	var items []Service
 	for rows.Next() {
 		var s Service
-		if err := rows.Scan(&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price,
+		if err := rows.Scan(&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price, &s.CurrencyCode,
 			&s.TaxRate, &s.IsActive, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -67,14 +68,14 @@ func (r *ServiceRepo) List(ctx context.Context, tenantID uuid.UUID) ([]Service, 
 	return items, rows.Err()
 }
 
-func (r *ServiceRepo) Create(ctx context.Context, tenantID uuid.UUID, name string, description *string, price, taxRate float64, sortOrder int) (*Service, error) {
+func (r *ServiceRepo) Create(ctx context.Context, tenantID uuid.UUID, name string, description *string, price float64, currencyCode string, taxRate float64, sortOrder int) (*Service, error) {
 	var s Service
 	err := r.db.Pool.QueryRow(ctx,
-		`INSERT INTO services (tenant_id, name, description, price, tax_rate, sort_order)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, tenant_id, name, description, price, tax_rate, is_active, sort_order, created_at, updated_at`,
-		tenantID, name, description, price, taxRate, sortOrder).Scan(
-		&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price,
+		`INSERT INTO services (tenant_id, name, description, price, currency_code, tax_rate, sort_order)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING id, tenant_id, name, description, price, currency_code, tax_rate, is_active, sort_order, created_at, updated_at`,
+		tenantID, name, description, price, currencyCode, taxRate, sortOrder).Scan(
+		&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price, &s.CurrencyCode,
 		&s.TaxRate, &s.IsActive, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating service: %w", err)
@@ -82,14 +83,14 @@ func (r *ServiceRepo) Create(ctx context.Context, tenantID uuid.UUID, name strin
 	return &s, nil
 }
 
-func (r *ServiceRepo) Update(ctx context.Context, id, tenantID uuid.UUID, name string, description *string, price, taxRate float64, isActive bool, sortOrder int) (*Service, error) {
+func (r *ServiceRepo) Update(ctx context.Context, id, tenantID uuid.UUID, name string, description *string, price float64, currencyCode string, taxRate float64, isActive bool, sortOrder int) (*Service, error) {
 	var s Service
 	err := r.db.Pool.QueryRow(ctx,
-		`UPDATE services SET name=$3, description=$4, price=$5, tax_rate=$6, is_active=$7, sort_order=$8, updated_at=NOW()
+		`UPDATE services SET name=$3, description=$4, price=$5, currency_code=$6, tax_rate=$7, is_active=$8, sort_order=$9, updated_at=NOW()
 		 WHERE id=$1 AND tenant_id=$2
-		 RETURNING id, tenant_id, name, description, price, tax_rate, is_active, sort_order, created_at, updated_at`,
-		id, tenantID, name, description, price, taxRate, isActive, sortOrder).Scan(
-		&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price,
+		 RETURNING id, tenant_id, name, description, price, currency_code, tax_rate, is_active, sort_order, created_at, updated_at`,
+		id, tenantID, name, description, price, currencyCode, taxRate, isActive, sortOrder).Scan(
+		&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price, &s.CurrencyCode,
 		&s.TaxRate, &s.IsActive, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("updating service: %w", err)

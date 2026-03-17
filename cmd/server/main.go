@@ -135,6 +135,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	tenantSubRepo := repository.NewTenantSubscriptionRepo(db)
 	tenantUsageRepo := repository.NewTenantUsageRepo(db)
 	tenantInvoiceRepo := repository.NewTenantInvoiceRepo(db)
+	tenantEmailTemplateRepo := repository.NewTenantEmailTemplateRepo(db)
 
 	// Email service
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
@@ -144,7 +145,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	platformHandler := handlers.NewPlatformHandler(tenantRepo, userRepo)
 	platformBillingHandler := handlers.NewPlatformBillingHandler(cfg.AppURL, enc, platformBillingConfigRepo, tenantRepo, tenantSubRepo, tenantUsageRepo, tenantInvoiceRepo)
 	platformBillingWebhookHandler := handlers.NewPlatformBillingWebhookHandler(enc, platformBillingConfigRepo, tenantSubRepo, tenantInvoiceRepo)
-	settingsHandler := handlers.NewSettingsHandler(settingsRepo, tenantRepo)
+	settingsHandler := handlers.NewSettingsHandler(settingsRepo, tenantRepo, tenantEmailTemplateRepo)
 	staffHandler := handlers.NewStaffHandler(userRepo)
 	bonusHandler := handlers.NewBonusHandler(bonusRepo)
 	mtHandler := handlers.NewMembershipTypeHandler(mtRepo, termsRepo)
@@ -154,7 +155,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	_ = bankDetailsRepo // used later
 	clientHandler := handlers.NewClientHandler(clientRepo, memberRepo, mtRepo, credRepo, redirectFlowRepo, enc, emailSvc)
 	agreementRepo := repository.NewAgreementSnapshotRepo(db)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, bankDetailsRepo, agreementRepo, enc, emailSvc, cfg)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, bankDetailsRepo, agreementRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
 	agreementHandler := handlers.NewAgreementHandler(agreementRepo)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
@@ -164,7 +165,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
-	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, clientRepo, enc, emailSvc)
+	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
@@ -233,38 +234,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 			r.Use(tenantMW.SetTenantContext)
 			r.Use(auditMW.LogWrites)
 
-		// Current user (works for both tenant and platform admin sessions)
-		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r.Context())
-			tenantIDStr := middleware.GetTenantID(r.Context())
-			role := middleware.GetRole(r.Context())
-
-			var setupCompletedAt *string
-			if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
-				if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
-					ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
-					setupCompletedAt = &ts
-				}
-			}
-
-			resp := map[string]interface{}{
-				"user_id":            userID,
-				"tenant_id":          tenantIDStr,
-				"role":               role,
-				"setup_completed_at": setupCompletedAt,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				log.Printf("Error encoding /me response: %v", err)
-			}
-		})
-
-			// Tenant-scoped routes (require tenant context)
-			r.Route("/tenant", func(r chi.Router) {
-				r.Use(tenantMW.RequireTenant)
-
-			// Current user
+			// Current user (works for both tenant and platform admin sessions)
 			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
 				userID := middleware.GetUserID(r.Context())
 				tenantIDStr := middleware.GetTenantID(r.Context())
@@ -287,9 +257,40 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				if err := json.NewEncoder(w).Encode(resp); err != nil {
-					log.Printf("Error encoding /tenant/me response: %v", err)
+					log.Printf("Error encoding /me response: %v", err)
 				}
 			})
+
+			// Tenant-scoped routes (require tenant context)
+			r.Route("/tenant", func(r chi.Router) {
+				r.Use(tenantMW.RequireTenant)
+
+				// Current user
+				r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+					userID := middleware.GetUserID(r.Context())
+					tenantIDStr := middleware.GetTenantID(r.Context())
+					role := middleware.GetRole(r.Context())
+
+					var setupCompletedAt *string
+					if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
+						if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
+							ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
+							setupCompletedAt = &ts
+						}
+					}
+
+					resp := map[string]interface{}{
+						"user_id":            userID,
+						"tenant_id":          tenantIDStr,
+						"role":               role,
+						"setup_completed_at": setupCompletedAt,
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					if err := json.NewEncoder(w).Encode(resp); err != nil {
+						log.Printf("Error encoding /tenant/me response: %v", err)
+					}
+				})
 
 				// Settings (Phase 3)
 				settingsHandler.RegisterRoutes(r)

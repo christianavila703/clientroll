@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
 import type { Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
@@ -14,6 +14,58 @@ interface Props {
 }
 
 type FormStep = "member" | "payment" | "bank" | "terms" | "sign";
+const DEFAULT_ENABLED_PAYMENT_FREQUENCIES = ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"];
+
+function positiveNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function fallbackWeeklyAmount(termOption: TermOption): number | null {
+  const total = positiveNumber(termOption.fee_total);
+  const months = Number(termOption.duration_months || 0);
+  if (!total || !months) return null;
+  const weeks = (months * 52) / 12;
+  if (!weeks) return null;
+  return total / weeks;
+}
+
+function fallbackFortnightlyAmount(termOption: TermOption): number | null {
+  const weekly = fallbackWeeklyAmount(termOption);
+  if (!weekly) return null;
+  return weekly * 2;
+}
+
+function fallbackMonthlyAmount(termOption: TermOption): number | null {
+  const total = positiveNumber(termOption.fee_total);
+  const months = Number(termOption.duration_months || 0);
+  if (!total || !months) return null;
+  return total / months;
+}
+
+function fallbackQuarterlyAmount(termOption: TermOption): number | null {
+  const total = positiveNumber(termOption.fee_total);
+  const months = Number(termOption.duration_months || 0);
+  if (!total || months < 3) return null;
+  return total / (months / 3);
+}
+
+function resolveFrequencyAmount(termOption: TermOption, frequency: string): number {
+  switch (frequency) {
+    case "weekly":
+      return positiveNumber(termOption.fee_weekly) || fallbackWeeklyAmount(termOption) || termOption.fee_total;
+    case "fortnightly":
+      return positiveNumber(termOption.fee_fortnightly) || fallbackFortnightlyAmount(termOption) || termOption.fee_total;
+    case "monthly":
+      return positiveNumber(termOption.fee_monthly) || fallbackMonthlyAmount(termOption) || termOption.fee_total;
+    case "quarterly":
+      return positiveNumber((termOption as any).fee_quarterly) || fallbackQuarterlyAmount(termOption) || termOption.fee_total;
+    case "upfront":
+      return termOption.fee_total;
+    default:
+      return termOption.fee_total;
+  }
+}
 
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], onComplete, onBack }: Props) {
   const supportsStripe = paymentProviders.includes("stripe");
@@ -40,6 +92,11 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const [memberSignature, setMemberSignature] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState<Set<string>>(new Set());
   const [sendAgreementEmail, setSendAgreementEmail] = useState(true);
+  const effectiveEnabledPaymentFrequencies =
+    membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
+      ? membership.enabled_payment_frequencies
+      : (tenant.enabled_payment_frequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
+  const effectiveFrequencySet = new Set((effectiveEnabledPaymentFrequencies || []).map((f) => String(f).toLowerCase()));
 
   const usesBankStep = payment.payment_method !== "card";
   const hasTerms = terms.length > 0;
@@ -65,7 +122,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       const isCustomSchedule = payment.payment_frequency === "custom_schedule";
       const paymentAmount = isCustomSchedule
         ? (termOption.custom_schedule_amount || termOption.fee_total)
-        : (termOption[`fee_${payment.payment_frequency}` as keyof TermOption] || termOption.fee_total);
+        : resolveFrequencyAmount(termOption, payment.payment_frequency);
       const res = await fetch(`/api/signup/${tenantSlug}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,11 +217,23 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               const toWeekly = (total: number, months: number) => months ? total / ((months * 52) / 12) : null;
               const toMonthly = (total: number, months: number) => months ? total / months : null;
               const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-              if (mode === "weekly") {
+              const weeklyValue = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
+              const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
+              const resolvedMode =
+                mode === "weekly" && effectiveFrequencySet.has("weekly") && weeklyValue
+                  ? "weekly"
+                  : mode === "monthly" && effectiveFrequencySet.has("monthly") && monthlyValue
+                  ? "monthly"
+                  : effectiveFrequencySet.has("monthly") && monthlyValue
+                  ? "monthly"
+                  : effectiveFrequencySet.has("weekly") && weeklyValue
+                  ? "weekly"
+                  : "total";
+              if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
                 if (w) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
               }
-              if (mode === "monthly") {
+              if (resolvedMode === "monthly") {
                 const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
                 if (m) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
               }
@@ -195,7 +264,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="px-8 py-8 sm:px-10 sm:py-10">
           {formStep === "member" && <MemberSection data={member} onChange={setMember} onNext={() => setFormStep("payment")} />}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
           {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
@@ -288,18 +357,26 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
 }
 
 /* ─── Section B: Payment Details ─── */
-function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; onNext: () => void; onBack: () => void }) {
+function PaymentSection({ data, onChange, termOption, paymentProviders, enabledPaymentFrequencies, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
   const supportsGoCardless = paymentProviders.includes("gocardless");
 
+  const weeklyAmount = positiveNumber(termOption.fee_weekly) || fallbackWeeklyAmount(termOption);
+  const fortnightlyAmount = positiveNumber(termOption.fee_fortnightly) || fallbackFortnightlyAmount(termOption);
+  const monthlyAmount = positiveNumber(termOption.fee_monthly) || fallbackMonthlyAmount(termOption);
+  const quarterlyAmount = positiveNumber((termOption as any).fee_quarterly) || fallbackQuarterlyAmount(termOption);
+  const enabledSet = new Set(
+    (enabledPaymentFrequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES).map((f) => String(f).toLowerCase())
+  );
+
   const frequencies = [
-    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termOption.allow_upfront, amount: termOption.fee_total },
-    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: !!termOption.fee_weekly, amount: termOption.fee_weekly },
-    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: !!termOption.fee_fortnightly, amount: termOption.fee_fortnightly },
-    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: !!termOption.fee_monthly, amount: termOption.fee_monthly },
-    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: !!(termOption as any).fee_quarterly, amount: (termOption as any).fee_quarterly },
+    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termOption.allow_upfront, amount: positiveNumber(termOption.fee_total) },
+    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: !!weeklyAmount, amount: weeklyAmount },
+    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: !!fortnightlyAmount, amount: fortnightlyAmount },
+    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: !!monthlyAmount, amount: monthlyAmount },
+    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: !!quarterlyAmount, amount: quarterlyAmount },
     {
       value: "custom_schedule",
       label: termOption.custom_schedule_label || `${termOption.custom_schedule_num_payments || 0} instalments`,
@@ -310,7 +387,14 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, onNext, 
       enabled: !!termOption.custom_schedule_enabled && !!termOption.custom_schedule_amount,
       amount: termOption.custom_schedule_amount,
     },
-  ].filter((f) => f.enabled);
+  ].filter((f) => f.enabled && enabledSet.has(f.value));
+
+  useEffect(() => {
+    if (!frequencies.some((f) => f.value === data.payment_frequency) && frequencies[0]) {
+      set("payment_frequency", frequencies[0].value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.payment_frequency, frequencies.map((f) => f.value).join("|")]);
 
   return (
     <div>

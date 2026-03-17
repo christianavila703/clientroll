@@ -60,30 +60,32 @@ func writeProviderError(w http.ResponseWriter, err error) {
 
 // GoCardlessHandler handles GoCardless Connect OAuth, webhooks, and payment creation.
 type GoCardlessHandler struct {
-	cfg         *config.Config
-	credRepo    *repository.TenantCredentialRepo
-	eventRepo   *repository.InboundWebhookEventRepo
-	paymentRepo *repository.PaymentRepo
-	disputeRepo *repository.PaymentDisputeRepo
-	memberRepo  *repository.MembershipRepo
-	clientRepo  *repository.ClientRepo
-	encryptor   *database.Encryptor
-	emailSvc    email.Provider
-	dispatcher  *events.Dispatcher
+	cfg               *config.Config
+	credRepo          *repository.TenantCredentialRepo
+	eventRepo         *repository.InboundWebhookEventRepo
+	paymentRepo       *repository.PaymentRepo
+	disputeRepo       *repository.PaymentDisputeRepo
+	memberRepo        *repository.MembershipRepo
+	clientRepo        *repository.ClientRepo
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
+	encryptor         *database.Encryptor
+	emailSvc          email.Provider
+	dispatcher        *events.Dispatcher
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
-func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
+func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, etr *repository.TenantEmailTemplateRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
 	return &GoCardlessHandler{
-		cfg:         cfg,
-		credRepo:    cr,
-		eventRepo:   eventRepo,
-		paymentRepo: paymentRepo,
-		disputeRepo: disputeRepo,
-		memberRepo:  memberRepo,
-		clientRepo:  clientRepo,
-		encryptor:   enc,
-		emailSvc:    es,
+		cfg:               cfg,
+		credRepo:          cr,
+		eventRepo:         eventRepo,
+		paymentRepo:       paymentRepo,
+		disputeRepo:       disputeRepo,
+		memberRepo:        memberRepo,
+		clientRepo:        clientRepo,
+		emailTemplateRepo: etr,
+		encryptor:         enc,
+		emailSvc:          es,
 	}
 }
 
@@ -828,12 +830,18 @@ func (h *GoCardlessHandler) sendPaymentEmail(ctx context.Context, tenantID, clie
 	go func() {
 		switch status {
 		case "succeeded", "confirmed", "paid_out":
+			if !h.isEmailTemplateEnabled(context.Background(), tenantID, "payment_receipt") {
+				return
+			}
 			input := email.PaymentReceiptEmail(client.Name, amount, "Membership", time.Now().Format("2 January 2006"), "")
 			input.To = *client.Email
 			if _, err := h.emailSvc.Send(context.Background(), input); err != nil {
 				log.Printf("Error sending payment receipt to %s: %v", *client.Email, err)
 			}
 		case "failed":
+			if !h.isEmailTemplateEnabled(context.Background(), tenantID, "payment_failed") {
+				return
+			}
 			input := email.PaymentFailedEmail(client.Name, amount, "Membership", failureReason, "")
 			input.To = *client.Email
 			if _, err := h.emailSvc.Send(context.Background(), input); err != nil {
@@ -841,6 +849,18 @@ func (h *GoCardlessHandler) sendPaymentEmail(ctx context.Context, tenantID, clie
 			}
 		}
 	}()
+}
+
+func (h *GoCardlessHandler) isEmailTemplateEnabled(ctx context.Context, tenantID uuid.UUID, templateKey string) bool {
+	if h.emailTemplateRepo == nil {
+		return true
+	}
+	enabled, err := h.emailTemplateRepo.IsEnabled(ctx, tenantID, templateKey)
+	if err != nil {
+		log.Printf("gocardless.email toggle check failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		return true
+	}
+	return enabled
 }
 
 // CreatePayment creates a payment in GoCardless and in the DB (production flow).

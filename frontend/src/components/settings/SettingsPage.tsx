@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import api, { ApiError } from "../../api/client";
 import ImageUpload from "../common/ImageUpload";
+import { extractBrandColorsFromImage } from "../../utils/brandColors";
 
 interface AgreementData {
   company_name?: string;
@@ -16,6 +17,14 @@ interface AgreementData {
 }
 
 const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
+const AVAILABLE_PAYMENT_FREQUENCIES = [
+  { key: "upfront", label: "Upfront" },
+  { key: "weekly", label: "Weekly" },
+  { key: "fortnightly", label: "Fortnightly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+  { key: "custom_schedule", label: "Custom instalments" },
+];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">("agreement");
@@ -181,6 +190,7 @@ function TenantSettings() {
     default_thankyou_image_url: string;
     default_thankyou_redirect_url: string;
     enabled_currencies: string[];
+    enabled_payment_frequencies: string[];
   }>({
     slug: "",
     timezone: "Australia/Brisbane",
@@ -193,9 +203,12 @@ function TenantSettings() {
     default_thankyou_image_url: "",
     default_thankyou_redirect_url: "",
     enabled_currencies: ["AUD"],
+    enabled_payment_frequencies: ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [detectingColors, setDetectingColors] = useState(false);
+  const [colorMessage, setColorMessage] = useState("");
 
   useEffect(() => {
     api.getTenantSettings().then((res) => {
@@ -214,6 +227,9 @@ function TenantSettings() {
         enabled_currencies: Array.isArray(t.enabled_currencies)
           ? Array.from(new Set((t.enabled_currencies as unknown[]).map((c) => String(c).toUpperCase()))).filter(Boolean)
           : ["AUD"],
+        enabled_payment_frequencies: Array.isArray(t.enabled_payment_frequencies)
+          ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
+          : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
       });
     }).catch((e) => { console.error(e); setMessage("Failed to load organisation settings"); });
   }, []);
@@ -248,6 +264,40 @@ function TenantSettings() {
       return { ...prev, enabled_currencies: Array.from(next) };
     });
   };
+  const togglePaymentFrequency = (frequency: string, checked: boolean) => {
+    setData((prev) => {
+      const next = new Set(prev.enabled_payment_frequencies || []);
+      if (checked) {
+        next.add(frequency);
+      } else {
+        next.delete(frequency);
+      }
+      if (next.size === 0) next.add("weekly");
+      return { ...prev, enabled_payment_frequencies: Array.from(next) };
+    });
+  };
+  const detectLogoColors = async (logoUrl: string) => {
+    if (!logoUrl) return;
+    setDetectingColors(true);
+    setColorMessage("");
+    try {
+      const colors = await extractBrandColorsFromImage(logoUrl);
+      if (!colors) {
+        setColorMessage("Couldn't detect colors from logo");
+        return;
+      }
+      setData((prev) => ({
+        ...prev,
+        primary_colour: colors.primary,
+        secondary_colour: colors.secondary,
+      }));
+      setColorMessage(`Colors detected: ${colors.primary} and ${colors.secondary}`);
+    } catch {
+      setColorMessage("Couldn't detect colors from logo");
+    } finally {
+      setDetectingColors(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -262,10 +312,18 @@ function TenantSettings() {
           <ImageUpload
             value={data.logo_url || ""}
             entityType="tenant"
-            onChange={(url) => setData({ ...data, logo_url: url })}
+            onChange={(url) => {
+              setData((prev) => ({ ...prev, logo_url: url }));
+              void detectLogoColors(url);
+            }}
             label="Logo"
             hint="Shown on public signup pages"
           />
+          {colorMessage && (
+            <p className={`text-[12px] ${colorMessage.startsWith("Colors detected") ? "text-emerald-600" : "text-amber-600"}`}>
+              {colorMessage}
+            </p>
+          )}
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Join page URL slug</label>
             <p className="text-[11px] text-gray-400 mb-1.5">This controls your public join URL.</p>
@@ -328,6 +386,23 @@ function TenantSettings() {
             </div>
           </div>
           <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Client payment frequency options</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Only these options are shown to clients during signup.</p>
+            <div className="flex flex-wrap gap-2">
+              {AVAILABLE_PAYMENT_FREQUENCIES.map((item) => (
+                <label key={item.key} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[12px] text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={(data.enabled_payment_frequencies || []).includes(item.key)}
+                    onChange={(e) => togglePaymentFrequency(item.key, e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+                  />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Brand colour</label>
             <p className="text-[11px] text-gray-400 mb-1.5">Used on public signup pages and emails</p>
             <div className="flex items-center gap-3">
@@ -345,6 +420,16 @@ function TenantSettings() {
                 Reset
               </button>
             </div>
+          </div>
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => void detectLogoColors(data.logo_url || "")}
+              disabled={!data.logo_url || detectingColors}
+              className="btn-secondary text-[12px]"
+            >
+              {detectingColors ? "Detecting colours..." : "Auto-detect colours from logo"}
+            </button>
           </div>
         </div>
       </div>
@@ -499,11 +584,17 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [environment, setEnvironment] = useState(existing?.environment || "sandbox");
-  const [isActive, setIsActive] = useState(existing?.is_active ?? true);
+  const [isActive, setIsActive] = useState(existing?.is_active ?? false);
   const [expanded, setExpanded] = useState(!existing?.has_key && !collapsedByDefault);
   const isStripe = provider.id === "stripe";
   const webhookUrl = tenantSlug ? `${window.location.origin}/api/webhooks/stripe/${tenantSlug}` : "";
   const stripeReady = !!(existing?.has_key && existing?.has_secret && existing?.is_active);
+  const maskedPlaceholder = "••••••••••••";
+
+  useEffect(() => {
+    setEnvironment(existing?.environment || "sandbox");
+    setIsActive(existing?.is_active ?? false);
+  }, [existing?.environment, existing?.is_active]);
 
   return (
     <div className="card overflow-hidden">
@@ -568,13 +659,15 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1">{provider.fields.key}</label>
               <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                className="input-field font-mono text-[13px]" placeholder={existing?.has_key ? "Leave blank to keep existing" : "Enter key..."} />
+                className="input-field font-mono text-[13px]" placeholder={existing?.has_key ? maskedPlaceholder : "Enter key..."} />
+              {existing?.has_key && <p className="mt-1 text-[11px] text-gray-500">Saved. Leave blank to keep existing.</p>}
             </div>
             {provider.hasSecret && (
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-1">{provider.fields.secret}</label>
                 <input type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)}
-                  className="input-field font-mono text-[13px]" placeholder={existing?.has_key ? "Leave blank to keep existing" : "Enter secret..."} />
+                  className="input-field font-mono text-[13px]" placeholder={existing?.has_secret ? maskedPlaceholder : "Enter secret..."} />
+                {existing?.has_secret && <p className="mt-1 text-[11px] text-gray-500">Saved. Leave blank to keep existing.</p>}
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">

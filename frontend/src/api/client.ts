@@ -15,6 +15,18 @@ class ApiError extends Error {
   }
 }
 
+export interface EmailTemplateConfig {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  category: "client" | "payments" | "internal" | "reminders";
+  description: string;
+  variables: string[];
+  enabled: boolean;
+  updated_at?: string | null;
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
@@ -135,6 +147,21 @@ export const api = {
   getTenantSettings: () => request("/tenant/settings/tenant"),
   updateTenantSettings: (data: unknown) =>
     request("/tenant/settings/tenant", { method: "PUT", body: data }),
+  getEmailTemplates: () =>
+    request<{ templates: EmailTemplateConfig[] }>("/tenant/settings/email-templates"),
+  updateEmailTemplate: (
+    templateKey: string,
+    data: { enabled?: boolean; subject?: string; body?: string }
+  ) =>
+    request<EmailTemplateConfig>(`/tenant/settings/email-templates/${encodeURIComponent(templateKey)}`, {
+      method: "PUT",
+      body: data,
+    }),
+  toggleEmailTemplatesCategory: (category: string, enabled: boolean) =>
+    request<{ category: string; enabled: boolean; updated: number }>(
+      `/tenant/settings/email-templates/category/${encodeURIComponent(category)}/toggle-all`,
+      { method: "PUT", body: { enabled } }
+    ),
   completeSetup: () =>
     request("/tenant/complete-setup", { method: "POST" }),
 

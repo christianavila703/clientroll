@@ -6,12 +6,15 @@ interface Service {
   name: string;
   description?: string;
   price: number;
+  currency_code?: string;
   tax_rate: number;
   is_active: boolean;
   sort_order: number;
   created_at: string;
   updated_at: string;
 }
+
+const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
 
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
@@ -107,7 +110,7 @@ export default function ServicesPage() {
                     <p className="font-medium text-gray-900">{s.name}</p>
                     {s.description && <p className="text-[11px] text-gray-400 mt-0.5 line-clamp-1">{s.description}</p>}
                   </td>
-                  <td className="tabular-nums text-gray-900">${s.price.toFixed(2)}</td>
+                  <td className="tabular-nums text-gray-900">{`${s.currency_code || "AUD"} ${s.price.toFixed(2)}`}</td>
                   <td className="text-gray-500">{s.tax_rate > 0 ? `${s.tax_rate}%` : "—"}</td>
                   <td>
                     <span className={`badge ${s.is_active ? "badge-green" : "badge-gray"}`}>
@@ -132,17 +135,38 @@ export default function ServicesPage() {
 function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; onSaved: () => void; onCancel: () => void }) {
   type NumericField = number | "";
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+  const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
 
   const [form, setForm] = useState({
     name: initial?.name || "",
     description: initial?.description || "",
     price: initial ? initial.price : "",
+    currency_code: initial?.currency_code || "AUD",
     tax_rate: initial ? initial.tax_rate : "",
     is_active: initial?.is_active ?? true,
     sort_order: initial ? initial.sort_order : "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.getTenantSettings().then((res) => {
+      const t = res as Record<string, unknown>;
+      const fromTenant = Array.isArray(t.enabled_currencies)
+        ? Array.from(new Set((t.enabled_currencies as unknown[]).map((c) => String(c).toUpperCase()))).filter(Boolean)
+        : [];
+      const allowed = fromTenant.filter((code) => AVAILABLE_CURRENCIES.includes(code));
+      const next = allowed.length ? allowed : ["AUD"];
+      if (!next.includes("AUD")) next.unshift("AUD");
+      setEnabledCurrencies(Array.from(new Set(next)));
+      setForm((prev) => {
+        const current = (prev.currency_code || "AUD").toUpperCase();
+        return next.includes(current) ? prev : { ...prev, currency_code: "AUD" };
+      });
+    }).catch(() => {
+      setEnabledCurrencies(["AUD"]);
+    });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,6 +178,7 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
           ...form,
           description: form.description || null,
           price: toNumberOrZero(form.price),
+          currency_code: (form.currency_code || "AUD").toUpperCase(),
           tax_rate: toNumberOrZero(form.tax_rate),
           sort_order: toNumberOrZero(form.sort_order),
         };
@@ -165,6 +190,7 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
           name: form.name,
           description: form.description || null,
           price: toNumberOrZero(form.price),
+          currency_code: (form.currency_code || "AUD").toUpperCase(),
           tax_rate: toNumberOrZero(form.tax_rate),
           sort_order: toNumberOrZero(form.sort_order),
         };
@@ -206,8 +232,20 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Price ($)</label>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Price</label>
             <input type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.01" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Currency</label>
+            <select
+              value={form.currency_code || "AUD"}
+              onChange={e => setForm({ ...form, currency_code: e.target.value })}
+              className="input-field"
+            >
+              {enabledCurrencies.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax Rate (%)</label>

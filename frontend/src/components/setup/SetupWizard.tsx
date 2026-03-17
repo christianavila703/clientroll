@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import api from "../../api/client";
 import { useAuth } from "../../store/AuthContext";
 import ImageUpload from "../common/ImageUpload";
+import RichTextEditor from "../common/RichTextEditor";
+import { extractBrandColorsFromImage } from "../../utils/brandColors";
 
 interface Props {
   onClose: () => void;
@@ -15,6 +17,14 @@ const STEPS = [
   { key: "terms", label: "Terms & Conditions", required: false },
 ] as const;
 const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
+const AVAILABLE_PAYMENT_FREQUENCIES = [
+  { key: "upfront", label: "Upfront" },
+  { key: "weekly", label: "Weekly" },
+  { key: "fortnightly", label: "Fortnightly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+  { key: "custom_schedule", label: "Custom instalments" },
+];
 
 type StepKey = (typeof STEPS)[number]["key"];
 
@@ -279,9 +289,25 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
 
 /* ─── Step 2: Branding ─── */
 function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: string) => void }) {
-  const [data, setData] = useState<Record<string, string>>({});
+  const [data, setData] = useState<{
+    slug: string;
+    primary_colour: string;
+    secondary_colour: string;
+    logo_url: string;
+    enabled_currencies: string[];
+    enabled_payment_frequencies: string[];
+  }>({
+    slug: "",
+    primary_colour: "#6366f1",
+    secondary_colour: "",
+    logo_url: "",
+    enabled_currencies: ["AUD"],
+    enabled_payment_frequencies: ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
+  });
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [detectingColors, setDetectingColors] = useState(false);
+  const [colorMessage, setColorMessage] = useState("");
 
   useEffect(() => {
     api.getTenantSettings()
@@ -295,6 +321,9 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
           enabled_currencies: Array.isArray(t.enabled_currencies)
             ? Array.from(new Set((t.enabled_currencies as unknown[]).map((c) => String(c).toUpperCase()))).filter(Boolean)
             : ["AUD"],
+          enabled_payment_frequencies: Array.isArray(t.enabled_payment_frequencies)
+            ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
+            : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
         });
         setLoaded(true);
       })
@@ -320,6 +349,37 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
       return { ...prev, enabled_currencies: Array.from(next) };
     });
   };
+  const togglePaymentFrequency = (frequency: string, checked: boolean) => {
+    setData((prev) => {
+      const next = new Set(prev.enabled_payment_frequencies || []);
+      if (checked) next.add(frequency);
+      else next.delete(frequency);
+      if (next.size === 0) next.add("weekly");
+      return { ...prev, enabled_payment_frequencies: Array.from(next) };
+    });
+  };
+  const detectLogoColors = async (logoUrl: string) => {
+    if (!logoUrl) return;
+    setDetectingColors(true);
+    setColorMessage("");
+    try {
+      const colors = await extractBrandColorsFromImage(logoUrl);
+      if (!colors) {
+        setColorMessage("Couldn't detect colors from logo");
+        return;
+      }
+      setData((prev) => ({
+        ...prev,
+        primary_colour: colors.primary,
+        secondary_colour: colors.secondary,
+      }));
+      setColorMessage(`Colors detected: ${colors.primary} and ${colors.secondary}`);
+    } catch {
+      setColorMessage("Couldn't detect colors from logo");
+    } finally {
+      setDetectingColors(false);
+    }
+  };
 
   if (!loaded) return <LoadingSpinner />;
 
@@ -332,10 +392,18 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
       <ImageUpload
         value={data.logo_url || ""}
         entityType="tenant"
-        onChange={(url) => setData({ ...data, logo_url: url })}
+        onChange={(url) => {
+          setData((prev) => ({ ...prev, logo_url: url }));
+          void detectLogoColors(url);
+        }}
         label="Logo"
         hint="Shown on public signup pages"
       />
+      {colorMessage && (
+        <p className={`text-[12px] ${colorMessage.startsWith("Colors detected") ? "text-emerald-600" : "text-amber-600"}`}>
+          {colorMessage}
+        </p>
+      )}
 
       <div>
         <label className="block text-[13px] font-medium text-gray-700 mb-1">Join page URL slug</label>
@@ -400,6 +468,11 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
           />
         </div>
       </div>
+      <div className="flex">
+        <button type="button" onClick={() => void detectLogoColors(data.logo_url || "")} disabled={!data.logo_url || detectingColors} className="btn-secondary text-[12px]">
+          {detectingColors ? "Detecting colours..." : "Auto-detect colours from logo"}
+        </button>
+      </div>
       <div>
         <label className="block text-[13px] font-medium text-gray-700 mb-1">Enabled currencies</label>
         <div className="flex flex-wrap gap-2">
@@ -413,6 +486,22 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
                 className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
               />
               {code}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="block text-[13px] font-medium text-gray-700 mb-1">Client payment frequency options</label>
+        <div className="flex flex-wrap gap-2">
+          {AVAILABLE_PAYMENT_FREQUENCIES.map((item) => (
+            <label key={item.key} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[12px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={(data.enabled_payment_frequencies || []).includes(item.key)}
+                onChange={(e) => togglePaymentFrequency(item.key, e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+              />
+              {item.label}
             </label>
           ))}
         </div>
@@ -502,8 +591,16 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [environment, setEnvironment] = useState(existing?.environment || "sandbox");
-  const [isActive, setIsActive] = useState(existing?.is_active ?? true);
+  const [isActive, setIsActive] = useState(existing?.is_active ?? false);
   const [saving, setSaving] = useState(false);
+  const isStripe = name.toLowerCase() === "stripe";
+  const stripeReady = !!(existing?.has_key && existing?.has_secret && existing?.is_active);
+  const maskedPlaceholder = "••••••••••••";
+
+  useEffect(() => {
+    setEnvironment(existing?.environment || "sandbox");
+    setIsActive(existing?.is_active ?? false);
+  }, [existing?.environment, existing?.is_active]);
 
   const handleSubmit = async () => {
     setSaving(true);
@@ -528,19 +625,59 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
 
       {webhookUrl && (
         <div className="rounded-md bg-indigo-50 border border-indigo-200 p-3 space-y-1.5">
-          <p className="text-[11px] font-medium text-indigo-900">Webhook URL for Stripe dashboard:</p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-white/80 px-2 py-1 font-mono text-[10px] text-indigo-900">
-              {webhookUrl}
-            </code>
-            <button
-              type="button"
-              onClick={() => navigator.clipboard.writeText(webhookUrl)}
-              className="btn-secondary text-[10px] px-2 py-0.5"
-            >
-              Copy
-            </button>
-          </div>
+          {isStripe ? (
+            <>
+              <p className="text-[12px] font-semibold text-indigo-900 mb-1">Stripe setup checklist</p>
+              <div className="space-y-1 text-[12px] text-indigo-900/90">
+                <p>1. Paste Stripe secret key + webhook signing secret and click Save.</p>
+                <p>2. In Stripe dashboard, add webhook endpoint:</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate rounded bg-white/80 px-2 py-1 font-mono text-[10px] text-indigo-900">
+                    {webhookUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(webhookUrl)}
+                    className="btn-secondary text-[10px] px-2 py-0.5"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <p>3. Enable these webhook events:</p>
+                <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
+                  <li><code>checkout.session.completed</code></li>
+                  <li><code>checkout.session.expired</code></li>
+                  <li><code>invoice.payment_succeeded</code></li>
+                  <li><code>invoice.payment_failed</code></li>
+                  <li><code>customer.subscription.deleted</code></li>
+                  <li><code>charge.dispute.created</code>, <code>charge.dispute.updated</code>, <code>charge.dispute.closed</code></li>
+                  <li><code>charge.refunded</code> and <code>refund.updated</code></li>
+                </ul>
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11px]">
+                <span className={`rounded px-1.5 py-0.5 ${existing?.has_key ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
+                <span className={`rounded px-1.5 py-0.5 ${existing?.has_secret ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
+                <span className={`rounded px-1.5 py-0.5 ${existing?.is_active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
+                <span className={`rounded px-1.5 py-0.5 ${stripeReady ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] font-medium text-indigo-900">Webhook URL for Stripe dashboard:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-white/80 px-2 py-1 font-mono text-[10px] text-indigo-900">
+                  {webhookUrl}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(webhookUrl)}
+                  className="btn-secondary text-[10px] px-2 py-0.5"
+                >
+                  Copy
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -551,8 +688,9 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           className="input-field font-mono text-[12px]"
-          placeholder={existing?.has_key ? "Leave blank to keep existing" : "Enter key..."}
+          placeholder={existing?.has_key ? maskedPlaceholder : "Enter key..."}
         />
+        {existing?.has_key && <p className="mt-1 text-[11px] text-gray-500">Saved. Leave blank to keep existing.</p>}
       </div>
 
       {hasSecret && secretLabel && (
@@ -563,8 +701,9 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
             value={apiSecret}
             onChange={(e) => setApiSecret(e.target.value)}
             className="input-field font-mono text-[12px]"
-            placeholder={existing?.has_secret ? "Leave blank to keep existing" : "Enter secret..."}
+            placeholder={existing?.has_secret ? maskedPlaceholder : "Enter secret..."}
           />
+          {existing?.has_secret && <p className="mt-1 text-[11px] text-gray-500">Saved. Leave blank to keep existing.</p>}
         </div>
       )}
 
@@ -665,7 +804,12 @@ function TermsStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: s
 
   const handleCreate = async () => {
     if (!title.trim()) { onError("Title is required"); return; }
-    if (!content.trim()) { onError("Content is required"); return; }
+    // Strip tags to detect empty rich-text content.
+    const plain = content
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .trim();
+    if (!plain) { onError("Content is required"); return; }
     setSaving(true);
     try {
       await api.createTerms({ title: title.trim(), content: content.trim() });
@@ -698,11 +842,9 @@ function TermsStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: s
         <WizardField label="Title" value={title} onChange={setTitle} />
         <div>
           <label className="block text-[13px] font-medium text-gray-700 mb-1">Content</label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
-            rows={8}
+          <RichTextEditor
+            content={content}
+            onChange={setContent}
             placeholder="Enter your terms and conditions..."
           />
         </div>

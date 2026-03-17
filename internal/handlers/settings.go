@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/email"
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
 	"clientroll/internal/repository"
@@ -31,16 +32,25 @@ var allowedTenantCurrencies = map[string]struct{}{
 	"CAD": {},
 	"SGD": {},
 }
+var allowedTenantPaymentFrequencies = map[string]struct{}{
+	"upfront":         {},
+	"weekly":          {},
+	"fortnightly":     {},
+	"monthly":         {},
+	"quarterly":       {},
+	"custom_schedule": {},
+}
 
 // SettingsHandler handles tenant settings endpoints.
 type SettingsHandler struct {
-	settingsRepo *repository.SettingsRepo
-	tenantRepo   *repository.TenantRepo
+	settingsRepo      *repository.SettingsRepo
+	tenantRepo        *repository.TenantRepo
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
 }
 
 // NewSettingsHandler creates a new settings handler.
-func NewSettingsHandler(sr *repository.SettingsRepo, tr *repository.TenantRepo) *SettingsHandler {
-	return &SettingsHandler{settingsRepo: sr, tenantRepo: tr}
+func NewSettingsHandler(sr *repository.SettingsRepo, tr *repository.TenantRepo, etr *repository.TenantEmailTemplateRepo) *SettingsHandler {
+	return &SettingsHandler{settingsRepo: sr, tenantRepo: tr, emailTemplateRepo: etr}
 }
 
 // RegisterRoutes registers settings routes.
@@ -50,6 +60,9 @@ func (h *SettingsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/settings/business-lookup", h.LookupBusiness)
 	r.Get("/settings/tenant", h.GetTenantSettings)
 	r.Put("/settings/tenant", h.UpdateTenantSettings)
+	r.Get("/settings/email-templates", h.ListEmailTemplates)
+	r.Put("/settings/email-templates/{templateKey}", h.UpdateEmailTemplate)
+	r.Put("/settings/email-templates/category/{category}/toggle-all", h.ToggleEmailTemplatesByCategory)
 	r.Post("/complete-setup", h.CompleteSetup)
 }
 
@@ -64,7 +77,8 @@ type businessLookupResult struct {
 
 var abrCompressedItemRegex = regexp.MustCompile(`name="Results_NameItems\[\d+\]\.Compressed" type="hidden" value="([^"]+)"`)
 var abrCompanyNameHintRegex = regexp.MustCompile(`\b(PTY|LTD|LIMITED|PROPRIETARY|CORPORATION|CORP)\b`)
-var abrTableRowRegex = regexp.MustCompile(`(?is)<tr[^>]*>\s*<td[^>]*>\s*<a[^>]*href="/ABN/View\?abn=\d+"[^>]*>\s*([0-9 ]{11,20})\s*</a>.*?</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>`)
+var abrHTMLTagRegex = regexp.MustCompile(`(?is)<[^>]+>`)
+var abrTableRowRegex = regexp.MustCompile(`(?is)<tr[^>]*>\s*<td[^>]*>[\s\S]*?<a[^>]*href=["'][^"']*ABN/View\?abn=\d+[^"']*["'][^>]*>\s*([0-9 ]{11,20})\s*</a>[\s\S]*?</td>\s*<td[^>]*>\s*([\s\S]*?)\s*</td>\s*<td[^>]*>\s*([\s\S]*?)\s*</td>\s*<td[^>]*>\s*([\s\S]*?)\s*</td>`)
 var abrLocationPostcodeStateRegex = regexp.MustCompile(`\b(\d{4})\s+([A-Z]{2,3})\b`)
 var abrLocationStatePostcodeRegex = regexp.MustCompile(`\b([A-Z]{2,3})\s+(\d{4})\b`)
 
@@ -153,30 +167,32 @@ func (h *SettingsHandler) LookupBusiness(w http.ResponseWriter, r *http.Request)
 
 	// Fallback parser for ABR's current table-based result markup.
 	if len(results) == 0 {
-		rowMatches := abrTableRowRegex.FindAllStringSubmatch(string(body), 20)
+		rowMatches := abrTableRowRegex.FindAllStringSubmatch(string(body), 40)
 		results = make([]businessLookupResult, 0, len(rowMatches))
 		for _, row := range rowMatches {
 			if len(row) < 5 {
 				continue
 			}
+
 			abnDigits := strings.Map(func(r rune) rune {
 				if r >= '0' && r <= '9' {
 					return r
 				}
 				return -1
-			}, strings.TrimSpace(html.UnescapeString(row[1])))
+			}, strings.TrimSpace(html.UnescapeString(abrHTMLTagRegex.ReplaceAllString(row[1], " "))))
 			if len(abnDigits) != 11 {
 				continue
 			}
+
 			abn := fmt.Sprintf("%s %s %s %s", abnDigits[:2], abnDigits[2:5], abnDigits[5:8], abnDigits[8:11])
 			if _, exists := seenABN[abn]; exists {
 				continue
 			}
 			seenABN[abn] = struct{}{}
 
-			entityName := strings.TrimSpace(html.UnescapeString(row[2]))
-			nameType := strings.ToUpper(strings.TrimSpace(html.UnescapeString(row[3])))
-			location := strings.TrimSpace(html.UnescapeString(row[4]))
+			entityName := strings.TrimSpace(html.UnescapeString(abrHTMLTagRegex.ReplaceAllString(row[2], " ")))
+			nameType := strings.ToUpper(strings.TrimSpace(html.UnescapeString(abrHTMLTagRegex.ReplaceAllString(row[3], " "))))
+			location := strings.TrimSpace(html.UnescapeString(abrHTMLTagRegex.ReplaceAllString(row[4], " ")))
 
 			state, postcode := "", ""
 			if m := abrLocationPostcodeStateRegex.FindStringSubmatch(location); len(m) == 3 {
@@ -288,6 +304,7 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		Timezone                   *string  `json:"timezone,omitempty"`
 		Slug                       *string  `json:"slug,omitempty"`
 		EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
+		EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
 		PrimaryColour              *string  `json:"primary_colour,omitempty"`
 		SecondaryColour            *string  `json:"secondary_colour,omitempty"`
 		SignupPriceDisplayMode     *string  `json:"signup_price_display_mode,omitempty"`
@@ -354,10 +371,35 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	var nextEnabledPaymentFrequencies []string
+	if input.EnabledPaymentFrequencies != nil {
+		seen := map[string]struct{}{}
+		nextEnabledPaymentFrequencies = make([]string, 0, len(input.EnabledPaymentFrequencies))
+		for _, raw := range input.EnabledPaymentFrequencies {
+			frequency := strings.ToLower(strings.TrimSpace(raw))
+			if frequency == "" {
+				continue
+			}
+			if _, ok := allowedTenantPaymentFrequencies[frequency]; !ok {
+				writeError(w, http.StatusBadRequest, "unsupported value in enabled_payment_frequencies")
+				return
+			}
+			if _, ok := seen[frequency]; ok {
+				continue
+			}
+			seen[frequency] = struct{}{}
+			nextEnabledPaymentFrequencies = append(nextEnabledPaymentFrequencies, frequency)
+		}
+		if len(nextEnabledPaymentFrequencies) == 0 {
+			nextEnabledPaymentFrequencies = []string{"upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"}
+		}
+	}
+
 	updateInput := models.UpdateTenantInput{
 		Timezone:                   input.Timezone,
 		Slug:                       nextSlug,
 		EnabledCurrencies:          nextEnabledCurrencies,
+		EnabledPaymentFrequencies:  nextEnabledPaymentFrequencies,
 		PrimaryColour:              input.PrimaryColour,
 		SecondaryColour:            input.SecondaryColour,
 		SignupPriceDisplayMode:     nextDisplayMode,
@@ -394,4 +436,196 @@ func (h *SettingsHandler) CompleteSetup(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, tenant)
+}
+
+// ListEmailTemplates returns operational email templates merged with tenant overrides.
+func (h *SettingsHandler) ListEmailTemplates(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	if h.emailTemplateRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Email template settings unavailable")
+		return
+	}
+
+	stored, err := h.emailTemplateRepo.ListByTenant(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error listing email templates: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to load email templates")
+		return
+	}
+	storedByKey := make(map[string]repository.TenantEmailTemplate, len(stored))
+	for _, row := range stored {
+		storedByKey[row.TemplateKey] = row
+	}
+
+	catalog := email.OperationalTemplateCatalog()
+	templates := make([]map[string]interface{}, 0, len(catalog))
+	for _, def := range catalog {
+		subject := def.Subject
+		body := def.Body
+		enabled := def.DefaultEnabled
+		var updatedAt *time.Time
+		if row, ok := storedByKey[def.Key]; ok {
+			enabled = row.Enabled
+			if row.SubjectOverride != nil {
+				subject = *row.SubjectOverride
+			}
+			if row.BodyOverride != nil {
+				body = *row.BodyOverride
+			}
+			updatedAt = &row.UpdatedAt
+		}
+		templates = append(templates, map[string]interface{}{
+			"id":          def.Key,
+			"name":        def.Name,
+			"subject":     subject,
+			"body":        body,
+			"category":    def.Category,
+			"description": def.Description,
+			"variables":   def.Variables,
+			"enabled":     enabled,
+			"updated_at":  updatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"templates": templates})
+}
+
+// UpdateEmailTemplate updates one template's enabled state and optional subject/body overrides.
+func (h *SettingsHandler) UpdateEmailTemplate(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	role := middleware.GetRole(r.Context())
+	if role != "tenant_admin" {
+		writeError(w, http.StatusForbidden, "Only tenant admins can update email templates")
+		return
+	}
+	if h.emailTemplateRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Email template settings unavailable")
+		return
+	}
+
+	templateKey := strings.TrimSpace(chi.URLParam(r, "templateKey"))
+	def, ok := email.OperationalTemplateByKey(templateKey)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Unknown template key")
+		return
+	}
+
+	var input struct {
+		Enabled *bool   `json:"enabled,omitempty"`
+		Subject *string `json:"subject,omitempty"`
+		Body    *string `json:"body,omitempty"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	enabled := def.DefaultEnabled
+	if current, err := h.emailTemplateRepo.IsEnabled(r.Context(), tenantID, templateKey); err == nil {
+		enabled = current
+	}
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+
+	normalize := func(value *string) *string {
+		if value == nil {
+			return nil
+		}
+		trimmed := strings.TrimSpace(*value)
+		if trimmed == "" {
+			return nil
+		}
+		return &trimmed
+	}
+	subjectOverride := normalize(input.Subject)
+	bodyOverride := normalize(input.Body)
+	if subjectOverride != nil && *subjectOverride == def.Subject {
+		subjectOverride = nil
+	}
+	if bodyOverride != nil && *bodyOverride == def.Body {
+		bodyOverride = nil
+	}
+
+	updated, err := h.emailTemplateRepo.Upsert(r.Context(), tenantID, templateKey, def.Category, enabled, subjectOverride, bodyOverride)
+	if err != nil {
+		log.Printf("Error updating email template %s: %v", templateKey, err)
+		writeError(w, http.StatusInternalServerError, "Failed to update email template")
+		return
+	}
+
+	subject := def.Subject
+	body := def.Body
+	if updated.SubjectOverride != nil {
+		subject = *updated.SubjectOverride
+	}
+	if updated.BodyOverride != nil {
+		body = *updated.BodyOverride
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":          def.Key,
+		"name":        def.Name,
+		"subject":     subject,
+		"body":        body,
+		"category":    def.Category,
+		"description": def.Description,
+		"variables":   def.Variables,
+		"enabled":     updated.Enabled,
+		"updated_at":  updated.UpdatedAt,
+	})
+}
+
+// ToggleEmailTemplatesByCategory enables or disables all templates in a category for this tenant.
+func (h *SettingsHandler) ToggleEmailTemplatesByCategory(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	role := middleware.GetRole(r.Context())
+	if role != "tenant_admin" {
+		writeError(w, http.StatusForbidden, "Only tenant admins can update email templates")
+		return
+	}
+	if h.emailTemplateRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Email template settings unavailable")
+		return
+	}
+
+	category := strings.TrimSpace(chi.URLParam(r, "category"))
+	if !email.IsOperationalTemplateCategory(category) {
+		writeError(w, http.StatusBadRequest, "Unknown template category")
+		return
+	}
+	var input struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &input); err != nil || input.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "enabled is required")
+		return
+	}
+
+	keys := email.OperationalTemplateKeysByCategory(category)
+	if len(keys) == 0 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"updated": 0})
+		return
+	}
+	if err := h.emailTemplateRepo.ToggleCategory(r.Context(), tenantID, category, keys, *input.Enabled); err != nil {
+		log.Printf("Error toggling email templates category %s: %v", category, err)
+		writeError(w, http.StatusInternalServerError, "Failed to update email templates")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"category": category,
+		"enabled":  *input.Enabled,
+		"updated":  len(keys),
+	})
 }

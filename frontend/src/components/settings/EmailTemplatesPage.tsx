@@ -1,88 +1,102 @@
-import { useRef, useState } from "react";
-import RichTextEditor from "../common/RichTextEditor";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
+import api, { ApiError, type EmailTemplateConfig } from "../../api/client";
+import RichTextEditor from "../common/RichTextEditor";
 
-interface Template {
-  id: string;
-  name: string;
-  subject: string;
-  body: string;
-  category: string;
-  description: string;
-  variables: string[];
-  lastUpdated: string;
-}
-
-const DEFAULT_TEMPLATES: Template[] = [
-  {
-    id: "membership_confirmation", name: "Membership Confirmation", subject: "Your {{membership_title}} membership is confirmed",
-    body: "<p>Hi {{client_name}},</p><p>Your membership has been successfully set up:</p><ul><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Term:</strong> {{term_months}} months</li><li><strong>Total Fee:</strong> ${{total_fee}}</li></ul><p>If you have any questions, please contact us.</p>",
-    category: "client", description: "Sent to client after completing membership signup",
-    variables: ["client_name", "membership_title", "term_months", "total_fee", "company_name"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "membership_welcome", name: "New Member Welcome", subject: "Welcome to {{company_name}}, {{client_name}}!",
-    body: "<p>Hi {{client_name}},</p><p>Welcome to <strong>{{company_name}}</strong>! We're excited to have you as a member.</p><p>Your <strong>{{membership_title}}</strong> membership is now active. Here's what to expect:</p><ul><li>Your first payment of ${{payment_amount}} will be debited {{payment_frequency}}</li><li>Your membership runs until {{end_date}}</li></ul><p>If you have any questions, don't hesitate to reach out.</p>",
-    category: "client", description: "Welcome email sent to new clients after signing up",
-    variables: ["client_name", "company_name", "membership_title", "payment_amount", "payment_frequency", "end_date"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "payment_receipt", name: "Payment Receipt", subject: "Payment receipt — ${{amount}}",
-    body: "<p>Hi {{client_name}},</p><p>We've received your payment:</p><ul><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Date:</strong> {{payment_date}}</li></ul><p>Thank you for your payment.</p>",
-    category: "payments", description: "Sent to client after a successful payment",
-    variables: ["client_name", "amount", "membership_title", "payment_date", "company_name"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "payment_failed", name: "Payment Failed (Client)", subject: "Payment failed — action required",
-    body: "<p>Hi {{client_name}},</p><p>Unfortunately your scheduled payment could not be processed.</p><ul><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Reason:</strong> {{failure_reason}}</li></ul><p>Please ensure your bank details are up to date. We'll automatically retry this payment.</p>",
-    category: "payments", description: "Sent to client when their payment fails",
-    variables: ["client_name", "amount", "membership_title", "failure_reason", "company_name"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "payment_failed_alert", name: "Payment Failed (Staff Alert)", subject: "Payment failed: {{client_name}} — ${{amount}}",
-    body: "<p>Hi {{admin_name}},</p><p>A payment has failed for one of your clients:</p><ul><li><strong>Client:</strong> {{client_name}}</li><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Membership:</strong> {{membership_title}}</li><li><strong>Reason:</strong> {{failure_reason}}</li></ul><p>Review this in your dashboard under Payments.</p>",
-    category: "internal", description: "Sent to staff when a client's payment fails",
-    variables: ["admin_name", "client_name", "amount", "membership_title", "failure_reason"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "dispute_alert", name: "Dispute Alert", subject: "Dispute opened: {{client_name}} — ${{amount}}",
-    body: "<p>Hi {{admin_name}},</p><p>A payment dispute has been opened:</p><ul><li><strong>Client:</strong> {{client_name}}</li><li><strong>Amount:</strong> ${{amount}}</li><li><strong>Reason:</strong> {{reason}}</li></ul><p>Please review and respond in your dashboard.</p>",
-    category: "internal", description: "Sent to staff when a client disputes a payment",
-    variables: ["admin_name", "client_name", "amount", "reason"],
-    lastUpdated: "7 February 2026",
-  },
-  {
-    id: "membership_expiring", name: "Membership Expiring", subject: "Your {{membership_title}} membership expires soon",
-    body: "<p>Hi {{client_name}},</p><p>Your <strong>{{membership_title}}</strong> membership is set to expire on <strong>{{expiry_date}}</strong>.</p><p>Please contact us if you'd like to renew or discuss your options.</p>",
-    category: "reminders", description: "Sent to client when membership is nearing end of term",
-    variables: ["client_name", "membership_title", "expiry_date", "company_name"],
-    lastUpdated: "7 February 2026",
-  },
-];
+type Template = EmailTemplateConfig;
 
 const CATEGORIES = [
-  { key: "client", label: "Client Communications" },
-  { key: "payments", label: "Payment Notifications" },
-  { key: "internal", label: "Staff Alerts" },
-  { key: "reminders", label: "Reminders" },
+  { key: "client", label: "Client Communications", description: "Emails sent to your clients for membership confirmations and welcomes." },
+  { key: "payments", label: "Payment Notifications", description: "Emails sent to clients for payment receipts and failed payment notifications." },
+  { key: "internal", label: "Staff Alerts", description: "Alerts sent to your staff when payments fail or disputes are opened." },
+  { key: "reminders", label: "Reminders", description: "Emails sent to clients when their membership is nearing expiry." },
 ];
 
 export default function EmailTemplatesPage() {
   const [tab, setTab] = useState("client");
   const [editing, setEditing] = useState<Template | null>(null);
   const [search, setSearch] = useState("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  const filtered = DEFAULT_TEMPLATES.filter(
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    api.getEmailTemplates()
+      .then((res) => {
+        if (!cancelled) setTemplates(res.templates || []);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load email templates");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filtered = templates.filter(
     (t) => t.category === tab && (!search || t.name.toLowerCase().includes(search.toLowerCase()))
   );
+  const allEnabled = useMemo(
+    () => filtered.length > 0 && filtered.every((t) => t.enabled),
+    [filtered]
+  );
+
+  const setTemplate = (next: Template) => {
+    setTemplates((prev) => prev.map((t) => (t.id === next.id ? next : t)));
+    setEditing((prev) => (prev && prev.id === next.id ? next : prev));
+  };
+
+  const toggleTemplate = async (template: Template, enabled: boolean) => {
+    setRowBusy(template.id);
+    setMessage("");
+    setError("");
+    try {
+      const updated = await api.updateEmailTemplate(template.id, { enabled });
+      setTemplate(updated);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to update template");
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
+  const toggleCategoryAll = async (enabled: boolean) => {
+    setBulkBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      await api.toggleEmailTemplatesCategory(tab, enabled);
+      setTemplates((prev) =>
+        prev.map((t) => (t.category === tab ? { ...t, enabled } : t))
+      );
+      setMessage(enabled ? "All templates in this category enabled" : "All templates in this category disabled");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to update category");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   if (editing) {
-    return <TemplateEditor template={editing} onBack={() => setEditing(null)} />;
+    return (
+      <TemplateEditor
+        template={editing}
+        onBack={() => setEditing(null)}
+        onSaved={(next) => {
+          setTemplate(next);
+          setMessage("Template saved");
+        }}
+      />
+    );
   }
 
   return (
@@ -90,77 +104,131 @@ export default function EmailTemplatesPage() {
       <div className="page-header">
         <h1 className="page-title">Email Templates</h1>
       </div>
+      {!!error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">{error}</div>}
+      {!!message && <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-700">{message}</div>}
 
-      {/* Tabs */}
       <div className="flex border-b border-gray-200 mb-4">
         {CATEGORIES.map((c) => (
-          <button key={c.key} onClick={() => setTab(c.key)}
+          <button
+            key={c.key}
+            onClick={() => setTab(c.key)}
             className={`px-3 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
               tab === c.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}>{c.label}</button>
+            }`}
+          >
+            {c.label}
+          </button>
         ))}
       </div>
 
-      <p className="text-[13px] text-gray-500 mb-4">
-        {tab === "client" && "Emails sent to your clients for membership confirmations and welcomes."}
-        {tab === "payments" && "Emails sent to clients for payment receipts and failed payment notifications."}
-        {tab === "internal" && "Alerts sent to your staff when payments fail or disputes are opened."}
-        {tab === "reminders" && "Emails sent to clients when their membership is nearing expiry."}
-      </p>
+      <p className="text-[13px] text-gray-500 mb-4">{CATEGORIES.find((c) => c.key === tab)?.description}</p>
 
-      {/* Search + count */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative max-w-xs w-full">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..."
-            className="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[13px] placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search..."
+            className="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[13px] placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none"
+          />
         </div>
         <span className="text-[13px] text-gray-400">{filtered.length} results</span>
+        <label className="ml-auto inline-flex items-center gap-2 text-[13px] text-gray-600">
+          <input
+            type="checkbox"
+            checked={allEnabled}
+            disabled={bulkBusy || filtered.length === 0}
+            onChange={(e) => {
+              void toggleCategoryAll(e.target.checked);
+            }}
+            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <span>{bulkBusy ? "Saving..." : "Enable all in this category"}</span>
+        </label>
       </div>
 
-      {/* Table */}
       <div className="card overflow-hidden">
-        <table className="data-table">
-          <thead><tr><th>Name</th><th>Last Updated</th><th className="w-10"></th></tr></thead>
-          <tbody>
-            {filtered.map((t) => (
-              <tr key={t.id} className="cursor-pointer" onClick={() => setEditing(t)}>
-                <td>
-                  <p className="font-medium text-gray-900">{t.name}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">{t.description}</p>
-                </td>
-                <td className="text-gray-500">{t.lastUpdated}</td>
-                <td>
-                  <button className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100" onClick={(e) => { e.stopPropagation(); setEditing(t); }}>
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
-                  </button>
-                </td>
+        {loading ? (
+          <div className="px-4 py-8 text-center text-[13px] text-gray-500">Loading templates...</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Enabled</th>
+                <th>Last Updated</th>
+                <th className="w-10"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((t) => (
+                <tr key={t.id} className="cursor-pointer" onClick={() => setEditing(t)}>
+                  <td>
+                    <p className="font-medium text-gray-900">{t.name}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{t.description}</p>
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={t.enabled}
+                      disabled={rowBusy === t.id}
+                      onChange={(e) => {
+                        void toggleTemplate(t, e.target.checked);
+                      }}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  </td>
+                  <td className="text-gray-500">{formatLastUpdated(t.updated_at)}</td>
+                  <td>
+                    <button className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100" onClick={(e) => { e.stopPropagation(); setEditing(t); }}>
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!filtered.length && (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-[13px] text-gray-500">No templates found</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
 }
 
-function TemplateEditor({ template, onBack }: { template: Template; onBack: () => void }) {
-  const [name, setName] = useState(template.name);
+function TemplateEditor({ template, onBack, onSaved }: { template: Template; onBack: () => void; onSaved: (template: Template) => void }) {
   const [subject, setSubject] = useState(template.subject);
   const [body, setBody] = useState(template.body);
+  const [enabled, setEnabled] = useState(template.enabled);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const subjectRef = useRef<HTMLInputElement | null>(null);
   const bodyEditorRef = useRef<Editor | null>(null);
   const lastTargetRef = useRef<"subject" | "body">("subject");
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
+    setError("");
+    setMessage("");
+    try {
+      const updated = await api.updateEmailTemplate(template.id, { enabled, subject, body });
+      onSaved(updated);
+      setEnabled(updated.enabled);
+      setSubject(updated.subject);
+      setBody(updated.body);
       setSaving(false);
       setMessage("Template saved");
       setTimeout(() => setMessage(""), 2000);
-    }, 500);
+    } catch (e) {
+      setSaving(false);
+      setError(e instanceof ApiError ? e.message : "Failed to save template");
+    }
   };
 
   const insertVariable = (v: string) => {
@@ -186,14 +254,11 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
       editor.chain().focus().insertContent(tag).run();
       return;
     }
-
-    // Fallback: append.
     setBody((prev) => (prev || "") + tag);
   };
 
   return (
     <div>
-      {/* Header — Ignition style: breadcrumb + actions */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-1.5 text-[15px]">
           <button onClick={onBack} className="text-indigo-600 hover:text-indigo-700 font-semibold">Emails</button>
@@ -202,29 +267,35 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
         </div>
         <div className="flex items-center gap-2">
           {message && <span className="text-[12px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{message}</span>}
-          <button onClick={handleSave} disabled={saving} className="btn-primary">
+          <button onClick={() => void handleSave()} disabled={saving} className="btn-primary">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
             {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
+      {!!error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">{error}</div>}
 
-      {/* Main card — Ignition "Template details" style */}
       <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Template details</h2>
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          {/* Template name */}
           <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">
-              Template name <span className="text-red-500">*</span>
-            </label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input-field max-w-md" />
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Template name</label>
+            <input value={template.name} readOnly className="input-field max-w-md bg-gray-50 text-gray-500" />
           </div>
 
-          {/* Email subject */}
+          <div className="flex items-center gap-3">
+            <label className="block text-[13px] font-medium text-gray-700">Enabled</label>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+          </div>
+
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">
               Email subject <span className="text-red-500">*</span>
@@ -239,7 +310,6 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
                 onChange={(e) => setSubject(e.target.value)}
                 className="input-field pr-28"
               />
-              {/* Inline placeholders dropdown for subject */}
               <div className="absolute right-1 top-1/2 -translate-y-1/2">
                 <PlaceholderDropdown
                   variables={template.variables}
@@ -252,7 +322,6 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
             </div>
           </div>
 
-          {/* Rich text editor with Placeholders dropdown in toolbar */}
           <div>
             <div className="rounded-md border border-gray-300 overflow-hidden focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-shadow">
               <div
@@ -272,7 +341,6 @@ function TemplateEditor({ template, onBack }: { template: Template; onBack: () =
             </div>
           </div>
 
-          {/* Variables reference */}
           <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3">
             <p className="text-[12px] font-medium text-gray-600 mb-2">Available placeholders</p>
             <div className="flex flex-wrap gap-1.5">
@@ -324,4 +392,15 @@ function PlaceholderDropdown({ variables, onInsert }: { variables: string[]; onI
       )}
     </div>
   );
+}
+
+function formatLastUpdated(value: string | null | undefined) {
+  if (!value) return "Default";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Default";
+  return parsed.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 }

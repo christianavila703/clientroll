@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -17,6 +18,17 @@ type MembershipTypeRepo struct {
 	db *database.Postgres
 }
 
+func decodeMembershipEnabledPaymentFrequencies(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var freqs []string
+	if err := json.Unmarshal(raw, &freqs); err != nil {
+		return nil
+	}
+	return freqs
+}
+
 // NewMembershipTypeRepo creates a new membership type repository.
 func NewMembershipTypeRepo(db *database.Postgres) *MembershipTypeRepo {
 	return &MembershipTypeRepo{db: db}
@@ -27,7 +39,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -70,17 +82,19 @@ func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, mem
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
 	var mt models.MembershipType
+	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipName, membershipLevel, title, slug,
 		nil, description, inclusions, nil,
-		topImageURL, currencyCode, totalValue, sortOrder).Scan(r.scanFields(&mt)...)
+		topImageURL, currencyCode, totalValue, sortOrder).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership type: %w", err)
 	}
+	mt.EnabledPaymentFrequencies = decodeMembershipEnabledPaymentFrequencies(enabledPaymentFrequenciesRaw)
 	return &mt, nil
 }
 
@@ -305,27 +319,29 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
 
 	var mt models.MembershipType
-	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(r.scanFields(&mt)...)
+	var enabledPaymentFrequenciesRaw []byte
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("finding membership type: %w", err)
 	}
+	mt.EnabledPaymentFrequencies = decodeMembershipEnabledPaymentFrequencies(enabledPaymentFrequenciesRaw)
 	return &mt, nil
 }
 
-func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType) []interface{} {
+func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType, enabledPaymentFrequenciesRaw *[]byte) []interface{} {
 	return []interface{}{
 		&mt.ID, &mt.TenantID, &mt.MembershipName, &mt.MembershipLevel, &mt.Title, &mt.Slug,
 		&mt.Summary, &mt.Description, &mt.Inclusions, &mt.Benefits,
-		&mt.TopImageURL, &mt.CurrencyCode, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
+		&mt.TopImageURL, &mt.CurrencyCode, enabledPaymentFrequenciesRaw, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}
@@ -387,6 +403,7 @@ func (r *MembershipTypeRepo) UpdateBasics(
 	currencyCode *string,
 	totalValue *float64,
 	sortOrder *int,
+	enabledPaymentFrequencies *[]string,
 ) (*models.MembershipType, error) {
 	query := `
 		UPDATE membership_types SET
@@ -403,23 +420,37 @@ func (r *MembershipTypeRepo) UpdateBasics(
 			total_value = COALESCE($13, total_value),
 			intrinsic_value = COALESCE($13, intrinsic_value),
 			sort_order = COALESCE($14, sort_order),
+			enabled_payment_frequencies = CASE
+				WHEN $15::jsonb IS NULL THEN enabled_payment_frequencies
+				ELSE $15::jsonb
+			END,
 			updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
 	var mt models.MembershipType
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, totalValue, sortOrder).
-		Scan(r.scanFields(&mt)...)
+	var enabledPaymentFrequenciesRaw []byte
+	var enabledPaymentFrequenciesJSON []byte
+	if enabledPaymentFrequencies != nil {
+		encoded, err := json.Marshal(*enabledPaymentFrequencies)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling enabled payment frequencies: %w", err)
+		}
+		enabledPaymentFrequenciesJSON = encoded
+	}
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, totalValue, sortOrder, enabledPaymentFrequenciesJSON).
+		Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("updating membership type basics: %w", err)
 	}
+	mt.EnabledPaymentFrequencies = decodeMembershipEnabledPaymentFrequencies(enabledPaymentFrequenciesRaw)
 	return &mt, nil
 }
 
@@ -427,9 +458,11 @@ func (r *MembershipTypeRepo) scanMany(rows pgx.Rows) ([]models.MembershipType, e
 	var items []models.MembershipType
 	for rows.Next() {
 		var mt models.MembershipType
-		if err := rows.Scan(r.scanFields(&mt)...); err != nil {
+		var enabledPaymentFrequenciesRaw []byte
+		if err := rows.Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...); err != nil {
 			return nil, fmt.Errorf("scanning membership type: %w", err)
 		}
+		mt.EnabledPaymentFrequencies = decodeMembershipEnabledPaymentFrequencies(enabledPaymentFrequenciesRaw)
 		items = append(items, mt)
 	}
 	return items, rows.Err()
