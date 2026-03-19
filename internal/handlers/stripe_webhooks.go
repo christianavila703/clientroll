@@ -94,6 +94,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Invalid Stripe webhook secret")
 		return
 	}
+	secret = strings.TrimSpace(secret)
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {

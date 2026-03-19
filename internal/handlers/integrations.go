@@ -131,6 +131,9 @@ func (h *IntegrationsHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	input.APIKey = strings.TrimSpace(input.APIKey)
+	input.APISecret = strings.TrimSpace(input.APISecret)
+	input.Environment = strings.ToLower(strings.TrimSpace(input.Environment))
 
 	// Encrypt credentials
 	var encKey, encSecret string
@@ -186,6 +189,23 @@ func (h *IntegrationsHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, _ := h.credRepo.GetByProvider(r.Context(), tenantID, provider)
+	if input.APIKey == "" && existing != nil && existing.APIKeyEncrypted != "" {
+		encKey = existing.APIKeyEncrypted
+	}
+	if input.APISecret == "" && existing != nil && existing.APISecretEncrypted != "" {
+		encSecret = existing.APISecretEncrypted
+	}
+	if input.IsActive {
+		if encKey == "" {
+			writeError(w, http.StatusBadRequest, "API key is required to activate Stripe")
+			return
+		}
+		if encSecret == "" {
+			writeError(w, http.StatusBadRequest, "Webhook signing secret is required to activate Stripe")
+			return
+		}
+	}
 	err = h.credRepo.Upsert(r.Context(), tenantID, provider, encKey, encSecret, input.Environment, input.IsActive)
 	if err != nil {
 		log.Printf("Error saving integration: %v", err)
