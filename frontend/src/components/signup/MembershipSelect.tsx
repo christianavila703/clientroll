@@ -138,7 +138,16 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
                     ? `$${formatMoney(minWeekly(mt)!)}`
                     : priceDisplayMode === "monthly" && minMonthly(mt) !== null
                     ? `$${formatMoney(minMonthly(mt)!)}`
-                    : `$${((mt as any).intrinsic_value || mt.total_value).toLocaleString()}`}
+                    : `$${(() => {
+                        const opts = mt.term_options || [];
+                        if (opts.length > 0) {
+                          const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
+                          return fees.length === 1 || fees[0] === fees[fees.length - 1]
+                            ? fees[0].toLocaleString()
+                            : `${fees[0].toLocaleString()} – $${fees[fees.length - 1].toLocaleString()}`;
+                        }
+                        return ((mt as any).intrinsic_value || mt.total_value).toLocaleString();
+                      })()}`}
                 </span>
                 <span className="text-[12px] text-gray-400">
                   {priceDisplayMode === "weekly" && minWeekly(mt) !== null

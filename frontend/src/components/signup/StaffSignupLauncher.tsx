@@ -128,7 +128,13 @@ export default function StaffSignupLauncher() {
                   <p className="text-[12px] text-gray-500 mt-1 line-clamp-2">{mt.description}</p>
                 )}
                 <div className="flex items-baseline gap-1 mt-3">
-                  <span className="text-xl font-bold text-indigo-600 tabular-nums">${mt.total_value.toLocaleString()}</span>
+                  <span className="text-xl font-bold text-indigo-600 tabular-nums">${(() => {
+                    const opts = mt.term_options || [];
+                    if (opts.length === 0) return mt.total_value.toLocaleString();
+                    if (opts.length === 1) return opts[0].fee_total.toLocaleString();
+                    const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
+                    return fees[0] === fees[fees.length - 1] ? fees[0].toLocaleString() : `${fees[0].toLocaleString()} – ${fees[fees.length - 1].toLocaleString()}`;
+                  })()}</span>
                   <span className="text-[12px] text-gray-400">total value</span>
                 </div>
                 {mt.term_options && mt.term_options.length > 0 && (
