@@ -142,11 +142,6 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	if membershipCurrency == "" {
 		membershipCurrency = "AUD"
 	}
-	if input.PaymentMethod == "direct_debit" && membershipCurrency != "AUD" {
-		writeError(w, http.StatusBadRequest, "Direct debit currently supports AUD memberships only")
-		return
-	}
-
 	m, err := h.memberRepo.Create(r.Context(), tenantID, clientID, mtID, toID,
 		startDate, input.PaymentMethod, input.PaymentFrequency, membershipCurrency, input.PaymentAmount,
 		func() *string {

@@ -412,10 +412,6 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// --- GoCardless direct debit path ---
 	gcMandateID := ""
 	if input.PaymentMethod == "direct_debit" {
-		if membershipCurrency != "AUD" {
-			writeError(w, http.StatusBadRequest, "Direct debit currently supports AUD memberships only")
-			return
-		}
 		if strings.TrimSpace(input.BSB) == "" || strings.TrimSpace(input.AccountNumber) == "" {
 			writeError(w, http.StatusBadRequest, "BSB and account number are required for direct debit")
 			return
