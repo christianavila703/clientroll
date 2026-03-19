@@ -92,13 +92,25 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 		"SELECT COUNT(*) FROM payment_disputes WHERE tenant_id=$1 AND status IN ('open', 'under_review')",
 		tenantID).Scan(&s.OpenDisputes)
 
-	// Direct debit stats (GoCardless + Stripe BECS by payment_method)
+	// Direct debit stats: count unique active clients on direct debit.
 	r.db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active' AND payment_method='direct_debit'",
+		`SELECT COUNT(DISTINCT m.client_id)
+		 FROM memberships m
+		 JOIN clients c ON c.id = m.client_id
+		 WHERE m.tenant_id=$1
+		   AND m.status='active'
+		   AND m.payment_method='direct_debit'
+		   AND c.deleted_at IS NULL`,
 		tenantID).Scan(&s.ActiveMandates)
 
 	r.db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active' AND payment_method='direct_debit'",
+		`SELECT COUNT(DISTINCT m.client_id)
+		 FROM memberships m
+		 JOIN clients c ON c.id = m.client_id
+		 WHERE m.tenant_id=$1
+		   AND m.status='active'
+		   AND m.payment_method='direct_debit'
+		   AND c.deleted_at IS NULL`,
 		tenantID).Scan(&s.ActiveSubscriptions)
 
 	r.db.Pool.QueryRow(ctx,
