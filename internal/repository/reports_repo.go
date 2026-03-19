@@ -66,12 +66,16 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 		  AND c.deleted_at IS NULL
 	`, tenantID).Scan(&s.ActiveMembers)
 
-	// This month revenue
+	// This month revenue (membership payments + service charges)
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	r.db.Pool.QueryRow(ctx,
-		"SELECT COALESCE(SUM(amount), 0) FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2",
-		tenantID, monthStart).Scan(&s.MonthRevenue)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev), 0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) combined
+	`, tenantID, monthStart).Scan(&s.MonthRevenue)
 
 	// Failed payments (unresolved)
 	r.db.Pool.QueryRow(ctx,
@@ -104,15 +108,19 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 	return &s, nil
 }
 
-// GetMonthlyRevenue returns monthly revenue for the past 12 months.
+// GetMonthlyRevenue returns monthly revenue for the past 12 months (membership payments + service charges).
 func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID) ([]MonthlyRevenue, error) {
 	query := `
-		SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month,
-		       COALESCE(SUM(amount), 0) AS revenue
-		FROM payments
-		WHERE tenant_id = $1 AND status = 'succeeded'
-		  AND paid_date >= NOW() - INTERVAL '12 months'
-		GROUP BY TO_CHAR(paid_date, 'YYYY-MM')
+		SELECT month, COALESCE(SUM(revenue), 0) AS revenue FROM (
+			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount AS revenue
+			FROM payments
+			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
+			UNION ALL
+			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount + tax_amount AS revenue
+			FROM service_charges
+			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
+		) combined
+		GROUP BY month
 		ORDER BY month`
 
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
@@ -272,14 +280,29 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	// Total clients
 	r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM clients WHERE tenant_id=$1", tenantID).Scan(&rpt.TotalClients)
 
-	// This month revenue
-	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2", tenantID, monthStart).Scan(&rpt.MonthRevenue)
+	// This month revenue (membership + service)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) x`, tenantID, monthStart).Scan(&rpt.MonthRevenue)
 
 	// Previous month revenue
-	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3", tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthRevenue)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+		) x`, tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthRevenue)
 
 	// Total revenue all time
-	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='succeeded'", tenantID).Scan(&rpt.TotalRevenue)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, tenantID).Scan(&rpt.TotalRevenue)
 
 	// MRR (sum of monthly payment amounts for active memberships)
 	r.db.Pool.QueryRow(ctx, `SELECT COALESCE(SUM(
@@ -306,8 +329,18 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 
 	// Collection rate
 	var totalDue, totalCollected float64
-	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1", tenantID).Scan(&totalDue)
-	r.db.Pool.QueryRow(ctx, "SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='succeeded'", tenantID).Scan(&totalCollected)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1
+		) x`, tenantID).Scan(&totalDue)
+	r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, tenantID).Scan(&totalCollected)
 	if totalDue > 0 {
 		rpt.CollectionRate = (totalCollected / totalDue) * 100
 	}
@@ -318,15 +351,16 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	// Monthly revenue (12 months)
 	rpt.MonthlyRevenue, _ = r.GetMonthlyRevenue(ctx, tenantID)
 
-	// Revenue totals by currency.
+	// Revenue totals by currency (membership + service).
 	rowsCurrency, err := r.db.Pool.Query(ctx, `
-		SELECT COALESCE(currency_code, 'AUD') AS currency_code,
-		       COALESCE(SUM(amount), 0) AS revenue,
-		       COUNT(*) AS payments
-		FROM payments
-		WHERE tenant_id = $1
-		  AND status = 'succeeded'
-		GROUP BY COALESCE(currency_code, 'AUD')
+		SELECT currency_code, COALESCE(SUM(revenue), 0) AS revenue, SUM(payments)::int AS payments FROM (
+			SELECT COALESCE(currency_code, 'AUD') AS currency_code, amount AS revenue, 1 AS payments
+			FROM payments WHERE tenant_id = $1 AND status = 'succeeded'
+			UNION ALL
+			SELECT 'AUD' AS currency_code, amount + tax_amount AS revenue, 1 AS payments
+			FROM service_charges WHERE tenant_id = $1 AND status = 'succeeded'
+		) combined
+		GROUP BY currency_code
 		ORDER BY currency_code
 	`, tenantID)
 	if err == nil {
@@ -377,8 +411,16 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 		}
 	}
 
-	// Top 10 clients by revenue
-	rows4, err := r.db.Pool.Query(ctx, `SELECT c.id::text, c.name, COALESCE(SUM(p.amount),0), COUNT(DISTINCT m.id) FROM clients c LEFT JOIN memberships m ON m.client_id=c.id LEFT JOIN payments p ON p.client_id=c.id AND p.status='succeeded' WHERE c.tenant_id=$1 GROUP BY c.id, c.name ORDER BY 3 DESC LIMIT 10`, tenantID)
+	// Top 10 clients by revenue (membership payments + service charges)
+	rows4, err := r.db.Pool.Query(ctx, `
+		SELECT c.id::text, c.name,
+			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.client_id=c.id AND p.status='succeeded'), 0)
+			+ COALESCE((SELECT SUM(sc.amount + sc.tax_amount) FROM service_charges sc WHERE sc.client_id=c.id AND sc.status='succeeded'), 0) AS total_rev,
+			(SELECT COUNT(DISTINCT m.id) FROM memberships m WHERE m.client_id=c.id) AS memberships
+		FROM clients c
+		WHERE c.tenant_id=$1 AND c.deleted_at IS NULL
+		GROUP BY c.id, c.name
+		ORDER BY total_rev DESC LIMIT 10`, tenantID)
 	if err == nil {
 		defer rows4.Close()
 		for rows4.Next() {
@@ -413,9 +455,15 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	return rpt, nil
 }
 
-// GetPaymentStatusBreakdown returns payment counts by status.
+// GetPaymentStatusBreakdown returns payment counts by status (membership payments + service charges).
 func (r *ReportsRepo) GetPaymentStatusBreakdown(ctx context.Context, tenantID uuid.UUID) (map[string]int, error) {
-	query := `SELECT status, COUNT(*) FROM payments WHERE tenant_id = $1 GROUP BY status`
+	query := `
+		SELECT status, SUM(cnt)::int FROM (
+			SELECT status, COUNT(*) AS cnt FROM payments WHERE tenant_id = $1 GROUP BY status
+			UNION ALL
+			SELECT status, COUNT(*) AS cnt FROM service_charges WHERE tenant_id = $1 GROUP BY status
+		) combined
+		GROUP BY status`
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, err
