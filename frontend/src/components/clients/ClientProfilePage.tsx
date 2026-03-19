@@ -1526,8 +1526,8 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [hasMandate, setHasMandate] = useState(false);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
 
-  // Selected payment method: "gocardless" | "stripe" | "gocardless_bank" (new bank details)
-  const [paymentMethod, setPaymentMethod] = useState<"gocardless" | "stripe" | "gocardless_bank" | "">("");
+  // Selected payment method: "gocardless" | "stripe" | "gocardless_bank" | "stripe_becs"
+  const [paymentMethod, setPaymentMethod] = useState<"gocardless" | "stripe" | "gocardless_bank" | "stripe_becs" | "">("");
 
   // Bank details for GoCardless (new mandate)
   const [bsb, setBsb] = useState("");
@@ -1553,9 +1553,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
       setClientEmail(mandate.client_email || null);
       const prov: string[] = mandate.payment_providers || [];
       setProviders(prov);
-      // Auto-select payment method
       if (mandate.has_mandate) {
         setPaymentMethod("gocardless");
+      } else if (prov.includes("stripe") && !prov.includes("gocardless")) {
+        setPaymentMethod("stripe");
       } else if (prov.length === 1) {
         setPaymentMethod(prov[0] as any);
       }
@@ -1614,14 +1615,16 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     finally { setSaving(false); }
   };
 
-  const handleChargeStripe = async () => {
+  const handleChargeStripe = async (method?: string) => {
     if (!description || toNumberOrZero(amount) <= 0) { setError("Description and amount are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      const data = await api.chargeServiceStripe(chargePayload()) as any;
+      const payload = { ...chargePayload(), payment_method: method || "card" };
+      const data = await api.chargeServiceStripe(payload) as any;
       if (data.checkout_url) {
         window.open(data.checkout_url, "_blank");
-        setSuccess("Stripe checkout opened in a new tab. The charge will be recorded once the client completes payment.");
+        const label = method === "direct_debit" ? "Direct debit" : "Stripe";
+        setSuccess(`${label} checkout opened in a new tab. The charge will be recorded once the client completes payment.`);
         setTimeout(() => onCharged(), 3000);
       } else {
         setSuccess("Charge recorded.");
@@ -1647,7 +1650,8 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (paymentMethod === "gocardless" && hasMandate) return handleChargeGC();
     if (paymentMethod === "gocardless_bank") return handleChargeGCBank();
     if (paymentMethod === "gocardless" && !hasMandate) return handleChargeGCBank();
-    if (paymentMethod === "stripe") return handleChargeStripe();
+    if (paymentMethod === "stripe_becs") return handleChargeStripe("direct_debit");
+    if (paymentMethod === "stripe") return handleChargeStripe("card");
   };
 
   const total = toNumberOrZero(amount) + toNumberOrZero(taxAmount);
@@ -1657,13 +1661,14 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (!paymentMethod || toNumberOrZero(amount) <= 0) return false;
     if (paymentMethod === "gocardless" && hasMandate) return true;
     if (paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) return !!bsb && !!accountNumber;
-    if (paymentMethod === "stripe") return true;
+    if (paymentMethod === "stripe" || paymentMethod === "stripe_becs") return true;
     return false;
   })();
 
   const submitLabel = (() => {
     if (saving) return "Processing...";
-    if (paymentMethod === "stripe") return `Pay $${total.toFixed(2)} via Card (Stripe)`;
+    if (paymentMethod === "stripe") return `Pay $${total.toFixed(2)} via Card`;
+    if (paymentMethod === "stripe_becs") return `Pay $${total.toFixed(2)} via Direct Debit`;
     if (paymentMethod === "gocardless" && hasMandate) return `Charge $${total.toFixed(2)} via Direct Debit`;
     if (paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) return `Set up mandate & charge $${total.toFixed(2)}`;
     return "Select a payment method";
@@ -1701,85 +1706,81 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
           ) : (
             <div className="px-6 py-5 space-y-5">
 
-              {/* Payment method selector — shown when both providers available or GC without mandate */}
-              {(hasGC && hasStripe) || (hasGC && !hasMandate) ? (
-                <div>
-                  <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment method</label>
-                  <div className="flex gap-2">
-                    {hasGC && hasMandate && (
-                      <button
-                        onClick={() => setPaymentMethod("gocardless")}
-                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
-                          paymentMethod === "gocardless" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
-                        }`}
-                      >
-                        <svg className="h-5 w-5 mx-auto mb-1 text-green-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
-                        Direct Debit
-                        <span className="block text-[10px] font-normal text-green-600 mt-0.5">Mandate active</span>
-                      </button>
-                    )}
-                    {hasGC && !hasMandate && (
-                      <button
-                        onClick={() => setPaymentMethod("gocardless_bank")}
-                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
-                          paymentMethod === "gocardless_bank" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
-                        }`}
-                      >
-                        <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
-                        Direct Debit
-                        <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Enter bank details</span>
-                      </button>
-                    )}
-                    {hasStripe && (
-                      <button
-                        onClick={() => setPaymentMethod("stripe")}
-                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
-                          paymentMethod === "stripe" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
-                        }`}
-                      >
-                        <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
-                        Card Payment
-                        <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Stripe checkout</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Send mandate link option for GC without mandate */}
-                  {hasGC && !hasMandate && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        onClick={handleSendMandateLink}
-                        disabled={sendingLink}
-                        className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
-                      >
-                        {sendingLink ? "Sending..." : "Or send mandate link to client"}
-                      </button>
-                    </div>
+              {/* Payment method selector */}
+              <div>
+                <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment method</label>
+                <div className="flex gap-2">
+                  {hasGC && hasMandate && (
+                    <button
+                      onClick={() => setPaymentMethod("gocardless")}
+                      className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                        paymentMethod === "gocardless" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <svg className="h-5 w-5 mx-auto mb-1 text-green-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                      Direct Debit
+                      <span className="block text-[10px] font-normal text-green-600 mt-0.5">Mandate active</span>
+                    </button>
                   )}
-                  {mandateLink && (
-                    <div className="mt-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
-                      <p className="text-[11px] text-gray-500 mb-1">Share this link:</p>
-                      <div className="flex gap-2 items-center">
-                        <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-white border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
-                        <button onClick={() => navigator.clipboard.writeText(mandateLink)} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
-                      </div>
-                    </div>
+                  {hasGC && !hasMandate && (
+                    <button
+                      onClick={() => setPaymentMethod("gocardless_bank")}
+                      className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                        paymentMethod === "gocardless_bank" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                      Direct Debit
+                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Enter bank details</span>
+                    </button>
+                  )}
+                  {!hasGC && hasStripe && (
+                    <button
+                      onClick={() => setPaymentMethod("stripe_becs")}
+                      className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                        paymentMethod === "stripe_becs" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                      Direct Debit
+                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Bank account</span>
+                    </button>
+                  )}
+                  {hasStripe && (
+                    <button
+                      onClick={() => setPaymentMethod("stripe")}
+                      className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                        paymentMethod === "stripe" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+                      Card Payment
+                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Stripe checkout</span>
+                    </button>
                   )}
                 </div>
-              ) : (
-                /* Single provider — show info banner */
-                hasGC && hasMandate ? (
-                  <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-2">
-                    <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <p className="text-[13px] text-green-800 font-medium">Direct debit mandate active — payment will be charged via GoCardless.</p>
+
+                {hasGC && !hasMandate && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={handleSendMandateLink}
+                      disabled={sendingLink}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      {sendingLink ? "Sending..." : "Or send mandate link to client"}
+                    </button>
                   </div>
-                ) : hasStripe ? (
-                  <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 flex items-center gap-2">
-                    <svg className="h-4 w-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
-                    <p className="text-[13px] text-blue-800 font-medium">Payment will be processed via Stripe card checkout.</p>
+                )}
+                {mandateLink && (
+                  <div className="mt-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
+                    <p className="text-[11px] text-gray-500 mb-1">Share this link:</p>
+                    <div className="flex gap-2 items-center">
+                      <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-white border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
+                      <button onClick={() => navigator.clipboard.writeText(mandateLink)} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
+                    </div>
                   </div>
-                ) : null
-              )}
+                )}
+              </div>
 
               {/* Bank details form — for GC new mandate */}
               {(paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) && (

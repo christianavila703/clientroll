@@ -201,7 +201,11 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 	if err1 != nil || err2 != nil || err3 != nil {
 		return
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, "AUD", time.Now().UTC(), sess.ID)
+	currencyCode := strings.ToUpper(strings.TrimSpace(metadata["currency_code"]))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), sess.ID)
 	if err != nil {
 		return
 	}

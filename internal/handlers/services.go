@@ -461,12 +461,13 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
 
 	var input struct {
-		ClientID    string  `json:"client_id"`
-		ServiceID   *string `json:"service_id"`
-		Description string  `json:"description"`
-		Amount      float64 `json:"amount"`
-		TaxAmount   float64 `json:"tax_amount"`
-		Notes       *string `json:"notes"`
+		ClientID      string  `json:"client_id"`
+		ServiceID     *string `json:"service_id"`
+		Description   string  `json:"description"`
+		Amount        float64 `json:"amount"`
+		TaxAmount     float64 `json:"tax_amount"`
+		Notes         *string `json:"notes"`
+		PaymentMethod string  `json:"payment_method"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
 		writeError(w, http.StatusBadRequest, "Client ID and positive amount required")
@@ -515,10 +516,11 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		SuccessURL: stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=success"),
 		CancelURL:  stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=cancelled"),
 		Metadata: map[string]string{
-			"tenant_id": tenantID.String(),
-			"client_id": clientID.String(),
-			"charge_id": charge.ID.String(),
-			"type":      "service_charge",
+			"tenant_id":      tenantID.String(),
+			"client_id":      clientID.String(),
+			"charge_id":      charge.ID.String(),
+			"type":           "service_charge",
+			"payment_method": input.PaymentMethod,
 		},
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
@@ -532,6 +534,9 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		},
+	}
+	if input.PaymentMethod == "direct_debit" {
+		params.PaymentMethodTypes = stripe.StringSlice([]string{"au_becs_debit"})
 	}
 	if client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)

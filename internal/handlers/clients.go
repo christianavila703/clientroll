@@ -410,6 +410,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 
 // GetMandateStatus checks whether a client has a GoCardless mandate on any active membership
 // and returns which payment providers (gocardless, stripe) are active for the tenant.
+// Also indicates whether direct debit is available (via GoCardless mandate or Stripe BECS).
 func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
@@ -431,6 +432,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		"gocardless_customer_id": nil,
 		"client_email":           nil,
 		"payment_providers":      []string{},
+		"supports_direct_debit":  false,
 	}
 
 	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
@@ -440,19 +442,22 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		result["client_email"] = *client.Email
 	}
 
-	// Check which payment providers are active for this tenant
 	providers := []string{}
+	hasGoCardless := false
+	hasStripe := false
 	if h.credRepo != nil {
 		if gc, _ := h.credRepo.GetByProvider(r.Context(), tenantID, "gocardless"); gc != nil && gc.APIKeyEncrypted != "" && gc.IsActive {
 			providers = append(providers, "gocardless")
+			hasGoCardless = true
 		}
 		if sc, _ := h.credRepo.GetByProvider(r.Context(), tenantID, "stripe"); sc != nil && sc.APIKeyEncrypted != "" && sc.IsActive {
 			providers = append(providers, "stripe")
+			hasStripe = true
 		}
 	}
 	result["payment_providers"] = providers
+	result["supports_direct_debit"] = hasGoCardless || hasStripe
 
-	// Check memberships for an active GoCardless mandate
 	memberships, err := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
 	if err == nil {
 		for _, m := range memberships {

@@ -71,7 +71,8 @@ function resolveFrequencyAmount(termOption: TermOption, frequency: string): numb
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], onComplete, onBack }: Props) {
   const supportsStripe = paymentProviders.includes("stripe");
   const supportsGoCardless = paymentProviders.includes("gocardless");
-  const defaultMethod = supportsGoCardless ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
+  const supportsDirectDebit = supportsGoCardless || supportsStripe;
+  const defaultMethod = supportsDirectDebit ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
   const [formStep, setFormStep] = useState<FormStep>("member");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -99,7 +100,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       : (tenant.enabled_payment_frequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
   const effectiveFrequencySet = new Set((effectiveEnabledPaymentFrequencies || []).map((f) => String(f).toLowerCase()));
 
-  const usesBankStep = payment.payment_method !== "card";
+  const usesBankStep = payment.payment_method === "direct_debit" && supportsGoCardless;
   const hasTerms = terms.length > 0;
   const steps: { key: FormStep; label: string; icon: string }[] = [
     { key: "member", label: "Your Details", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
@@ -144,7 +145,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           member_signature: memberSignature,
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
-          ...(payment.payment_method === "direct_debit" ? bank : {}),
+          ...(payment.payment_method === "direct_debit" && supportsGoCardless ? bank : {}),
         }),
       });
       const data = await res.json();
@@ -280,7 +281,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               onNext={() => setFormStep("payment")}
             />
           )}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} />}
           {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
@@ -460,7 +461,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, enabledP
         <div>
           <label className="block text-[13px] font-semibold text-gray-700 mb-3">Payment Method</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {supportsGoCardless && (
+            {(supportsGoCardless || supportsStripe) && (
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
                 data.payment_method === "direct_debit" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`} style={data.payment_method === "direct_debit" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
@@ -468,7 +469,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, enabledP
                   className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div>
                   <p className="text-[14px] font-semibold text-gray-900">Direct Debit</p>
-                  <p className="text-[12px] text-gray-500">Pay from bank account (GoCardless)</p>
+                  <p className="text-[12px] text-gray-500">Pay from your bank account</p>
                 </div>
               </label>
             )}
@@ -517,7 +518,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, enabledP
         </div>
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "card" ? "Continue" : "Bank Details"} />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "direct_debit" && paymentProviders.includes("gocardless") ? "Bank Details" : "Continue"} />
     </div>
   );
 }
