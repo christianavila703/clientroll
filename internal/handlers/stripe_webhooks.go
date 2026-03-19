@@ -172,6 +172,12 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		}
 		return
 	}
+	// For subscription checkouts, rely on invoice events for ledger entries.
+	// This avoids double-counting the initial payment from both
+	// checkout.session.completed and invoice.payment_succeeded.
+	if sess.Mode == stripe.CheckoutSessionModeSubscription {
+		return
+	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)
