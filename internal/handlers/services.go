@@ -16,6 +16,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v82"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 )
 
 var isoServiceCurrencyRegex = regexp.MustCompile(`^[A-Z]{3}$`)
@@ -51,6 +53,7 @@ func (h *ServiceHandler) RegisterRoutes(r chi.Router) {
 	r.Delete("/services/{serviceID}", h.Delete)
 	r.Post("/services/charge", h.TakePayment)
 	r.Post("/services/charge-with-bank-details", h.ChargeWithBankDetails)
+	r.Post("/services/charge-stripe", h.ChargeStripe)
 	r.Get("/services/charges/{clientID}", h.ListCharges)
 }
 
@@ -450,6 +453,113 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 		"gocardless_mandate_id": mandateID,
 		"gocardless_payment_id": gcPaymentID,
 	})
+}
+
+// ChargeStripe creates a Stripe Checkout session for a one-off service charge.
+func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
+
+	var input struct {
+		ClientID    string  `json:"client_id"`
+		ServiceID   *string `json:"service_id"`
+		Description string  `json:"description"`
+		Amount      float64 `json:"amount"`
+		TaxAmount   float64 `json:"tax_amount"`
+		Notes       *string `json:"notes"`
+	}
+	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
+		writeError(w, http.StatusBadRequest, "Client ID and positive amount required")
+		return
+	}
+	clientID, _ := uuid.Parse(input.ClientID)
+
+	secretKey, err := h.getStripeSecretKey(r.Context(), tenantID)
+	if err != nil || secretKey == "" {
+		writeError(w, http.StatusBadRequest, "Stripe not configured for this tenant")
+		return
+	}
+	stripe.Key = secretKey
+
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+
+	var serviceID *uuid.UUID
+	if input.ServiceID != nil && *input.ServiceID != "" {
+		sid, _ := uuid.Parse(*input.ServiceID)
+		serviceID = &sid
+	}
+
+	charge, err := h.serviceRepo.CreateCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, input.Notes, &userID)
+	if err != nil {
+		log.Printf("Error creating service charge: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create charge")
+		return
+	}
+
+	totalCents := int64((input.Amount + input.TaxAmount) * 100)
+	if totalCents <= 0 {
+		totalCents = int64(input.Amount * 100)
+	}
+
+	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
+	if origin == "" {
+		origin = "https://app.clientroll.com"
+	}
+
+	params := &stripe.CheckoutSessionParams{
+		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
+		SuccessURL: stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=success"),
+		CancelURL:  stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=cancelled"),
+		Metadata: map[string]string{
+			"tenant_id": tenantID.String(),
+			"client_id": clientID.String(),
+			"charge_id": charge.ID.String(),
+			"type":      "service_charge",
+		},
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String("aud"),
+					UnitAmount: stripe.Int64(totalCents),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String(input.Description),
+					},
+				},
+			},
+		},
+	}
+	if client.Email != nil && *client.Email != "" {
+		params.CustomerEmail = stripe.String(*client.Email)
+	}
+
+	sess, err := checkoutsession.New(params)
+	if err != nil {
+		log.Printf("Stripe Checkout session error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create Stripe checkout session")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"charge":       charge,
+		"checkout_url": sess.URL,
+		"session_id":   sess.ID,
+	})
+}
+
+func (h *ServiceHandler) getStripeSecretKey(ctx context.Context, tenantID uuid.UUID) (string, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return "", fmt.Errorf("stripe integration unavailable")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return "", fmt.Errorf("stripe not configured")
+	}
+	return h.encryptor.Decrypt(creds.APIKeyEncrypted)
 }
 
 func (h *ServiceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {

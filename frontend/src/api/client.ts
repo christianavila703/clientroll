@@ -246,6 +246,11 @@ export const api = {
       method: "POST",
       body: data,
     }),
+  chargeServiceStripe: (data: unknown) =>
+    request("/tenant/services/charge-stripe", {
+      method: "POST",
+      body: data,
+    }),
 
   // Reports
   getDashboardReport: () => request("/tenant/reports/dashboard"),

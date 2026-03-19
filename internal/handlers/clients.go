@@ -408,7 +408,8 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"memberships": results, "count": len(results)})
 }
 
-// GetMandateStatus checks whether a client has a GoCardless mandate on any active membership.
+// GetMandateStatus checks whether a client has a GoCardless mandate on any active membership
+// and returns which payment providers (gocardless, stripe) are active for the tenant.
 func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
@@ -429,6 +430,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		"membership_id":          nil,
 		"gocardless_customer_id": nil,
 		"client_email":           nil,
+		"payment_providers":      []string{},
 	}
 
 	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
@@ -438,7 +440,19 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		result["client_email"] = *client.Email
 	}
 
-	// Check memberships for an active mandate
+	// Check which payment providers are active for this tenant
+	providers := []string{}
+	if h.credRepo != nil {
+		if gc, _ := h.credRepo.GetByProvider(r.Context(), tenantID, "gocardless"); gc != nil && gc.APIKeyEncrypted != "" && gc.IsActive {
+			providers = append(providers, "gocardless")
+		}
+		if sc, _ := h.credRepo.GetByProvider(r.Context(), tenantID, "stripe"); sc != nil && sc.APIKeyEncrypted != "" && sc.IsActive {
+			providers = append(providers, "stripe")
+		}
+	}
+	result["payment_providers"] = providers
+
+	// Check memberships for an active GoCardless mandate
 	memberships, err := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
 	if err == nil {
 		for _, m := range memberships {

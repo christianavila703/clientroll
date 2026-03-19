@@ -1462,23 +1462,28 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Mandate status
-  const [mandateLoading, setMandateLoading] = useState(true);
+  // Payment provider info
+  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState<string[]>([]);
   const [hasMandate, setHasMandate] = useState(false);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
 
-  // Bank details (Option A: staff enters bank details)
-  const [showBankForm, setShowBankForm] = useState(false);
+  // Selected payment method: "gocardless" | "stripe" | "gocardless_bank" (new bank details)
+  const [paymentMethod, setPaymentMethod] = useState<"gocardless" | "stripe" | "gocardless_bank" | "">("");
+
+  // Bank details for GoCardless (new mandate)
   const [bsb, setBsb] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolderName, setAccountHolderName] = useState(clientName);
 
-  // Send link (Option B)
+  // Send mandate link
   const [sendingLink, setSendingLink] = useState(false);
   const [mandateLink, setMandateLink] = useState("");
 
+  const hasGC = providers.includes("gocardless");
+  const hasStripe = providers.includes("stripe");
+
   useEffect(() => {
-    // Load services and mandate status in parallel
     Promise.all([
       api.listServices(),
       api.getClientMandateStatus(clientId),
@@ -1488,8 +1493,16 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
       setServices((servicesData.services || []).filter((s: any) => s.is_active));
       setHasMandate(mandate.has_mandate || false);
       setClientEmail(mandate.client_email || null);
-      setMandateLoading(false);
-    }).catch(() => setMandateLoading(false));
+      const prov: string[] = mandate.payment_providers || [];
+      setProviders(prov);
+      // Auto-select payment method
+      if (mandate.has_mandate) {
+        setPaymentMethod("gocardless");
+      } else if (prov.length === 1) {
+        setPaymentMethod(prov[0] as any);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [clientId]);
 
   const handleServiceSelect = (serviceId: string) => {
@@ -1502,83 +1515,107 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     }
   };
 
-  // Submit: charge with existing mandate
-  const handleChargeWithMandate = async () => {
-    const parsedAmount = toNumberOrZero(amount);
-    const parsedTax = toNumberOrZero(taxAmount);
-    if (!description || parsedAmount <= 0) { setError("Description and amount are required"); return; }
+  const chargePayload = () => ({
+    client_id: clientId,
+    service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
+    description,
+    amount: toNumberOrZero(amount),
+    tax_amount: toNumberOrZero(taxAmount),
+    notes: notes || null,
+  });
+
+  const handleChargeGC = async () => {
+    if (!description || toNumberOrZero(amount) <= 0) { setError("Description and amount are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      const data = await api.chargeService({
-        client_id: clientId,
-        service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
-        description,
-        amount: parsedAmount,
-        tax_amount: parsedTax,
-        notes: notes || null,
-      }) as any;
-      if (data.gocardless_payment_id) {
-        setSuccess(`Direct debit submitted via GoCardless (${data.gocardless_payment_id})`);
-      } else {
-        setSuccess("Charge recorded via GoCardless.");
-      }
+      const data = await api.chargeService(chargePayload()) as any;
+      setSuccess(data.gocardless_payment_id
+        ? `Direct debit submitted via GoCardless (${data.gocardless_payment_id})`
+        : "Charge recorded via GoCardless.");
       setTimeout(() => onCharged(), 2000);
     } catch (err: any) { setError(err.message || "Failed"); }
     finally { setSaving(false); }
   };
 
-  // Submit: create mandate from bank details + charge
-  const handleChargeWithBankDetails = async () => {
-    const parsedAmount = toNumberOrZero(amount);
-    const parsedTax = toNumberOrZero(taxAmount);
-    if (!description || parsedAmount <= 0) { setError("Description and amount are required"); return; }
+  const handleChargeGCBank = async () => {
+    if (!description || toNumberOrZero(amount) <= 0) { setError("Description and amount are required"); return; }
     if (!bsb || !accountNumber) { setError("BSB and account number are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
       const data = await api.chargeServiceWithBankDetails({
-        client_id: clientId,
-        service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
-        description,
-        amount: parsedAmount,
-        tax_amount: parsedTax,
-        notes: notes || null,
+        ...chargePayload(),
         account_holder_name: accountHolderName,
         account_number: accountNumber,
         bsb,
       }) as any;
-      if (data.warning) {
-        setSuccess(`Mandate created (${data.gocardless_mandate_id}). Warning: ${data.warning}`);
-      } else {
-        setSuccess(`Mandate created and payment submitted via GoCardless (${data.gocardless_payment_id})`);
-      }
+      setSuccess(data.warning
+        ? `Mandate created (${data.gocardless_mandate_id}). Warning: ${data.warning}`
+        : `Mandate created and payment submitted via GoCardless (${data.gocardless_payment_id})`);
       setTimeout(() => onCharged(), 2500);
     } catch (err: any) { setError(err.message || "Failed"); }
     finally { setSaving(false); }
   };
 
-  // Send mandate link to client
+  const handleChargeStripe = async () => {
+    if (!description || toNumberOrZero(amount) <= 0) { setError("Description and amount are required"); return; }
+    setSaving(true); setError(""); setSuccess("");
+    try {
+      const data = await api.chargeServiceStripe(chargePayload()) as any;
+      if (data.checkout_url) {
+        window.open(data.checkout_url, "_blank");
+        setSuccess("Stripe checkout opened in a new tab. The charge will be recorded once the client completes payment.");
+        setTimeout(() => onCharged(), 3000);
+      } else {
+        setSuccess("Charge recorded.");
+        setTimeout(() => onCharged(), 2000);
+      }
+    } catch (err: any) { setError(err.message || "Failed"); }
+    finally { setSaving(false); }
+  };
+
   const handleSendMandateLink = async () => {
     setSendingLink(true); setError("");
     try {
       const data = await api.sendClientMandateLink(clientId) as any;
       setMandateLink(data.redirect_url || "");
-      if (data.email_sent) {
-        setSuccess(`Mandate setup link sent to ${clientEmail}. You can also copy the link below.`);
-      } else {
-        setSuccess("Mandate link created. Copy it below and share with the client.");
-      }
+      setSuccess(data.email_sent
+        ? `Mandate setup link sent to ${clientEmail}. You can also copy the link below.`
+        : "Mandate link created. Copy it below and share with the client.");
     } catch (err: any) { setError(err.message || "Failed to create mandate link"); }
     finally { setSendingLink(false); }
   };
 
+  const handleSubmit = () => {
+    if (paymentMethod === "gocardless" && hasMandate) return handleChargeGC();
+    if (paymentMethod === "gocardless_bank") return handleChargeGCBank();
+    if (paymentMethod === "gocardless" && !hasMandate) return handleChargeGCBank();
+    if (paymentMethod === "stripe") return handleChargeStripe();
+  };
+
   const total = toNumberOrZero(amount) + toNumberOrZero(taxAmount);
+  const noProviders = !hasGC && !hasStripe;
+
+  const canSubmit = (() => {
+    if (!paymentMethod || toNumberOrZero(amount) <= 0) return false;
+    if (paymentMethod === "gocardless" && hasMandate) return true;
+    if (paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) return !!bsb && !!accountNumber;
+    if (paymentMethod === "stripe") return true;
+    return false;
+  })();
+
+  const submitLabel = (() => {
+    if (saving) return "Processing...";
+    if (paymentMethod === "stripe") return `Pay $${total.toFixed(2)} via Card (Stripe)`;
+    if (paymentMethod === "gocardless" && hasMandate) return `Charge $${total.toFixed(2)} via Direct Debit`;
+    if (paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) return `Set up mandate & charge $${total.toFixed(2)}`;
+    return "Select a payment method";
+  })();
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
         <div className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl">
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <div>
               <h2 className="text-[15px] font-bold text-gray-900">Take Payment</h2>
@@ -1592,59 +1629,102 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
           {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
           {success && <div className="mx-6 mt-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[13px] text-green-700">{success}</div>}
 
-          {mandateLoading ? (
+          {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+            </div>
+          ) : noProviders ? (
+            <div className="px-6 py-8 text-center">
+              <svg className="h-10 w-10 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              <p className="text-[14px] font-semibold text-gray-700 mb-1">No payment provider configured</p>
+              <p className="text-[13px] text-gray-500 mb-4">Set up GoCardless or Stripe in Settings &rarr; Integrations to start collecting payments.</p>
+              <a href="/settings" className="btn-primary text-[12px] inline-flex">Go to Settings</a>
             </div>
           ) : (
             <div className="px-6 py-5 space-y-5">
 
-              {/* Mandate status banner */}
-              {hasMandate ? (
-                <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-2">
-                  <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-[13px] text-green-800 font-medium">Direct debit mandate active. Payment will be charged via GoCardless.</p>
-                </div>
-              ) : (
-                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <svg className="h-4 w-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-                    <p className="text-[13px] text-amber-800 font-semibold">No direct debit mandate set up</p>
-                  </div>
-                  <p className="text-[12px] text-amber-700 mb-3">Choose how to collect payment from this client:</p>
+              {/* Payment method selector — shown when both providers available or GC without mandate */}
+              {(hasGC && hasStripe) || (hasGC && !hasMandate) ? (
+                <div>
+                  <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment method</label>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowBankForm(!showBankForm)}
-                      className={`flex-1 rounded-lg border-2 px-3 py-2.5 text-[12px] font-semibold transition-all ${
-                        showBankForm ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
-                      }`}
-                    >
-                      <svg className="h-4 w-4 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
-                      Enter bank details now
-                    </button>
-                    <button
-                      onClick={handleSendMandateLink}
-                      disabled={sendingLink}
-                      className="flex-1 rounded-lg border-2 border-gray-200 bg-white px-3 py-2.5 text-[12px] font-semibold text-gray-700 hover:border-gray-300 transition-all"
-                    >
-                      <svg className="h-4 w-4 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
-                      {sendingLink ? "Sending..." : "Send mandate link"}
-                    </button>
+                    {hasGC && hasMandate && (
+                      <button
+                        onClick={() => setPaymentMethod("gocardless")}
+                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                          paymentMethod === "gocardless" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                        }`}
+                      >
+                        <svg className="h-5 w-5 mx-auto mb-1 text-green-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                        Direct Debit
+                        <span className="block text-[10px] font-normal text-green-600 mt-0.5">Mandate active</span>
+                      </button>
+                    )}
+                    {hasGC && !hasMandate && (
+                      <button
+                        onClick={() => setPaymentMethod("gocardless_bank")}
+                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                          paymentMethod === "gocardless_bank" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                        }`}
+                      >
+                        <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                        Direct Debit
+                        <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Enter bank details</span>
+                      </button>
+                    )}
+                    {hasStripe && (
+                      <button
+                        onClick={() => setPaymentMethod("stripe")}
+                        className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
+                          paymentMethod === "stripe" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                        }`}
+                      >
+                        <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+                        Card Payment
+                        <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Stripe checkout</span>
+                      </button>
+                    )}
                   </div>
+
+                  {/* Send mandate link option for GC without mandate */}
+                  {hasGC && !hasMandate && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={handleSendMandateLink}
+                        disabled={sendingLink}
+                        className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                      >
+                        {sendingLink ? "Sending..." : "Or send mandate link to client"}
+                      </button>
+                    </div>
+                  )}
                   {mandateLink && (
-                    <div className="mt-3 rounded-md bg-white border border-gray-200 px-3 py-2">
-                      <p className="text-[11px] text-gray-500 mb-1">Share this link with the client:</p>
+                    <div className="mt-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
+                      <p className="text-[11px] text-gray-500 mb-1">Share this link:</p>
                       <div className="flex gap-2 items-center">
-                        <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
-                        <button onClick={() => { navigator.clipboard.writeText(mandateLink); }} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
+                        <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-white border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
+                        <button onClick={() => navigator.clipboard.writeText(mandateLink)} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
                       </div>
                     </div>
                   )}
                 </div>
+              ) : (
+                /* Single provider — show info banner */
+                hasGC && hasMandate ? (
+                  <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-2">
+                    <svg className="h-4 w-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <p className="text-[13px] text-green-800 font-medium">Direct debit mandate active — payment will be charged via GoCardless.</p>
+                  </div>
+                ) : hasStripe ? (
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 flex items-center gap-2">
+                    <svg className="h-4 w-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+                    <p className="text-[13px] text-blue-800 font-medium">Payment will be processed via Stripe card checkout.</p>
+                  </div>
+                ) : null
               )}
 
-              {/* Bank details form (Option A) */}
-              {!hasMandate && showBankForm && (
+              {/* Bank details form — for GC new mandate */}
+              {(paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) && (
                 <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 px-4 py-4 space-y-3">
                   <h3 className="text-[13px] font-bold text-gray-900">Bank Details</h3>
                   <div className="grid grid-cols-2 gap-3">
@@ -1726,21 +1806,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
               {/* Submit */}
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
-                {hasMandate ? (
-                  <button onClick={handleChargeWithMandate} disabled={saving || toNumberOrZero(amount) <= 0} className="btn-primary text-[12px]">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
-                    {saving ? "Processing..." : `Charge $${total.toFixed(2)} via Direct Debit`}
-                  </button>
-                ) : showBankForm ? (
-                  <button onClick={handleChargeWithBankDetails} disabled={saving || toNumberOrZero(amount) <= 0 || !bsb || !accountNumber} className="btn-primary text-[12px]">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
-                    {saving ? "Setting up..." : `Set up mandate & charge $${total.toFixed(2)}`}
-                  </button>
-                ) : (
-                  <button disabled className="btn-primary text-[12px] opacity-50 cursor-not-allowed">
-                    Select a payment method above
-                  </button>
-                )}
+                <button onClick={handleSubmit} disabled={saving || !canSubmit} className={`btn-primary text-[12px] ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
+                  {submitLabel}
+                </button>
               </div>
             </div>
           )}
