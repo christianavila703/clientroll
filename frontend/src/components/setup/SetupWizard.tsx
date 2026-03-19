@@ -735,7 +735,6 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
 function MembershipStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: string) => void }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [totalValue, setTotalValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState(false);
 
@@ -746,7 +745,6 @@ function MembershipStep({ onSaved, onError }: { onSaved: () => void; onError: (m
       await api.createMembershipType({
         title: title.trim(),
         description: description.trim() || undefined,
-        total_value: parseFloat(totalValue) || 0,
       });
       setCreated(true);
       onSaved();
@@ -785,7 +783,6 @@ function MembershipStep({ onSaved, onError }: { onSaved: () => void; onError: (m
             placeholder="Brief description of this membership..."
           />
         </div>
-        <WizardField label="Total Value ($)" value={totalValue} onChange={setTotalValue} type="number" placeholder="0.00" />
       </div>
       <div className="mt-4 flex justify-end">
         <button onClick={handleCreate} disabled={saving} className="btn-primary text-[13px]">

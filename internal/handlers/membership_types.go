@@ -88,11 +88,8 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description     *string `json:"description"`
 		Inclusions      *string `json:"inclusions"`
 		TopImageURL     *string `json:"top_image_url"`
-		IsMostPopular   bool    `json:"is_most_popular"`
-		// Kept for backward compatibility with older frontends that still send it.
-		IntrinsicValue *float64 `json:"intrinsic_value"`
-		TotalValue     float64  `json:"total_value"`
-		SortOrder      int      `json:"sort_order"`
+		IsMostPopular bool `json:"is_most_popular"`
+		SortOrder     int  `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
@@ -146,7 +143,7 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mt, err := h.mtRepo.Create(r.Context(), tenantID, membershipName, membershipLevel, input.Title, input.Slug,
-		input.Description, input.Inclusions, input.TopImageURL, input.TotalValue, input.SortOrder, input.CurrencyCode)
+		input.Description, input.Inclusions, input.TopImageURL, input.SortOrder, input.CurrencyCode)
 	if err != nil {
 		log.Printf("Error creating membership type: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership type")
@@ -180,10 +177,9 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Description               *string   `json:"description"`
 		Inclusions                *string   `json:"inclusions"`
 		Benefits                  *string   `json:"benefits"`
-		TopImageURL               *string   `json:"top_image_url"`
-		CurrencyCode              *string   `json:"currency_code"`
-		TotalValue                *float64  `json:"total_value"`
-		SortOrder                 *int      `json:"sort_order"`
+		TopImageURL  *string `json:"top_image_url"`
+		CurrencyCode *string `json:"currency_code"`
+		SortOrder    *int    `json:"sort_order"`
 		EnabledPaymentFrequencies *[]string `json:"enabled_payment_frequencies"`
 		IsActive                  *bool     `json:"is_active"`
 		IsMostPopular             *bool     `json:"is_most_popular"`
@@ -293,7 +289,6 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		input.Benefits,
 		input.TopImageURL,
 		nextCurrency,
-		input.TotalValue,
 		input.SortOrder,
 		nextEnabledPaymentFrequencies,
 	); err != nil {

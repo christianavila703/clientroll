@@ -22,11 +22,9 @@ type MembershipType struct {
 	CurrencyCode    string    `json:"currency_code"`
 	// If set, this overrides tenant-level enabled payment frequencies for this membership.
 	EnabledPaymentFrequencies []string  `json:"enabled_payment_frequencies,omitempty"`
-	IsActive                  bool      `json:"is_active"`
-	IsMostPopular             bool      `json:"is_most_popular"`
-	IntrinsicValue            float64   `json:"intrinsic_value"`
-	TotalValue                float64   `json:"total_value"`
-	SortOrder                 int       `json:"sort_order"`
+	IsActive      bool `json:"is_active"`
+	IsMostPopular bool `json:"is_most_popular"`
+	SortOrder     int  `json:"sort_order"`
 	UseCustomThankyou         bool      `json:"use_custom_thankyou"`
 	ThankyouHeading           *string   `json:"thankyou_heading"`
 	ThankyouBody              *string   `json:"thankyou_body"`

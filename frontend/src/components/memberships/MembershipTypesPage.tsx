@@ -13,8 +13,6 @@ interface MembershipType {
   currency_code?: string;
   is_active: boolean;
   is_most_popular?: boolean;
-  intrinsic_value: number;
-  total_value: number;
   sort_order: number;
   term_options?: TermOption[];
   created_at: string;
@@ -202,7 +200,7 @@ export default function MembershipTypesPage() {
                   </td>
                   <td className="tabular-nums">{mt.currency_code || "AUD"} ${(() => {
                     const opts = mt.term_options || [];
-                    if (opts.length === 0) return (mt.intrinsic_value || mt.total_value || 0).toLocaleString();
+                    if (opts.length === 0) return "0";
                     if (opts.length === 1) return opts[0].fee_total.toLocaleString();
                     const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
                     return fees[0] === fees[fees.length - 1]
@@ -315,7 +313,7 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
 
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
   const [form, setForm] = useState({
-    membership_name: "", membership_level: "", description: "", inclusions: "", total_value: "", sort_order: "", top_image_url: "", is_most_popular: false, currency_code: "AUD",
+    membership_name: "", membership_level: "", description: "", inclusions: "", sort_order: "", top_image_url: "", is_most_popular: false, currency_code: "AUD",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -347,7 +345,6 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
         membership_level: membershipLevel || null,
         description: form.description || "",
         inclusions: form.inclusions || "",
-        total_value: toNumberOrZero(form.total_value),
         sort_order: toNumberOrZero(form.sort_order),
         top_image_url: form.top_image_url || "",
         is_most_popular: form.is_most_popular,
@@ -402,11 +399,6 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
           hint="Banner displayed at the top of the public signup page"
         />
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-[13px] font-medium text-gray-700 mb-1">Membership Value ($)</label>
-            <p className="text-[10px] text-gray-400 mb-1">Base value of the membership (excl. bonuses)</p>
-            <input type="number" value={form.total_value} onChange={(e) => setForm({ ...form, total_value: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" step="0.01" />
-          </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Sort Order</label>
             <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value === "" ? "" : Number(e.target.value) })} className="input-field" min="0" />

@@ -39,7 +39,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -116,15 +116,15 @@ func (r *MembershipTypeRepo) FindBySlug(ctx context.Context, slug string, tenant
 }
 
 // Create inserts a new membership type.
-func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, totalValue float64, sortOrder int, currencyCode string) (*models.MembershipType, error) {
+func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, sortOrder int, currencyCode string) (*models.MembershipType, error) {
 	query := `
 		INSERT INTO membership_types (tenant_id, membership_name, membership_level, title, slug,
 		    summary, description, inclusions, benefits,
-		    top_image_url, currency_code, intrinsic_value, total_value, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
+		    top_image_url, currency_code, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
@@ -132,7 +132,7 @@ func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, mem
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipName, membershipLevel, title, slug,
 		nil, description, inclusions, nil,
-		topImageURL, currencyCode, totalValue, sortOrder).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
+		topImageURL, currencyCode, sortOrder).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership type: %w", err)
 	}
@@ -152,7 +152,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 
 	mt, err := r.Create(ctx, tenantID, source.MembershipName, source.MembershipLevel, newTitle, newSlug,
 		source.Description, source.Inclusions, source.TopImageURL,
-		source.TotalValue, source.SortOrder+1, source.CurrencyCode)
+		source.SortOrder+1, source.CurrencyCode)
 	if err != nil {
 		return nil, err
 	}
@@ -208,19 +208,7 @@ func (r *MembershipTypeRepo) CreateTermOption(
 	if err != nil {
 		return nil, fmt.Errorf("creating term option: %w", err)
 	}
-	r.syncTotalValue(ctx, membershipTypeID, tenantID)
 	return &to, nil
-}
-
-// syncTotalValue recalculates total_value and intrinsic_value on the parent
-// membership type from the first term option (by duration_months).
-func (r *MembershipTypeRepo) syncTotalValue(ctx context.Context, membershipTypeID, tenantID uuid.UUID) {
-	_, _ = r.db.Pool.Exec(ctx, `
-		UPDATE membership_types SET
-			total_value    = COALESCE((SELECT fee_total FROM membership_term_options WHERE membership_type_id=$1 AND tenant_id=$2 ORDER BY duration_months LIMIT 1), 0),
-			intrinsic_value = COALESCE((SELECT fee_total FROM membership_term_options WHERE membership_type_id=$1 AND tenant_id=$2 ORDER BY duration_months LIMIT 1), 0),
-			updated_at = NOW()
-		WHERE id=$1 AND tenant_id=$2`, membershipTypeID, tenantID)
 }
 
 // UpdateTermOption updates a term option.
@@ -263,7 +251,6 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 	if err != nil {
 		return nil, fmt.Errorf("updating term option: %w", err)
 	}
-	r.syncTotalValue(ctx, to.MembershipTypeID, tenantID)
 	return &to, nil
 }
 
@@ -311,17 +298,10 @@ func (r *MembershipTypeRepo) Delete(ctx context.Context, id, tenantID uuid.UUID)
 	return err
 }
 
-// DeleteTermOption removes a term option and syncs the parent's total_value.
+// DeleteTermOption removes a term option.
 func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID uuid.UUID) error {
-	var mtID uuid.UUID
-	_ = r.db.Pool.QueryRow(ctx,
-		"SELECT membership_type_id FROM membership_term_options WHERE id=$1 AND tenant_id=$2", id, tenantID).Scan(&mtID)
-
 	_, err := r.db.Pool.Exec(ctx,
 		"DELETE FROM membership_term_options WHERE id=$1 AND tenant_id=$2", id, tenantID)
-	if err == nil && mtID != uuid.Nil {
-		r.syncTotalValue(ctx, mtID, tenantID)
-	}
 	return err
 }
 
@@ -381,7 +361,7 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
@@ -403,7 +383,7 @@ func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType, enabledPaymen
 	return []interface{}{
 		&mt.ID, &mt.TenantID, &mt.MembershipName, &mt.MembershipLevel, &mt.Title, &mt.Slug,
 		&mt.Summary, &mt.Description, &mt.Inclusions, &mt.Benefits,
-		&mt.TopImageURL, &mt.CurrencyCode, enabledPaymentFrequenciesRaw, &mt.IsActive, &mt.IsMostPopular, &mt.IntrinsicValue, &mt.TotalValue, &mt.SortOrder,
+		&mt.TopImageURL, &mt.CurrencyCode, enabledPaymentFrequenciesRaw, &mt.IsActive, &mt.IsMostPopular, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}
@@ -463,7 +443,6 @@ func (r *MembershipTypeRepo) UpdateBasics(
 	id, tenantID uuid.UUID,
 	membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL *string,
 	currencyCode *string,
-	totalValue *float64,
 	sortOrder *int,
 	enabledPaymentFrequencies *[]string,
 ) (*models.MembershipType, error) {
@@ -479,18 +458,16 @@ func (r *MembershipTypeRepo) UpdateBasics(
 			benefits = COALESCE($10, benefits),
 			top_image_url = COALESCE($11, top_image_url),
 			currency_code = COALESCE($12, currency_code),
-			total_value = COALESCE($13, total_value),
-			intrinsic_value = COALESCE($13, intrinsic_value),
-			sort_order = COALESCE($14, sort_order),
+			sort_order = COALESCE($13, sort_order),
 			enabled_payment_frequencies = CASE
-				WHEN $15::jsonb IS NULL THEN enabled_payment_frequencies
-				ELSE $15::jsonb
+				WHEN $14::jsonb IS NULL THEN enabled_payment_frequencies
+				ELSE $14::jsonb
 			END,
 			updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, intrinsic_value, total_value, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
@@ -504,7 +481,7 @@ func (r *MembershipTypeRepo) UpdateBasics(
 		}
 		enabledPaymentFrequenciesJSON = encoded
 	}
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, totalValue, sortOrder, enabledPaymentFrequenciesJSON).
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, sortOrder, enabledPaymentFrequenciesJSON).
 		Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		if err == pgx.ErrNoRows {

@@ -33,7 +33,6 @@ interface MembershipType {
   title: string;
   slug: string;
   description?: string;
-  total_value: number;
   is_active: boolean;
   top_image_url?: string;
   term_options?: { id: string; duration_months: number; fee_total: number }[];
@@ -130,7 +129,7 @@ export default function StaffSignupLauncher() {
                 <div className="flex items-baseline gap-1 mt-3">
                   <span className="text-xl font-bold text-indigo-600 tabular-nums">${(() => {
                     const opts = mt.term_options || [];
-                    if (opts.length === 0) return mt.total_value.toLocaleString();
+                    if (opts.length === 0) return "0";
                     if (opts.length === 1) return opts[0].fee_total.toLocaleString();
                     const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
                     return fees[0] === fees[fees.length - 1] ? fees[0].toLocaleString() : `${fees[0].toLocaleString()} – ${fees[fees.length - 1].toLocaleString()}`;

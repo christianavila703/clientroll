@@ -30,7 +30,6 @@ interface MembershipType {
   benefits?: string;
   top_image_url?: string;
   enabled_payment_frequencies?: string[];
-  total_value: number;
   term_options: TermOption[];
 }
 
