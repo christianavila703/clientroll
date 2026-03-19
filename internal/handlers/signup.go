@@ -779,6 +779,8 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	}
 
 	feeCents := stripeProcessingFee(unitAmount, "card")
+	totalAmount := float64(unitAmount+feeCents) / 100.0
+	params.Metadata["payment_amount"] = strconv.FormatFloat(totalAmount, 'f', 2, 64)
 
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),
@@ -885,6 +887,8 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	}
 
 	feeCents := stripeProcessingFee(unitAmount, "direct_debit")
+	totalAmount := float64(unitAmount+feeCents) / 100.0
+	params.Metadata["payment_amount"] = strconv.FormatFloat(totalAmount, 'f', 2, 64)
 
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),

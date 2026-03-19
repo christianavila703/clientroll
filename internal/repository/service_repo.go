@@ -33,6 +33,7 @@ type ServiceCharge struct {
 	Description string     `json:"description"`
 	Amount      float64    `json:"amount"`
 	TaxAmount   float64    `json:"tax_amount"`
+	ProcessingFeeAmount float64 `json:"processing_fee_amount"`
 	Status      string     `json:"status"`
 	PaidDate    *time.Time `json:"paid_date"`
 	Notes       *string    `json:"notes"`
@@ -105,25 +106,48 @@ func (r *ServiceRepo) Delete(ctx context.Context, id, tenantID uuid.UUID) error 
 
 // CreateCharge creates a one-off service charge for a client.
 func (r *ServiceRepo) CreateCharge(ctx context.Context, tenantID, clientID uuid.UUID, serviceID *uuid.UUID, description string, amount, taxAmount float64, notes *string, createdBy *uuid.UUID) (*ServiceCharge, error) {
-	var sc ServiceCharge
 	now := time.Now()
+	return r.createChargeWithState(ctx, tenantID, clientID, serviceID, description, amount, taxAmount, 0, "succeeded", &now, notes, createdBy)
+}
+
+// CreatePendingCharge creates a service charge in pending state. Use this before
+// redirecting to hosted checkout so reports only include it after successful payment.
+func (r *ServiceRepo) CreatePendingCharge(ctx context.Context, tenantID, clientID uuid.UUID, serviceID *uuid.UUID, description string, amount, taxAmount, processingFeeAmount float64, notes *string, createdBy *uuid.UUID) (*ServiceCharge, error) {
+	return r.createChargeWithState(ctx, tenantID, clientID, serviceID, description, amount, taxAmount, processingFeeAmount, "pending", nil, notes, createdBy)
+}
+
+func (r *ServiceRepo) createChargeWithState(ctx context.Context, tenantID, clientID uuid.UUID, serviceID *uuid.UUID, description string, amount, taxAmount, processingFeeAmount float64, status string, paidDate *time.Time, notes *string, createdBy *uuid.UUID) (*ServiceCharge, error) {
+	var sc ServiceCharge
 	err := r.db.Pool.QueryRow(ctx,
-		`INSERT INTO service_charges (tenant_id, client_id, service_id, description, amount, tax_amount, status, paid_date, notes, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'succeeded', $7, $8, $9)
-		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, status, paid_date, notes, created_by, created_at`,
-		tenantID, clientID, serviceID, description, amount, taxAmount, &now, notes, createdBy).Scan(
+		`INSERT INTO service_charges (tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, created_at`,
+		tenantID, clientID, serviceID, description, amount, taxAmount, processingFeeAmount, status, paidDate, notes, createdBy).Scan(
 		&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-		&sc.Amount, &sc.TaxAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt)
+		&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating service charge: %w", err)
 	}
 	return &sc, nil
 }
 
+// UpdateChargeStatus updates a service charge status and paid_date.
+func (r *ServiceRepo) UpdateChargeStatus(ctx context.Context, tenantID, chargeID uuid.UUID, status string, paidDate *time.Time) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE service_charges
+		 SET status = $3, paid_date = $4
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, chargeID, status, paidDate)
+	if err != nil {
+		return fmt.Errorf("updating service charge status: %w", err)
+	}
+	return nil
+}
+
 // ListChargesByClient returns service charges for a client.
 func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantID uuid.UUID) ([]ServiceCharge, error) {
 	rows, err := r.db.Pool.Query(ctx,
-		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, status, paid_date, notes, created_by, created_at
+		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, created_at
 		 FROM service_charges WHERE client_id=$1 AND tenant_id=$2 ORDER BY created_at DESC`, clientID, tenantID)
 	if err != nil {
 		return nil, err
@@ -133,7 +157,7 @@ func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantI
 	for rows.Next() {
 		var sc ServiceCharge
 		if err := rows.Scan(&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-			&sc.Amount, &sc.TaxAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt); err != nil {
+			&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, sc)

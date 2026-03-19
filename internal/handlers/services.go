@@ -494,13 +494,6 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		serviceID = &sid
 	}
 
-	charge, err := h.serviceRepo.CreateCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, input.Notes, &userID)
-	if err != nil {
-		log.Printf("Error creating service charge: %v", err)
-		writeError(w, http.StatusInternalServerError, "Failed to create charge")
-		return
-	}
-
 	totalCents := int64((input.Amount + input.TaxAmount) * 100)
 	if totalCents <= 0 {
 		totalCents = int64(input.Amount * 100)
@@ -516,6 +509,14 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		feeMethod = "direct_debit"
 	}
 	feeCents := stripeProcessingFee(totalCents, feeMethod)
+	feeAmount := float64(feeCents) / 100.0
+
+	charge, err := h.serviceRepo.CreatePendingCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, feeAmount, input.Notes, &userID)
+	if err != nil {
+		log.Printf("Error creating pending service charge: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create charge")
+		return
+	}
 
 	params := &stripe.CheckoutSessionParams{
 		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -561,6 +562,7 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		log.Printf("Stripe Checkout session error: %v", err)
+		_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
 		writeError(w, http.StatusInternalServerError, "Failed to create Stripe checkout session")
 		return
 	}

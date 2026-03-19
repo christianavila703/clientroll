@@ -30,6 +30,7 @@ type StripeWebhookHandler struct {
 	paymentRepo *repository.PaymentRepo
 	disputeRepo *repository.PaymentDisputeRepo
 	memberRepo  *repository.MembershipRepo
+	serviceRepo *repository.ServiceRepo
 	dispatcher  *events.Dispatcher
 }
 
@@ -43,6 +44,7 @@ func NewStripeWebhookHandler(
 	paymentRepo *repository.PaymentRepo,
 	disputeRepo *repository.PaymentDisputeRepo,
 	memberRepo *repository.MembershipRepo,
+	serviceRepo *repository.ServiceRepo,
 ) *StripeWebhookHandler {
 	return &StripeWebhookHandler{
 		db:          db,
@@ -53,6 +55,7 @@ func NewStripeWebhookHandler(
 		paymentRepo: paymentRepo,
 		disputeRepo: disputeRepo,
 		memberRepo:  memberRepo,
+		serviceRepo: serviceRepo,
 	}
 }
 
@@ -155,6 +158,20 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		return
 	}
 	metadata := sess.Metadata
+	if metadata["type"] == "service_charge" {
+		if h.serviceRepo == nil {
+			return
+		}
+		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
+		if err != nil {
+			return
+		}
+		now := time.Now().UTC()
+		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
+			log.Printf("stripe webhook update service charge succeeded failed: %v", err)
+		}
+		return
+	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)
@@ -195,6 +212,19 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 		return
 	}
 	metadata := sess.Metadata
+	if metadata["type"] == "service_charge" {
+		if h.serviceRepo == nil {
+			return
+		}
+		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
+		if err != nil {
+			return
+		}
+		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil); err != nil {
+			log.Printf("stripe webhook update service charge failed failed: %v", err)
+		}
+		return
+	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)

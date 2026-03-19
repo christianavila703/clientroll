@@ -73,7 +73,7 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 		SELECT COALESCE(SUM(rev), 0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 		) combined
 	`, tenantID, monthStart).Scan(&s.MonthRevenue)
 
@@ -92,13 +92,13 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 		"SELECT COUNT(*) FROM payment_disputes WHERE tenant_id=$1 AND status IN ('open', 'under_review')",
 		tenantID).Scan(&s.OpenDisputes)
 
-	// Direct debit stats
+	// Direct debit stats (GoCardless + Stripe BECS by payment_method)
 	r.db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND gocardless_mandate_id IS NOT NULL AND status='active'",
+		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active' AND payment_method='direct_debit'",
 		tenantID).Scan(&s.ActiveMandates)
 
 	r.db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND gocardless_subscription_id IS NOT NULL AND status='active'",
+		"SELECT COUNT(*) FROM memberships WHERE tenant_id=$1 AND status='active' AND payment_method='direct_debit'",
 		tenantID).Scan(&s.ActiveSubscriptions)
 
 	r.db.Pool.QueryRow(ctx,
@@ -116,7 +116,7 @@ func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID)
 			FROM payments
 			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
 			UNION ALL
-			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount + tax_amount AS revenue
+			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount + tax_amount + processing_fee_amount AS revenue
 			FROM service_charges
 			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
 		) combined
@@ -285,7 +285,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 		SELECT COALESCE(SUM(rev),0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 		) x`, tenantID, monthStart).Scan(&rpt.MonthRevenue)
 
 	// Previous month revenue
@@ -293,7 +293,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 		SELECT COALESCE(SUM(rev),0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
 		) x`, tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthRevenue)
 
 	// Total revenue all time
@@ -301,7 +301,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 		SELECT COALESCE(SUM(rev),0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
 		) x`, tenantID).Scan(&rpt.TotalRevenue)
 
 	// MRR (sum of monthly payment amounts for active memberships)
@@ -333,13 +333,13 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 		SELECT COALESCE(SUM(rev),0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1
 		) x`, tenantID).Scan(&totalDue)
 	r.db.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(rev),0) FROM (
 			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
 			UNION ALL
-			SELECT amount + tax_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
 		) x`, tenantID).Scan(&totalCollected)
 	if totalDue > 0 {
 		rpt.CollectionRate = (totalCollected / totalDue) * 100
@@ -357,7 +357,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 			SELECT COALESCE(currency_code, 'AUD') AS currency_code, amount AS revenue, 1 AS payments
 			FROM payments WHERE tenant_id = $1 AND status = 'succeeded'
 			UNION ALL
-			SELECT 'AUD' AS currency_code, amount + tax_amount AS revenue, 1 AS payments
+			SELECT 'AUD' AS currency_code, amount + tax_amount + processing_fee_amount AS revenue, 1 AS payments
 			FROM service_charges WHERE tenant_id = $1 AND status = 'succeeded'
 		) combined
 		GROUP BY currency_code
@@ -415,7 +415,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	rows4, err := r.db.Pool.Query(ctx, `
 		SELECT c.id::text, c.name,
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.client_id=c.id AND p.status='succeeded'), 0)
-			+ COALESCE((SELECT SUM(sc.amount + sc.tax_amount) FROM service_charges sc WHERE sc.client_id=c.id AND sc.status='succeeded'), 0) AS total_rev,
+			+ COALESCE((SELECT SUM(sc.amount + sc.tax_amount + sc.processing_fee_amount) FROM service_charges sc WHERE sc.client_id=c.id AND sc.status='succeeded'), 0) AS total_rev,
 			(SELECT COUNT(DISTINCT m.id) FROM memberships m WHERE m.client_id=c.id) AS memberships
 		FROM clients c
 		WHERE c.tenant_id=$1 AND c.deleted_at IS NULL
