@@ -200,7 +200,15 @@ export default function MembershipTypesPage() {
                       {mt.is_most_popular && <span className="badge badge-purple">Most Popular</span>}
                     </div>
                   </td>
-                  <td className="tabular-nums">{mt.currency_code || "AUD"} ${mt.intrinsic_value?.toLocaleString() || mt.total_value.toLocaleString()}</td>
+                  <td className="tabular-nums">{mt.currency_code || "AUD"} ${(() => {
+                    const opts = mt.term_options || [];
+                    if (opts.length === 0) return (mt.intrinsic_value || mt.total_value || 0).toLocaleString();
+                    if (opts.length === 1) return opts[0].fee_total.toLocaleString();
+                    const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
+                    return fees[0] === fees[fees.length - 1]
+                      ? fees[0].toLocaleString()
+                      : `${fees[0].toLocaleString()} – ${fees[fees.length - 1].toLocaleString()}`;
+                  })()}</td>
                   <td className="text-gray-500">{mt.term_options?.length || 0} options</td>
                   <td className="text-gray-500">
                     {new Date(mt.updated_at || mt.created_at).toLocaleDateString("en-AU", {
