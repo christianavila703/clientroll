@@ -208,7 +208,19 @@ func (r *MembershipTypeRepo) CreateTermOption(
 	if err != nil {
 		return nil, fmt.Errorf("creating term option: %w", err)
 	}
+	r.syncTotalValue(ctx, membershipTypeID, tenantID)
 	return &to, nil
+}
+
+// syncTotalValue recalculates total_value and intrinsic_value on the parent
+// membership type from the first term option (by duration_months).
+func (r *MembershipTypeRepo) syncTotalValue(ctx context.Context, membershipTypeID, tenantID uuid.UUID) {
+	_, _ = r.db.Pool.Exec(ctx, `
+		UPDATE membership_types SET
+			total_value    = COALESCE((SELECT fee_total FROM membership_term_options WHERE membership_type_id=$1 AND tenant_id=$2 ORDER BY duration_months LIMIT 1), 0),
+			intrinsic_value = COALESCE((SELECT fee_total FROM membership_term_options WHERE membership_type_id=$1 AND tenant_id=$2 ORDER BY duration_months LIMIT 1), 0),
+			updated_at = NOW()
+		WHERE id=$1 AND tenant_id=$2`, membershipTypeID, tenantID)
 }
 
 // UpdateTermOption updates a term option.
@@ -251,6 +263,7 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 	if err != nil {
 		return nil, fmt.Errorf("updating term option: %w", err)
 	}
+	r.syncTotalValue(ctx, to.MembershipTypeID, tenantID)
 	return &to, nil
 }
 
@@ -298,10 +311,17 @@ func (r *MembershipTypeRepo) Delete(ctx context.Context, id, tenantID uuid.UUID)
 	return err
 }
 
-// DeleteTermOption removes a term option.
+// DeleteTermOption removes a term option and syncs the parent's total_value.
 func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID uuid.UUID) error {
+	var mtID uuid.UUID
+	_ = r.db.Pool.QueryRow(ctx,
+		"SELECT membership_type_id FROM membership_term_options WHERE id=$1 AND tenant_id=$2", id, tenantID).Scan(&mtID)
+
 	_, err := r.db.Pool.Exec(ctx,
 		"DELETE FROM membership_term_options WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	if err == nil && mtID != uuid.Nil {
+		r.syncTotalValue(ctx, mtID, tenantID)
+	}
 	return err
 }
 
