@@ -91,6 +91,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, err := h.encryptor.Decrypt(creds.APISecretEncrypted)
 	if err != nil || secret == "" {
+		log.Printf("stripe webhook secret decrypt failed tenant=%s slug=%s err=%v", tenant.ID, tenantSlug, err)
 		writeError(w, http.StatusUnauthorized, "Invalid Stripe webhook secret")
 		return
 	}
@@ -103,6 +104,8 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	event, err := webhook.ConstructEvent(payload, r.Header.Get("Stripe-Signature"), secret)
 	if err != nil {
+		sigHeader := r.Header.Get("Stripe-Signature")
+		log.Printf("stripe webhook signature verify failed tenant=%s slug=%s payload_len=%d sig_header_len=%d err=%v", tenant.ID, tenantSlug, len(payload), len(sigHeader), err)
 		writeError(w, http.StatusUnauthorized, "Invalid Stripe signature")
 		return
 	}
