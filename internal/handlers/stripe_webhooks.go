@@ -102,7 +102,12 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
-	event, err := webhook.ConstructEvent(payload, r.Header.Get("Stripe-Signature"), secret)
+	event, err := webhook.ConstructEventWithOptions(
+		payload,
+		r.Header.Get("Stripe-Signature"),
+		secret,
+		webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true},
+	)
 	if err != nil {
 		sigHeader := r.Header.Get("Stripe-Signature")
 		log.Printf("stripe webhook signature verify failed tenant=%s slug=%s payload_len=%d sig_header_len=%d err=%v", tenant.ID, tenantSlug, len(payload), len(sigHeader), err)
