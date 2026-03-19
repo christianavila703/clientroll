@@ -255,19 +255,46 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.Gender)
 	trimStringPtr(&input.Client.EmergencyContactName)
 	trimStringPtr(&input.Client.EmergencyContactPhone)
-	if input.Client.Name == "" ||
-		input.Client.Address == nil ||
-		input.Client.Suburb == nil ||
-		input.Client.State == nil ||
-		input.Client.Postcode == nil ||
-		input.Client.Email == nil ||
-		input.Client.Phone == nil ||
-		input.Client.BirthDate == nil ||
-		input.Client.Gender == nil ||
-		input.Client.EmergencyContactName == nil ||
-		input.Client.EmergencyContactPhone == nil {
-		writeError(w, http.StatusBadRequest, "Please complete all required client details")
-		return
+	{
+		var missing []string
+		if input.Client.Name == "" {
+			missing = append(missing, "name")
+		}
+		if input.Client.Address == nil {
+			missing = append(missing, "address")
+		}
+		if input.Client.Suburb == nil {
+			missing = append(missing, "suburb")
+		}
+		if input.Client.State == nil {
+			missing = append(missing, "state")
+		}
+		if input.Client.Postcode == nil {
+			missing = append(missing, "postcode")
+		}
+		if input.Client.Email == nil {
+			missing = append(missing, "email")
+		}
+		if input.Client.Phone == nil {
+			missing = append(missing, "phone")
+		}
+		if input.Client.BirthDate == nil {
+			missing = append(missing, "birth_date")
+		}
+		if input.Client.Gender == nil {
+			missing = append(missing, "gender")
+		}
+		if input.Client.EmergencyContactName == nil {
+			missing = append(missing, "emergency_contact_name")
+		}
+		if input.Client.EmergencyContactPhone == nil {
+			missing = append(missing, "emergency_contact_phone")
+		}
+		if len(missing) > 0 {
+			log.Printf("Signup validation: missing client fields: %v", missing)
+			writeError(w, http.StatusBadRequest, "Please complete all required client details: "+strings.Join(missing, ", "))
+			return
+		}
 	}
 	if input.PaymentMethod == "" {
 		input.PaymentMethod = "direct_debit"

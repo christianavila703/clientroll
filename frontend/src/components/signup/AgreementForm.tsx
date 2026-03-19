@@ -117,7 +117,11 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const currentIdx = steps.findIndex((s) => s.key === formStep);
 
   const handleSubmit = async () => {
-    if (!memberSignature) { setError("Please provide your signature"); return; }
+    if (!memberSignature) {
+      setError("Please provide your signature");
+      setTimeout(() => document.getElementById("signup-error")?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+      return;
+    }
     setSubmitting(true); setError("");
     try {
       const isCustomSchedule = payment.payment_frequency === "custom_schedule";
@@ -154,7 +158,11 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
         tyData.gocardless_error = data.gocardless_error;
       }
       onComplete(tyData);
-    } catch (err) { setError(err instanceof Error ? err.message : "Submission failed"); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Submission failed";
+      setError(msg);
+      setTimeout(() => document.getElementById("signup-error")?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    }
     finally { setSubmitting(false); }
   };
 
@@ -255,7 +263,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       </div>
 
       {error && (
-        <div className="mb-6 rounded-xl bg-red-50 border border-red-200 px-5 py-4 flex items-start gap-3">
+        <div id="signup-error" className="mb-6 rounded-xl bg-red-50 border border-red-200 px-5 py-4 flex items-start gap-3">
           <svg className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
           <p className="text-sm text-red-700">{error}</p>
         </div>
