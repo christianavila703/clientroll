@@ -57,6 +57,8 @@ interface Payment {
   provider_reference?: string;
   failure_reason?: string;
   retry_count?: number;
+  _type?: "membership" | "service";
+  _description?: string;
 }
 
 /* ─── Main Component ─── */
@@ -142,14 +144,31 @@ export default function ClientProfilePage() {
     const token = localStorage.getItem("access_token");
     const h = { Authorization: `Bearer ${token}` };
     try {
-      const [clientRes, memberRes, payRes] = await Promise.all([
+      const [clientRes, memberRes, payRes, chargesRes] = await Promise.all([
         fetch(`/api/tenant/clients/${clientId}`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/clients/${clientId}/memberships`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/payments/client/${clientId}`, { headers: h }).then(r => r.json()),
+        api.listClientCharges(clientId!).catch(() => ({ charges: [] })) as Promise<any>,
       ]);
       setClient(clientRes);
       setMemberships(memberRes.memberships || []);
-      setPayments(payRes.payments || []);
+
+      const membershipPayments: Payment[] = (payRes.payments || []).map((p: any) => ({
+        ...p, _type: "membership" as const,
+      }));
+      const serviceCharges: Payment[] = ((chargesRes as any).charges || []).map((c: any) => ({
+        id: c.id,
+        amount: (c.amount || 0) + (c.tax_amount || 0),
+        status: c.status || "succeeded",
+        due_date: c.paid_date || c.created_at,
+        paid_date: c.paid_date || c.created_at,
+        _type: "service" as const,
+        _description: c.description,
+      }));
+      const all = [...membershipPayments, ...serviceCharges].sort(
+        (a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
+      );
+      setPayments(all);
     } catch { /* handle */ }
     finally { setLoading(false); }
   };
@@ -861,12 +880,17 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
                     }`}>
                       {p.status === "succeeded" ? "Paid" : p.status === "confirmed" ? "Confirmed" : p.status}
                     </span>
-                    {p.provider_reference && (
+                    {p._type === "service" ? (
+                      <span className="text-[10px] font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">Service</span>
+                    ) : p.provider_reference ? (
                       <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">GoCardless</span>
-                    )}
+                    ) : null}
                   </div>
                   <span className="text-[15px] font-semibold text-gray-900 tabular-nums">${p.amount.toFixed(2)}</span>
                 </div>
+                {p._type === "service" && p._description && (
+                  <p className="text-[11px] text-gray-500">{p._description}</p>
+                )}
                 {p.paid_date && (p.status === "succeeded" || p.status === "confirmed") && (
                   <p className="text-[11px] text-emerald-600">
                     Payment completed ({fmtShort(p.paid_date)})

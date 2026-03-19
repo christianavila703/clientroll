@@ -251,6 +251,8 @@ export const api = {
       method: "POST",
       body: data,
     }),
+  listClientCharges: (clientId: string) =>
+    request(`/tenant/services/charges/${clientId}`),
 
   // Reports
   getDashboardReport: () => request("/tenant/reports/dashboard"),
