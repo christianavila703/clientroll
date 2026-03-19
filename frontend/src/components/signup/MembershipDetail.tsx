@@ -118,7 +118,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                       if (currentTerm) return currentTerm.fee_total.toLocaleString();
                       const opts = membership.term_options || [];
                       if (opts.length > 0) return opts[0].fee_total.toLocaleString();
-                      return ((membership as any).intrinsic_value || membership.total_value + bonuses.reduce((s, b) => s + b.value, 0)).toLocaleString();
+                      return "0";
                     })()}`}
               </span>
               <span className="text-[13px] text-gray-500">

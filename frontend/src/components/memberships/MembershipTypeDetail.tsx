@@ -9,7 +9,7 @@ interface MembershipType {
   enabled_payment_frequencies?: string[];
   top_image_url?: string; is_active: boolean;
   is_most_popular?: boolean;
-  total_value: number; sort_order: number; term_options?: TermOption[];
+  sort_order: number; term_options?: TermOption[];
 }
 interface TermOption {
   id: string; duration_months: number; fee_total: number;

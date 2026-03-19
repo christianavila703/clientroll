@@ -1219,7 +1219,7 @@ function LabeledInput({
 
 /* ─── Setup Membership Modal ─── */
 interface MembershipTypeOption {
-  id: string; title: string; slug: string; total_value: number; is_active: boolean;
+  id: string; title: string; slug: string; is_active: boolean;
   term_options?: {
     id: string; duration_months: number; fee_total: number;
     fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
@@ -1342,7 +1342,12 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                           <p className="text-[14px] font-semibold text-gray-900">{mt.title}</p>
                           <p className="text-[12px] text-gray-400 mt-0.5">{mt.term_options?.length || 0} term options</p>
                         </div>
-                        <span className="text-[16px] font-bold text-indigo-600 tabular-nums">${mt.total_value.toLocaleString()}</span>
+                        <span className="text-[16px] font-bold text-indigo-600 tabular-nums">${(() => {
+                          const opts = mt.term_options || [];
+                          if (opts.length === 0) return "0";
+                          const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
+                          return fees[0] === fees[fees.length - 1] ? fees[0].toLocaleString() : `${fees[0].toLocaleString()} – $${fees[fees.length - 1].toLocaleString()}`;
+                        })()}</span>
                       </div>
                     </button>
                   ))}

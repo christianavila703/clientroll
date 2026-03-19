@@ -146,7 +146,7 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
                             ? fees[0].toLocaleString()
                             : `${fees[0].toLocaleString()} – $${fees[fees.length - 1].toLocaleString()}`;
                         }
-                        return ((mt as any).intrinsic_value || mt.total_value).toLocaleString();
+                        return "0";
                       })()}`}
                 </span>
                 <span className="text-[12px] text-gray-400">
