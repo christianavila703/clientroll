@@ -51,6 +51,8 @@ function normalizeReport(raw: any): Report {
 
 const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6", "#ec4899"];
 const STATUS_COLOURS: Record<string, string> = { succeeded: "#10b981", failed: "#ef4444", pending: "#f59e0b", disputed: "#f97316" };
+const fmtMoney = (value: number) =>
+  value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ReportsPage() {
   const [data, setData] = useState<Report | null>(null);
@@ -148,10 +150,10 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
     <div className="space-y-5">
       {/* KPI row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Monthly Revenue" value={`$${data.month_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} delta={revDelta} />
-        <Kpi label="MRR" value={`$${data.mrr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Monthly Recurring Revenue" />
-        <Kpi label="ARR" value={`$${data.arr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Annual Recurring Revenue" />
-        <Kpi label="Total Revenue" value={`$${data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} sub="All time" />
+        <Kpi label="Monthly Revenue" value={`$${fmtMoney(data.month_revenue)}`} delta={revDelta} />
+        <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} sub="Monthly Recurring Revenue" />
+        <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} sub="Annual Recurring Revenue" />
+        <Kpi label="Total Revenue" value={`$${fmtMoney(data.total_revenue)}`} sub="All time" />
       </div>
 
       {/* KPI row 2 */}
@@ -177,7 +179,7 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
             {data.revenue_by_currency.map((row) => (
               <div key={row.currency_code} className="px-5 py-2.5 flex items-center justify-between">
                 <span className="text-[13px] font-medium text-gray-900">{row.currency_code}</span>
-                <span className="text-[13px] text-gray-700 tabular-nums">${row.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span className="text-[11px] text-gray-400">({row.payments} payments)</span></span>
+                <span className="text-[13px] text-gray-700 tabular-nums">${fmtMoney(row.revenue)} <span className="text-[11px] text-gray-400">({row.payments} payments)</span></span>
               </div>
             ))}
           </div>
@@ -236,7 +238,7 @@ function RevenueTab({ data }: { data: Report }) {
   const areaChart = {
     tooltip: { trigger: "axis" as const, formatter: (params: any) => {
       const bar = params.find((p: any) => p.seriesType === "bar");
-      return `<b>${bar?.name || params[0]?.name}</b><br/>Revenue: <b>$${(bar?.value || params[0]?.value || 0).toLocaleString()}</b>`;
+      return `<b>${bar?.name || params[0]?.name}</b><br/>Revenue: <b>$${fmtMoney(bar?.value || params[0]?.value || 0)}</b>`;
     }},
     grid: { left: 55, right: 20, top: 20, bottom: 55 },
     xAxis: { type: "category" as const, data: data.monthly_revenue.map(m => m.month),
@@ -283,10 +285,10 @@ function RevenueTab({ data }: { data: Report }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="MRR" value={`$${data.mrr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
-        <Kpi label="ARR" value={`$${data.arr.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
-        <Kpi label="Avg / Member" value={`$${data.avg_revenue_per_member.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} sub="Lifetime" />
-        <Kpi label="Total Revenue" value={`$${data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
+        <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} />
+        <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} />
+        <Kpi label="Avg / Member" value={`$${fmtMoney(data.avg_revenue_per_member)}`} sub="Lifetime" />
+        <Kpi label="Total Revenue" value={`$${fmtMoney(data.total_revenue)}`} />
       </div>
       <div className="card overflow-hidden"><div className="card-header"><h3>Monthly Revenue Trend</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={areaChart} style={{ height: 320 }} /> : <Empty />}</div></div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -354,7 +356,7 @@ function MembershipsTab({ data }: { data: Report }) {
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{b.count} members</span>
-                  <span className="text-[12px] text-gray-400 tabular-nums">${b.revenue.toLocaleString()}</span>
+                  <span className="text-[12px] text-gray-400 tabular-nums">${fmtMoney(b.revenue)}</span>
                 </div>
               </div>
             ))}
@@ -449,7 +451,7 @@ function ClientsTab({ data, fmtDate }: { data: Report; fmtDate: (d: string) => s
         <Kpi label="Total Clients" value={data.total_clients} />
         <Kpi label="Active Members" value={data.active_members} />
         <Kpi label="New This Month" value={data.new_signups_month} />
-        <Kpi label="Avg Lifetime Value" value={`$${data.avg_revenue_per_member.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} />
+        <Kpi label="Avg Lifetime Value" value={`$${fmtMoney(data.avg_revenue_per_member)}`} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="card overflow-hidden">
@@ -468,7 +470,7 @@ function ClientsTab({ data, fmtDate }: { data: Report; fmtDate: (d: string) => s
                     <p className="text-[11px] text-gray-400">{c.memberships} membership{c.memberships !== 1 ? "s" : ""}</p>
                   </div>
                 </div>
-                <span className="text-[13px] font-semibold text-gray-900 tabular-nums">${c.total_paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="text-[13px] font-semibold text-gray-900 tabular-nums">${fmtMoney(c.total_paid)}</span>
               </Link>
             ))}
           </div>

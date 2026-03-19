@@ -11,6 +11,8 @@ interface RecentClient { id: string; name: string; email?: string; created_at: s
 interface MixSlice { name: string; count: number; revenue: number; colour: string; }
 
 const COLOURS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#14b8a6"];
+const fmtMoney = (value: number) =>
+  value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -59,7 +61,7 @@ export default function DashboardPage() {
   const revenueChart = {
     tooltip: { trigger: "axis" as const, formatter: (params: any) => {
       const bar = params.find((p: any) => p.seriesType === "bar");
-      return `<div style="font-size:13px"><b>${bar?.name || params[0]?.name}</b><br/>Revenue: <b>$${(bar?.value || params[0]?.value || 0).toLocaleString()}</b></div>`;
+      return `<div style="font-size:13px"><b>${bar?.name || params[0]?.name}</b><br/>Revenue: <b>$${fmtMoney(bar?.value || params[0]?.value || 0)}</b></div>`;
     }},
     grid: { left: 50, right: 20, top: 20, bottom: 55 },
     xAxis: { type: "category" as const, data: monthly.map(m => m.month),
@@ -138,7 +140,7 @@ export default function DashboardPage() {
   const revenueByType = {
     tooltip: { trigger: "axis" as const, formatter: (params: any) => {
       const p = params[0];
-      return `<div style="font-size:13px"><b>${p.name}</b><br/>$${p.value.toLocaleString()}</div>`;
+      return `<div style="font-size:13px"><b>${p.name}</b><br/>$${fmtMoney(p.value)}</div>`;
     }},
     grid: { left: 10, right: 40, top: 10, bottom: 30, containLabel: true },
     xAxis: { type: "value" as const, axisLabel: { color: "#9ca3af", fontSize: 11, formatter: (v: number) => `$${v.toLocaleString()}` }, splitLine: { lineStyle: { color: "#f3f4f6" } } },
@@ -203,7 +205,7 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <KpiCard label="Active Members" value={summary?.active_members ?? "–"} colour="indigo" />
-        <KpiCard label="Revenue This Month" value={`$${curMonthRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} colour="emerald" delta={revDelta} />
+        <KpiCard label="Revenue This Month" value={`$${fmtMoney(curMonthRevenue)}`} colour="emerald" delta={revDelta} />
         <KpiCard label="Failed Payments" value={summary?.failed_payments ?? "–"} colour="red" alert={(summary?.failed_payments || 0) > 0} />
         <KpiCard label="Active Direct Debits" value={summary?.active_subscriptions ?? "–"} colour="violet" />
         <KpiCard label="New Signups" value={summary?.new_signups ?? "–"} colour="blue" />
@@ -222,8 +224,8 @@ export default function DashboardPage() {
                 <div className="flex h-64 items-center justify-center text-[13px] text-gray-400">No revenue data yet</div>
               )}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 text-[13px]">
-                <div><span className="text-gray-500">Total Revenue</span><p className="font-semibold text-gray-900 tabular-nums">${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
-                <div className="text-right"><span className="text-gray-500">Avg Monthly</span><p className="font-semibold text-gray-900 tabular-nums">${monthly.length > 0 ? (totalRevenue / monthly.length).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "0.00"}</p></div>
+                <div><span className="text-gray-500">Total Revenue</span><p className="font-semibold text-gray-900 tabular-nums">${fmtMoney(totalRevenue)}</p></div>
+                <div className="text-right"><span className="text-gray-500">Avg Monthly</span><p className="font-semibold text-gray-900 tabular-nums">${monthly.length > 0 ? fmtMoney(totalRevenue / monthly.length) : "0.00"}</p></div>
               </div>
             </div>
           </div>

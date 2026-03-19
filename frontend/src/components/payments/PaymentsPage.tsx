@@ -55,6 +55,8 @@ export default function PaymentsPage() {
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
+  const fmtMoney = (value: number) =>
+    value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const daysUntilEnd = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -94,7 +96,7 @@ export default function PaymentsPage() {
         </div>
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Collected</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">${totalCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">${fmtMoney(totalCollected)}</p>
         </div>
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Succeeded</p>
@@ -183,8 +185,8 @@ export default function PaymentsPage() {
                         <td>
                           <div className="w-28">
                             <div className="flex items-center justify-between text-[11px] mb-1">
-                              <span className="text-gray-500 tabular-nums">${p.total_paid.toLocaleString()}</span>
-                              <span className="text-gray-400 tabular-nums">${p.total_expected.toLocaleString()}</span>
+                              <span className="text-gray-500 tabular-nums">${fmtMoney(p.total_paid)}</span>
+                              <span className="text-gray-400 tabular-nums">${fmtMoney(p.total_expected)}</span>
                             </div>
                             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                               <div
@@ -192,7 +194,7 @@ export default function PaymentsPage() {
                                 style={{ width: `${Math.min(paidPct, 100)}%` }}
                               />
                             </div>
-                            <p className="text-[10px] text-gray-400 mt-0.5">${remaining.toLocaleString()} remaining</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">${fmtMoney(remaining)} remaining</p>
                           </div>
                         </td>
                         <td>
@@ -229,7 +231,7 @@ export default function PaymentsPage() {
                   <div className="grid grid-cols-2 gap-2 text-[12px]">
                     <div><span className="text-gray-400">Due</span><p className="text-gray-700">{fmtDate(p.due_date)}</p></div>
                     <div><span className="text-gray-400">Paid</span><p className="text-gray-700">{p.paid_date ? fmtDate(p.paid_date) : "—"}</p></div>
-                    <div><span className="text-gray-400">Contract</span><p className="tabular-nums">${p.total_paid.toLocaleString()} / ${p.total_expected.toLocaleString()}</p></div>
+                    <div><span className="text-gray-400">Contract</span><p className="tabular-nums">${fmtMoney(p.total_paid)} / ${fmtMoney(p.total_expected)}</p></div>
                     <div><span className="text-gray-400">Ends</span><p className={end.colour}>{fmtDate(p.membership_end)} ({end.text})</p></div>
                   </div>
                   {p.failure_reason && <p className="mt-2 text-[11px] text-red-500">{p.failure_reason}</p>}
