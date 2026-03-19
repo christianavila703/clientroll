@@ -76,6 +76,7 @@ export default function ClientProfilePage() {
   const [showTakePayment, setShowTakePayment] = useState(false);
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
+  const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[] }>({ hasMandate: false, providers: [] });
 
   useEffect(() => {
     if (!clientId) return;
@@ -144,13 +145,15 @@ export default function ClientProfilePage() {
     const token = localStorage.getItem("access_token");
     const h = { Authorization: `Bearer ${token}` };
     try {
-      const [clientRes, memberRes, payRes, chargesRes] = await Promise.all([
+      const [clientRes, memberRes, payRes, chargesRes, mandateRes] = await Promise.all([
         fetch(`/api/tenant/clients/${clientId}`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/clients/${clientId}/memberships`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/payments/client/${clientId}`, { headers: h }).then(r => r.json()),
         api.listClientCharges(clientId!).catch(() => ({ charges: [] })) as Promise<any>,
+        api.getClientMandateStatus(clientId!).catch(() => ({})) as Promise<any>,
       ]);
       setClient(clientRes);
+      setPaymentInfo({ hasMandate: mandateRes?.has_mandate || false, providers: mandateRes?.payment_providers || [] });
       setMemberships(memberRes.memberships || []);
 
       const membershipPayments: Payment[] = (payRes.payments || []).map((p: any) => ({
@@ -380,17 +383,43 @@ export default function ClientProfilePage() {
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-[13px] font-semibold text-gray-900">Payment methods</h3>
             </div>
-            <div className="px-5 py-3">
-              <p className="text-[12px] text-gray-400 mb-2">Client pays with</p>
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-11 items-center justify-center rounded bg-gray-100">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+            <div className="px-5 py-3 space-y-2.5">
+              {paymentInfo.providers.length === 0 && !paymentInfo.hasMandate && (
+                <p className="text-[12px] text-gray-400">No payment providers configured</p>
+              )}
+              {paymentInfo.hasMandate && (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-11 items-center justify-center rounded bg-green-50">
+                    <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-700">Direct Debit</p>
+                    <p className="text-[11px] text-green-600">Mandate active</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[13px] font-medium text-gray-700">Direct Debit</p>
-                  <p className="text-[11px] text-gray-400">Bank account on file</p>
+              )}
+              {paymentInfo.providers.includes("gocardless") && !paymentInfo.hasMandate && (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-11 items-center justify-center rounded bg-gray-100">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-700">Direct Debit</p>
+                    <p className="text-[11px] text-amber-600">No mandate set up</p>
+                  </div>
                 </div>
-              </div>
+              )}
+              {paymentInfo.providers.includes("stripe") && (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-11 items-center justify-center rounded bg-blue-50">
+                    <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium text-gray-700">Card Payments</p>
+                    <p className="text-[11px] text-blue-600">Stripe available</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
