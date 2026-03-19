@@ -773,25 +773,41 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		params.CustomerEmail = stripe.String(*client.Email)
 	}
 
+	cur := strings.ToLower(strings.TrimSpace(currencyCode))
+	if cur == "" {
+		cur = string(stripe.CurrencyAUD)
+	}
+
+	feeCents := stripeProcessingFee(unitAmount, "card")
+
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),
 		PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-			Currency:   stripe.String(string(stripe.CurrencyAUD)),
+			Currency:   stripe.String(cur),
 			UnitAmount: stripe.Int64(unitAmount),
 			ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
 				Name: stripe.String("Membership - " + tenant.Name),
 			},
 		},
 	}
-	if strings.TrimSpace(currencyCode) != "" {
-		lineItem.PriceData.Currency = stripe.String(strings.ToLower(currencyCode))
+	feeItem := &stripe.CheckoutSessionLineItemParams{
+		Quantity: stripe.Int64(1),
+		PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+			Currency:   stripe.String(cur),
+			UnitAmount: stripe.Int64(feeCents),
+			ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+				Name: stripe.String("Processing Fee"),
+			},
+		},
 	}
 	if mode == stripe.CheckoutSessionModeSubscription {
 		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
-		lineItem.PriceData.Recurring = &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
+		recurring := &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
 			Interval:      stripe.String(interval),
 			IntervalCount: stripe.Int64(count),
 		}
+		lineItem.PriceData.Recurring = recurring
+		feeItem.PriceData.Recurring = recurring
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"tenant_id":     tenant.ID.String(),
@@ -801,7 +817,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			},
 		}
 	}
-	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem}
+	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 
 	sess, err := checkoutsession.New(params)
 	if err != nil {
@@ -868,6 +884,8 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		params.CustomerEmail = stripe.String(*client.Email)
 	}
 
+	feeCents := stripeProcessingFee(unitAmount, "direct_debit")
+
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),
 		PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
@@ -878,12 +896,24 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			},
 		},
 	}
+	feeItem := &stripe.CheckoutSessionLineItemParams{
+		Quantity: stripe.Int64(1),
+		PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+			Currency:   stripe.String(cur),
+			UnitAmount: stripe.Int64(feeCents),
+			ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+				Name: stripe.String("Processing Fee"),
+			},
+		},
+	}
 	if mode == stripe.CheckoutSessionModeSubscription {
 		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
-		lineItem.PriceData.Recurring = &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
+		recurring := &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
 			Interval:      stripe.String(interval),
 			IntervalCount: stripe.Int64(count),
 		}
+		lineItem.PriceData.Recurring = recurring
+		feeItem.PriceData.Recurring = recurring
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"tenant_id":      tenant.ID.String(),
@@ -894,13 +924,35 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			},
 		}
 	}
-	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem}
+	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		return "", err
 	}
 	return sess.URL, nil
+}
+
+// stripeProcessingFee computes the surcharge in cents using the gross-up formula
+// so the merchant nets the original amount after Stripe deducts its fees.
+//
+//	Card:         1.75 % + 30 c  (no cap)
+//	Direct Debit: 1.00 % + 30 c  (total Stripe fee capped at $3.50 / 350 c)
+func stripeProcessingFee(baseAmountCents int64, method string) int64 {
+	base := float64(baseAmountCents)
+	if method == "direct_debit" {
+		grossUp := (base + 30) / (1 - 0.01)
+		if grossUp*0.01+30 > 350 {
+			return 350 // cap: surcharge = flat $3.50 when Stripe fee hits cap
+		}
+		return int64(math.Ceil(grossUp - base))
+	}
+	grossUp := (base + 30) / (1 - 0.0175)
+	fee := int64(math.Ceil(grossUp - base))
+	if fee < 0 {
+		return 0
+	}
+	return fee
 }
 
 func stripeRecurringInterval(freq string, intervalUnit *string, intervalCount int) (string, int64) {

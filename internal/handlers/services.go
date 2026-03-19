@@ -511,6 +511,12 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		origin = "https://app.clientroll.com"
 	}
 
+	feeMethod := "card"
+	if input.PaymentMethod == "direct_debit" {
+		feeMethod = "direct_debit"
+	}
+	feeCents := stripeProcessingFee(totalCents, feeMethod)
+
 	params := &stripe.CheckoutSessionParams{
 		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
 		SuccessURL: stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=success"),
@@ -530,6 +536,16 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 					UnitAmount: stripe.Int64(totalCents),
 					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
 						Name: stripe.String(input.Description),
+					},
+				},
+			},
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String("aud"),
+					UnitAmount: stripe.Int64(feeCents),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Processing Fee"),
 					},
 				},
 			},
