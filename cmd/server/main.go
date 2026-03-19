@@ -155,7 +155,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	_ = bankDetailsRepo // used later
 	clientHandler := handlers.NewClientHandler(clientRepo, memberRepo, mtRepo, credRepo, redirectFlowRepo, enc, emailSvc)
 	agreementRepo := repository.NewAgreementSnapshotRepo(db)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, bankDetailsRepo, agreementRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, platformBillingConfigRepo, bankDetailsRepo, agreementRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
 	agreementHandler := handlers.NewAgreementHandler(agreementRepo)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
@@ -164,7 +164,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	reportsHandler := handlers.NewReportsHandler(reportsRepo)
 	webhookHandler := handlers.NewWebhookHandler(webhookRepo, enc)
 	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
-	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, enc)
+	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, platformBillingConfigRepo, enc)
 	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)

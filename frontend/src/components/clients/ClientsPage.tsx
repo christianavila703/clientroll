@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import api from "../../api/client";
+import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
 
 interface Client {
   id: string;
   name: string;
   email?: string;
   phone?: string;
+  unit_number?: string;
   address?: string;
   suburb?: string;
   state?: string;
@@ -16,16 +18,17 @@ interface Client {
 
 const CLIENT_FIELDS = [
   { key: "name", label: "Full Name", required: true },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
+  { key: "email", label: "Email", required: true },
+  { key: "phone", label: "Phone", required: true },
+  { key: "unit_number", label: "Unit Number" },
   { key: "address", label: "Address" },
-  { key: "suburb", label: "Suburb" },
-  { key: "state", label: "State" },
-  { key: "postcode", label: "Postcode" },
-  { key: "birth_date", label: "Date of Birth" },
-  { key: "gender", label: "Gender" },
-  { key: "emergency_contact_name", label: "Emergency Contact Name" },
-  { key: "emergency_contact_phone", label: "Emergency Contact Phone" },
+  { key: "suburb", label: "Suburb", required: true },
+  { key: "state", label: "State", required: true },
+  { key: "postcode", label: "Postcode", required: true },
+  { key: "birth_date", label: "Date of Birth", required: true },
+  { key: "gender", label: "Gender", required: true },
+  { key: "emergency_contact_name", label: "Emergency Contact Name", required: true },
+  { key: "emergency_contact_phone", label: "Emergency Contact Phone", required: true },
 ];
 
 function LabeledInput({
@@ -354,23 +357,47 @@ function ClientRowMenu({ clientId, clientName }: { clientId: string; clientName:
 function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCreated: () => void }) {
   const [form, setForm] = useState({
     name: editing?.name || "", email: editing?.email || "", phone: editing?.phone || "",
+    unit_number: editing?.unit_number || "",
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
     postcode: editing?.postcode || "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [googlePlacesKey, setGooglePlacesKey] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listIntegrations()
+      .then((res) => {
+        if (cancelled) return;
+        const integrations = (res as { integrations?: Array<{ provider?: string; public_api_key?: string; is_active?: boolean }> }).integrations || [];
+        const googlePlaces = integrations.find((i) => i.provider === "google_places" && i.is_active);
+        setGooglePlacesKey(googlePlaces?.public_api_key || "");
+      })
+      .catch(() => {
+        if (!cancelled) setGooglePlacesKey("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true); setError("");
     try {
+      if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.birth_date.trim() || !form.gender.trim() || !form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim()) {
+        throw new Error("Please complete all required fields");
+      }
       // Backend rejects unknown fields (DisallowUnknownFields) for clients create/update.
       // Only send supported fields.
       const payload = {
         name: form.name,
         email: normalizeStringOrNull(form.email),
         phone: normalizeStringOrNull(form.phone),
+        unit_number: normalizeStringOrNull(form.unit_number),
         address: normalizeStringOrNull(form.address),
         suburb: normalizeStringOrNull(form.suburb),
         state: normalizeStringOrNull(form.state),
@@ -420,25 +447,29 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 value={form.email}
                 onChange={(v) => setForm((prev) => ({ ...prev, email: v }))}
                 type="email"
+                required
               />
               <LabeledInput
                 label="Phone"
                 value={form.phone}
                 onChange={(v) => setForm((prev) => ({ ...prev, phone: v }))}
                 type="tel"
+                required
               />
               <LabeledInput
                 label="Date of birth"
                 value={form.birth_date}
                 onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
                 type="date"
+                required
               />
               <div>
-                <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender <span className="text-red-500">*</span></label>
                 <select
                   value={form.gender}
                   onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))}
                   className="input-field"
+                  required
                 >
                   <option value="">—</option><option value="Female">Female</option><option value="Male">Male</option>
                 </select>
@@ -448,26 +479,49 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
           <div>
             <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Address</h4>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Street address</label>
+                <AddressAutocompleteInput
+                  value={form.address}
+                  onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
+                  onAddressSelect={({ unit_number, address, suburb, state, postcode }) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      unit_number: unit_number || prev.unit_number,
+                      address: address || prev.address,
+                      suburb: suburb || prev.suburb,
+                      state: state || prev.state,
+                      postcode: postcode || prev.postcode,
+                    }))
+                  }
+                  apiKey={googlePlacesKey}
+                  className="input-field"
+                  placeholder="Start typing an address..."
+                />
+              </div>
               <LabeledInput
-                label="Street address"
-                value={form.address}
-                onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
-                colSpan
+                label="Unit number"
+                value={form.unit_number}
+                onChange={(v) => setForm((prev) => ({ ...prev, unit_number: v }))}
+                required
               />
               <LabeledInput
                 label="Suburb"
                 value={form.suburb}
                 onChange={(v) => setForm((prev) => ({ ...prev, suburb: v }))}
+                required
               />
               <LabeledInput
                 label="State"
                 value={form.state}
                 onChange={(v) => setForm((prev) => ({ ...prev, state: v }))}
+                required
               />
               <LabeledInput
                 label="Postcode"
                 value={form.postcode}
                 onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
+                required
               />
             </div>
           </div>
@@ -478,12 +532,14 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 label="Contact name"
                 value={form.emergency_contact_name}
                 onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
+                required
               />
               <LabeledInput
                 label="Contact phone"
                 value={form.emergency_contact_phone}
                 onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
                 type="tel"
+                required
               />
             </div>
           </div>
@@ -495,9 +551,9 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
 
 /* ─── CSV Export ─── */
 function exportCSV(clients: Client[]) {
-  const headers = ["Name", "Email", "Phone", "Address", "Suburb", "State", "Postcode", "Created"];
+  const headers = ["Name", "Email", "Phone", "Unit Number", "Address", "Suburb", "State", "Postcode", "Created"];
   const rows = clients.map(c => [
-    c.name, c.email || "", c.phone || "", c.address || "",
+    c.name, c.email || "", c.phone || "", c.unit_number || "", c.address || "",
     c.suburb || "", c.state || "", c.postcode || "",
     new Date(c.created_at).toLocaleDateString("en-AU"),
   ]);

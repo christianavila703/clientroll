@@ -26,7 +26,7 @@ func (r *ClientRepo) DB() *database.Postgres {
 	return r.db
 }
 
-const clientFields = `id, tenant_id, name, address, suburb, state, postcode,
+const clientFields = `id, tenant_id, name, unit_number, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
 	emergency_contact_phone, gocardless_customer_id, deleted_at, created_at, updated_at`
 
@@ -92,13 +92,13 @@ func (r *ClientRepo) FindByEmail(ctx context.Context, tenantID uuid.UUID, email 
 // Create inserts a new client.
 func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `
-		INSERT INTO clients (tenant_id, name, address, suburb, state, postcode,
+		INSERT INTO clients (tenant_id, name, unit_number, address, suburb, state, postcode,
 		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING ` + clientFields
 
 	var out models.Client
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.Address, c.Suburb,
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
 	if err != nil {
@@ -110,14 +110,14 @@ func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.C
 // Update updates a client.
 func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `
-		UPDATE clients SET name=$3, address=$4, suburb=$5, state=$6, postcode=$7,
-		    email=$8, phone=$9, birth_date=$10, gender=$11,
-		    emergency_contact_name=$12, emergency_contact_phone=$13, updated_at=NOW()
+		UPDATE clients SET name=$3, unit_number=$4, address=$5, suburb=$6, state=$7, postcode=$8,
+		    email=$9, phone=$10, birth_date=$11, gender=$12,
+		    emergency_contact_name=$13, emergency_contact_phone=$14, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		RETURNING ` + clientFields
 
 	var out models.Client
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.Address, c.Suburb,
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
 	if err != nil {
@@ -193,7 +193,7 @@ func (r *ClientRepo) SoftDeleteMany(ctx context.Context, tenantID uuid.UUID, cli
 
 func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
-		&c.ID, &c.TenantID, &c.Name, &c.Address, &c.Suburb, &c.State,
+		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
 		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 	}

@@ -11,6 +11,7 @@ type Client struct {
 	ID                    uuid.UUID  `json:"id"`
 	TenantID              uuid.UUID  `json:"tenant_id"`
 	Name                  string     `json:"name"`
+	UnitNumber            *string    `json:"unit_number"`
 	Address               *string    `json:"address"`
 	Suburb                *string    `json:"suburb"`
 	State                 *string    `json:"state"`

@@ -13,6 +13,7 @@ interface Tenant {
   secondary_colour?: string;
   signup_price_display_mode?: "total" | "weekly" | "monthly";
   enabled_payment_frequencies?: string[];
+  google_places_api_key?: string;
   payment_providers?: string[];
 }
 

@@ -93,9 +93,10 @@ func (h *PlatformBillingHandler) UpdateConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	var input struct {
-		PerMemberPriceUSD *float64 `json:"per_member_price_usd,omitempty"`
-		Currency          *string  `json:"currency,omitempty"`
-		IsActive          *bool    `json:"is_active,omitempty"`
+		PerMemberPriceUSD    *float64 `json:"per_member_price_usd,omitempty"`
+		Currency             *string  `json:"currency,omitempty"`
+		IsActive             *bool    `json:"is_active,omitempty"`
+		GooglePlacesIsActive *bool    `json:"google_places_is_active,omitempty"`
 
 		StripeProductID *string `json:"stripe_product_id,omitempty"`
 		StripePriceID   *string `json:"stripe_price_id,omitempty"`
@@ -103,6 +104,7 @@ func (h *PlatformBillingHandler) UpdateConfig(w http.ResponseWriter, r *http.Req
 		StripePublishableKey string `json:"stripe_publishable_key,omitempty"`
 		StripeSecretKey      string `json:"stripe_secret_key,omitempty"`
 		StripeWebhookSecret  string `json:"stripe_webhook_secret,omitempty"`
+		GooglePlacesAPIKey   string `json:"google_places_api_key,omitempty"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -110,11 +112,12 @@ func (h *PlatformBillingHandler) UpdateConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	up := repository.PlatformBillingConfigUpdateInput{
-		PerMemberPriceUSD: input.PerMemberPriceUSD,
-		Currency:          input.Currency,
-		IsActive:          input.IsActive,
-		StripeProductID:   input.StripeProductID,
-		StripePriceID:     input.StripePriceID,
+		PerMemberPriceUSD:    input.PerMemberPriceUSD,
+		Currency:             input.Currency,
+		IsActive:             input.IsActive,
+		GooglePlacesIsActive: input.GooglePlacesIsActive,
+		StripeProductID:      input.StripeProductID,
+		StripePriceID:        input.StripePriceID,
 	}
 
 	if input.StripePublishableKey != "" {
@@ -140,6 +143,14 @@ func (h *PlatformBillingHandler) UpdateConfig(w http.ResponseWriter, r *http.Req
 			return
 		}
 		up.StripeWebhookSecretEncrypted = &encVal
+	}
+	if input.GooglePlacesAPIKey != "" {
+		encVal, err := h.enc.Encrypt(input.GooglePlacesAPIKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Encryption error")
+			return
+		}
+		up.GooglePlacesAPIKeyEncrypted = &encVal
 	}
 
 	updated, err := h.cfgRepo.Update(r.Context(), cfg.ID, up)
@@ -167,7 +178,7 @@ func (h *PlatformBillingHandler) ListTenantBilling(w http.ResponseWriter, r *htt
 	}
 
 	type TenantBillingRow struct {
-		Tenant       models.Tenant `json:"tenant"`
+		Tenant       models.Tenant                  `json:"tenant"`
 		Subscription *repository.TenantSubscription `json:"subscription,omitempty"`
 	}
 
@@ -298,8 +309,7 @@ func (h *PlatformBillingHandler) CreatePortalSession(w http.ResponseWriter, r *h
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"url":        sess.URL,
+		"url": sess.URL,
 		// Billing Portal sessions do not expose an expires_at field in stripe-go.
 	})
 }
-

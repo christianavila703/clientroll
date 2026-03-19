@@ -574,6 +574,7 @@ function IntegrationsStep({ onSaved, onError }: { onSaved: () => void; onError: 
         onSave={(data) => handleSave("stripe", data)}
         webhookUrl={webhookUrl}
       />
+
     </div>
   );
 }

@@ -74,12 +74,87 @@ func (h *ClientHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create creates a new client.
 func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
-	var input models.Client
-	if err := decodeJSON(r, &input); err != nil || input.Name == "" {
-		writeError(w, http.StatusBadRequest, "Name is required")
+
+	var input struct {
+		Name                  *string `json:"name"`
+		UnitNumber            *string `json:"unit_number"`
+		Address               *string `json:"address"`
+		Suburb                *string `json:"suburb"`
+		State                 *string `json:"state"`
+		Postcode              *string `json:"postcode"`
+		Email                 *string `json:"email"`
+		Phone                 *string `json:"phone"`
+		BirthDate             *string `json:"birth_date"`
+		Gender                *string `json:"gender"`
+		EmergencyContactName  *string `json:"emergency_contact_name"`
+		EmergencyContactPhone *string `json:"emergency_contact_phone"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	client, err := h.clientRepo.Create(r.Context(), tenantID, &input)
+
+	normalize := func(v *string) *string {
+		if v == nil {
+			return nil
+		}
+		t := strings.TrimSpace(*v)
+		if t == "" {
+			return nil
+		}
+		return &t
+	}
+	required := func(v *string) string {
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(*v)
+	}
+
+	var birthDate *time.Time
+	if bd := normalize(input.BirthDate); bd != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, *bd)
+		if parseErr != nil {
+			if d, dayErr := time.Parse("2006-01-02", *bd); dayErr == nil {
+				parsed = d
+			} else {
+				writeError(w, http.StatusBadRequest, "Invalid request body")
+				return
+			}
+		}
+		birthDate = &parsed
+	}
+
+	create := &models.Client{
+		Name:                  required(input.Name),
+		UnitNumber:            normalize(input.UnitNumber),
+		Address:               normalize(input.Address),
+		Suburb:                normalize(input.Suburb),
+		State:                 normalize(input.State),
+		Postcode:              normalize(input.Postcode),
+		Email:                 normalize(input.Email),
+		Phone:                 normalize(input.Phone),
+		BirthDate:             birthDate,
+		Gender:                normalize(input.Gender),
+		EmergencyContactName:  normalize(input.EmergencyContactName),
+		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
+	}
+
+	if create.Name == "" ||
+		create.Address == nil ||
+		create.Suburb == nil ||
+		create.State == nil ||
+		create.Postcode == nil ||
+		create.Email == nil ||
+		create.Phone == nil ||
+		create.BirthDate == nil ||
+		create.Gender == nil ||
+		create.EmergencyContactName == nil ||
+		create.EmergencyContactPhone == nil {
+		writeError(w, http.StatusBadRequest, "All client fields are required")
+		return
+	}
+	client, err := h.clientRepo.Create(r.Context(), tenantID, create)
 	if err != nil {
 		log.Printf("Error creating client: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create client")
@@ -123,6 +198,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var input struct {
 		Name                  *string `json:"name"`
+		UnitNumber            *string `json:"unit_number"`
 		Address               *string `json:"address"`
 		Suburb                *string `json:"suburb"`
 		State                 *string `json:"state"`
@@ -171,6 +247,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			return *input.Name
 		}()),
+		UnitNumber:            normalize(input.UnitNumber),
 		Address:               normalize(input.Address),
 		Suburb:                normalize(input.Suburb),
 		State:                 normalize(input.State),

@@ -37,6 +37,7 @@ type SignupHandler struct {
 	memberRepo        *repository.MembershipRepo
 	settingsRepo      *repository.SettingsRepo
 	credRepo          *repository.TenantCredentialRepo
+	platformCfgRepo   *repository.PlatformBillingConfigRepo
 	bankDetailsRepo   *repository.BankDetailsRepo
 	agreementRepo     *repository.AgreementSnapshotRepo
 	emailTemplateRepo *repository.TenantEmailTemplateRepo
@@ -56,6 +57,7 @@ func NewSignupHandler(
 	mr *repository.MembershipRepo,
 	sr *repository.SettingsRepo,
 	credR *repository.TenantCredentialRepo,
+	platformCfgRepo *repository.PlatformBillingConfigRepo,
 	bdr *repository.BankDetailsRepo,
 	agr *repository.AgreementSnapshotRepo,
 	etr *repository.TenantEmailTemplateRepo,
@@ -66,7 +68,7 @@ func NewSignupHandler(
 	return &SignupHandler{
 		tenantRepo: tr, mtRepo: mt, bonusRepo: br, termsRepo: terms,
 		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
-		credRepo: credR, bankDetailsRepo: bdr, agreementRepo: agr, emailTemplateRepo: etr,
+		credRepo: credR, platformCfgRepo: platformCfgRepo, bankDetailsRepo: bdr, agreementRepo: agr, emailTemplateRepo: etr,
 		encryptor: enc, emailSvc: es, cfg: appCfg,
 	}
 }
@@ -122,6 +124,7 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 			"secondary_colour":            tenant.SecondaryColour,
 			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
+			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		"memberships":       active,
 		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
@@ -163,6 +166,7 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"secondary_colour":            tenant.SecondaryColour,
 			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
+			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		"membership":        mt,
 		"terms":             terms,
@@ -227,6 +231,42 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	if input.Client.Name == "" || input.TermOptionID == "" || input.MembershipTypeID == "" {
 		writeError(w, http.StatusBadRequest, "Client name, membership type and term option are required")
+		return
+	}
+	input.Client.Name = strings.TrimSpace(input.Client.Name)
+	trimStringPtr := func(v **string) {
+		if v == nil || *v == nil {
+			return
+		}
+		t := strings.TrimSpace(**v)
+		if t == "" {
+			*v = nil
+			return
+		}
+		**v = t
+	}
+	trimStringPtr(&input.Client.UnitNumber)
+	trimStringPtr(&input.Client.Address)
+	trimStringPtr(&input.Client.Suburb)
+	trimStringPtr(&input.Client.State)
+	trimStringPtr(&input.Client.Postcode)
+	trimStringPtr(&input.Client.Email)
+	trimStringPtr(&input.Client.Phone)
+	trimStringPtr(&input.Client.Gender)
+	trimStringPtr(&input.Client.EmergencyContactName)
+	trimStringPtr(&input.Client.EmergencyContactPhone)
+	if input.Client.Name == "" ||
+		input.Client.Address == nil ||
+		input.Client.Suburb == nil ||
+		input.Client.State == nil ||
+		input.Client.Postcode == nil ||
+		input.Client.Email == nil ||
+		input.Client.Phone == nil ||
+		input.Client.BirthDate == nil ||
+		input.Client.Gender == nil ||
+		input.Client.EmergencyContactName == nil ||
+		input.Client.EmergencyContactPhone == nil {
+		writeError(w, http.StatusBadRequest, "Please complete all required client details")
 		return
 	}
 	if input.PaymentMethod == "" {
@@ -644,6 +684,21 @@ func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID 
 	return providers
 }
 
+func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
+	if h.platformCfgRepo == nil || h.encryptor == nil {
+		return ""
+	}
+	cfg, err := h.platformCfgRepo.GetOrCreate(ctx)
+	if err != nil || cfg == nil || cfg.GooglePlacesAPIKeyEncrypted == nil || *cfg.GooglePlacesAPIKeyEncrypted == "" || !cfg.GooglePlacesIsActive {
+		return ""
+	}
+	key, err := h.encryptor.Decrypt(*cfg.GooglePlacesAPIKeyEncrypted)
+	if err != nil {
+		return ""
+	}
+	return key
+}
+
 func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
@@ -779,6 +834,9 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 	// Client address
 	if client.Address != nil {
 		addr := *client.Address
+		if client.UnitNumber != nil && *client.UnitNumber != "" {
+			addr = "Unit " + *client.UnitNumber + ", " + addr
+		}
 		if client.Suburb != nil {
 			addr += ", " + *client.Suburb
 		}

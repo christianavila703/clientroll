@@ -5,7 +5,7 @@ import api from "../../api/client";
 /* ─── Types ─── */
 interface Client {
   id: string; name: string; email?: string; phone?: string;
-  address?: string; suburb?: string; state?: string; postcode?: string;
+  unit_number?: string; address?: string; suburb?: string; state?: string; postcode?: string;
   birth_date?: string; gender?: string;
   emergency_contact_name?: string; emergency_contact_phone?: string;
   business_structure?: string; gst_registered?: string; tax_number?: string;
@@ -179,7 +179,8 @@ export default function ClientProfilePage() {
     { key: "payments" as const, label: "Payments" },
   ];
 
-  const fullAddress = [client.address, client.suburb, [client.state, client.postcode].filter(Boolean).join(" ")].filter(Boolean).join("\n");
+  const streetLine = [client.unit_number ? `Unit ${client.unit_number},` : null, client.address].filter(Boolean).join(" ");
+  const fullAddress = [streetLine, client.suburb, [client.state, client.postcode].filter(Boolean).join(" ")].filter(Boolean).join("\n");
 
   return (
     <div>
@@ -954,7 +955,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
   const [tab, setTab] = useState<"details" | "company">("details");
   const [form, setForm] = useState({
     name: client.name, email: client.email || "", phone: client.phone || "",
-    address: client.address || "", suburb: client.suburb || "", state: client.state || "",
+    unit_number: client.unit_number || "", address: client.address || "", suburb: client.suburb || "", state: client.state || "",
     postcode: client.postcode || "", birth_date: client.birth_date?.split("T")[0] || "", gender: client.gender || "",
     emergency_contact_name: client.emergency_contact_name || "",
     emergency_contact_phone: client.emergency_contact_phone || "",
@@ -987,6 +988,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
         email: form.email,
         phone: form.phone,
         gender: form.gender,
+        unit_number: form.unit_number,
         address: form.address,
         suburb: form.suburb,
         state: form.state,
@@ -1084,6 +1086,11 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                       value={form.address}
                       onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
                       colSpan
+                    />
+                    <LabeledInput
+                      label="Unit / Apt Number"
+                      value={form.unit_number}
+                      onChange={(v) => setForm((prev) => ({ ...prev, unit_number: v }))}
                     />
                     <LabeledInput
                       label="Suburb"

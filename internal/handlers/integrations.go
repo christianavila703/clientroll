@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"clientroll/internal/database"
 	"clientroll/internal/middleware"
@@ -15,12 +16,18 @@ import (
 // IntegrationsHandler handles per-tenant integration credential management.
 type IntegrationsHandler struct {
 	credRepo  *repository.TenantCredentialRepo
+	cfgRepo   *repository.PlatformBillingConfigRepo
 	encryptor *database.Encryptor
 }
 
+var allowedIntegrationProviders = map[string]struct{}{
+	"gocardless": {},
+	"stripe":     {},
+}
+
 // NewIntegrationsHandler creates a new integrations handler.
-func NewIntegrationsHandler(cr *repository.TenantCredentialRepo, enc *database.Encryptor) *IntegrationsHandler {
-	return &IntegrationsHandler{credRepo: cr, encryptor: enc}
+func NewIntegrationsHandler(cr *repository.TenantCredentialRepo, cfgRepo *repository.PlatformBillingConfigRepo, enc *database.Encryptor) *IntegrationsHandler {
+	return &IntegrationsHandler{credRepo: cr, cfgRepo: cfgRepo, encryptor: enc}
 }
 
 // RegisterRoutes registers integration routes.
@@ -43,16 +50,17 @@ func (h *IntegrationsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Mask keys — only show last 4 chars
 	type SafeCred struct {
-		Provider    string `json:"provider"`
-		Environment string `json:"environment"`
-		IsActive    bool   `json:"is_active"`
-		HasKey      bool   `json:"has_key"`
-		HasSecret   bool   `json:"has_secret"`
-		KeyHint     string `json:"key_hint"`
+		Provider     string `json:"provider"`
+		Environment  string `json:"environment"`
+		IsActive     bool   `json:"is_active"`
+		HasKey       bool   `json:"has_key"`
+		HasSecret    bool   `json:"has_secret"`
+		KeyHint      string `json:"key_hint"`
+		PublicAPIKey string `json:"public_api_key,omitempty"`
 	}
 
-	safe := make([]SafeCred, len(creds))
-	for i, c := range creds {
+	safe := make([]SafeCred, 0, len(creds)+1)
+	for _, c := range creds {
 		keyHint := ""
 		if c.APIKeyEncrypted != "" {
 			decrypted, err := h.encryptor.Decrypt(c.APIKeyEncrypted)
@@ -68,7 +76,31 @@ func (h *IntegrationsHandler) List(w http.ResponseWriter, r *http.Request) {
 			HasSecret:   c.APISecretEncrypted != "",
 			KeyHint:     keyHint,
 		}
-		safe[i] = sc
+		safe = append(safe, sc)
+	}
+
+	// Universal Google Places key is platform-scoped, not tenant-scoped.
+	if h.cfgRepo != nil && h.encryptor != nil {
+		cfg, err := h.cfgRepo.GetOrCreate(r.Context())
+		if err == nil && cfg != nil {
+			gp := SafeCred{
+				Provider:    "google_places",
+				Environment: "live",
+				IsActive:    cfg.GooglePlacesIsActive,
+				HasKey:      cfg.GooglePlacesAPIKeyEncrypted != nil && *cfg.GooglePlacesAPIKeyEncrypted != "",
+				HasSecret:   false,
+				KeyHint:     "",
+			}
+			if gp.HasKey && gp.IsActive {
+				if dec, decErr := h.encryptor.Decrypt(*cfg.GooglePlacesAPIKeyEncrypted); decErr == nil {
+					gp.PublicAPIKey = dec
+					if len(dec) > 4 {
+						gp.KeyHint = "..." + dec[len(dec)-4:]
+					}
+				}
+			}
+			safe = append(safe, gp)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"integrations": safe})
@@ -77,7 +109,11 @@ func (h *IntegrationsHandler) List(w http.ResponseWriter, r *http.Request) {
 // Upsert creates or updates integration credentials.
 func (h *IntegrationsHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
-	provider := chi.URLParam(r, "provider")
+	provider := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "provider")))
+	if _, ok := allowedIntegrationProviders[provider]; !ok {
+		writeError(w, http.StatusBadRequest, "Unknown integration provider")
+		return
+	}
 
 	role := middleware.GetRole(r.Context())
 	if role != "tenant_admin" {

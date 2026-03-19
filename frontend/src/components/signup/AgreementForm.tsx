@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
+import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
 import type { Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
 interface Props {
@@ -76,7 +77,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const [error, setError] = useState("");
 
   const [member, setMember] = useState({
-    name: "", address: "", suburb: "", state: "", postcode: "",
+    name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "",
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
   });
@@ -263,9 +264,16 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       {/* Step content */}
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="px-8 py-8 sm:px-10 sm:py-10">
-          {formStep === "member" && <MemberSection data={member} onChange={setMember} onNext={() => setFormStep("payment")} />}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={setPayment} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
-          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={setBank} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
+          {formStep === "member" && (
+            <MemberSection
+              data={member}
+              onChange={(next) => setMember(next as typeof member)}
+              googlePlacesApiKey={tenant.google_places_api_key}
+              onNext={() => setFormStep("payment")}
+            />
+          )}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(payment.payment_method === "card" ? (hasTerms ? "terms" : "sign") : "bank")} onBack={() => setFormStep("member")} />}
+          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
         </div>
@@ -308,7 +316,12 @@ function NavButtons({ onBack, onNext, nextLabel, isSubmit, disabled }: { onBack?
 }
 
 /* ─── Section A: Member Details ─── */
-function MemberSection({ data, onChange, onNext }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; onNext: () => void }) {
+function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
+  data: Record<string, string>;
+  onChange: (d: Record<string, string>) => void;
+  onNext: () => void;
+  googlePlacesApiKey?: string;
+}) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
 
@@ -321,14 +334,33 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <Field label="Full Name" required full><input value={data.name} onChange={(e) => set("name", e.target.value)} className={inputCls} placeholder="John Smith" required /></Field>
-        <Field label="Address" full><input value={data.address} onChange={(e) => set("address", e.target.value)} className={inputCls} placeholder="123 Main Street" /></Field>
-        <Field label="Suburb"><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className={inputCls} placeholder="Melbourne" /></Field>
-        <Field label="State"><input value={data.state} onChange={(e) => set("state", e.target.value)} className={inputCls} placeholder="VIC" /></Field>
-        <Field label="Postcode"><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className={inputCls} placeholder="3000" /></Field>
+        <Field label="Street Address" required full>
+          <AddressAutocompleteInput
+            value={data.address}
+            onChange={(v) => set("address", v)}
+            onAddressSelect={({ unit_number, address, suburb, state, postcode }) => {
+              onChange({
+                ...data,
+                unit_number: unit_number || data.unit_number,
+                address: address || data.address,
+                suburb: suburb || data.suburb,
+                state: state || data.state,
+                postcode: postcode || data.postcode,
+              });
+            }}
+            apiKey={googlePlacesApiKey}
+            className={inputCls}
+            placeholder="Start typing an address..."
+          />
+        </Field>
+        <Field label="Unit / Apt Number"><input value={data.unit_number} onChange={(e) => set("unit_number", e.target.value)} className={inputCls} placeholder="Unit 4" /></Field>
+        <Field label="Suburb" required><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className={inputCls} placeholder="Melbourne" required /></Field>
+        <Field label="State" required><input value={data.state} onChange={(e) => set("state", e.target.value)} className={inputCls} placeholder="VIC" required /></Field>
+        <Field label="Postcode" required><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className={inputCls} placeholder="3000" required /></Field>
         <Field label="Email" required><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className={inputCls} placeholder="john@example.com" required /></Field>
         <Field label="Phone" required><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
-        <Field label="Date of Birth"><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} /></Field>
-        <Field label="Gender">
+        <Field label="Date of Birth" required><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} required /></Field>
+        <Field label="Gender" required>
           <div className="flex gap-4 mt-1">
             {["Female", "Male"].map((g) => (
               <label key={g} className={`flex items-center gap-2.5 rounded-xl border px-4 py-3 cursor-pointer transition-all min-h-[48px] ${
@@ -346,12 +378,25 @@ function MemberSection({ data, onChange, onNext }: { data: Record<string, string
       <div className="mt-10 pt-8 border-t border-gray-100">
         <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Emergency Contact</h3>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-          <Field label="Contact Name"><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className={inputCls} placeholder="Jane Smith" /></Field>
-          <Field label="Contact Phone"><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className={inputCls} placeholder="0400 000 000" /></Field>
+          <Field label="Contact Name" required><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className={inputCls} placeholder="Jane Smith" required /></Field>
+          <Field label="Contact Phone" required><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
         </div>
       </div>
 
-      <NavButtons onNext={onNext} nextLabel="Payment Details" />
+      <NavButtons onNext={() => {
+        const required: [string, string][] = [
+          ["name", "Full Name"], ["address", "Street Address"], ["suburb", "Suburb"],
+          ["state", "State"], ["postcode", "Postcode"], ["email", "Email"],
+          ["phone", "Phone"], ["birth_date", "Date of Birth"], ["gender", "Gender"],
+          ["emergency_contact_name", "Emergency Contact Name"], ["emergency_contact_phone", "Emergency Contact Phone"],
+        ];
+        const missing = required.filter(([k]) => !data[k]?.trim());
+        if (missing.length) {
+          alert("Please fill in: " + missing.map(([, l]) => l).join(", "));
+          return;
+        }
+        onNext();
+      }} nextLabel="Payment Details" />
     </div>
   );
 }

@@ -21,11 +21,13 @@ type PlatformBillingConfig struct {
 	StripePublishableKeyEncrypted *string `json:"-"`
 	StripeSecretKeyEncrypted      *string `json:"-"`
 	StripeWebhookSecretEncrypted  *string `json:"-"`
+	GooglePlacesAPIKeyEncrypted   *string `json:"-"`
 
 	StripeProductID *string `json:"stripe_product_id,omitempty"`
 	StripePriceID   *string `json:"stripe_price_id,omitempty"`
 
-	IsActive bool `json:"is_active"`
+	IsActive             bool `json:"is_active"`
+	GooglePlacesIsActive bool `json:"google_places_is_active"`
 }
 
 // PlatformBillingConfigPublic is safe to return via API.
@@ -33,14 +35,16 @@ type PlatformBillingConfigPublic struct {
 	PerMemberPriceUSD float64 `json:"per_member_price_usd"`
 	Currency          string  `json:"currency"`
 
-	HasPublishableKey bool `json:"has_publishable_key"`
-	HasSecretKey      bool `json:"has_secret_key"`
-	HasWebhookSecret  bool `json:"has_webhook_secret"`
+	HasPublishableKey  bool `json:"has_publishable_key"`
+	HasSecretKey       bool `json:"has_secret_key"`
+	HasWebhookSecret   bool `json:"has_webhook_secret"`
+	HasGooglePlacesKey bool `json:"has_google_places_key"`
 
 	StripeProductID *string `json:"stripe_product_id,omitempty"`
 	StripePriceID   *string `json:"stripe_price_id,omitempty"`
 
-	IsActive bool `json:"is_active"`
+	IsActive             bool `json:"is_active"`
+	GooglePlacesIsActive bool `json:"google_places_is_active"`
 }
 
 // PlatformBillingConfigUpdateInput is used to update platform billing config.
@@ -56,8 +60,10 @@ type PlatformBillingConfigUpdateInput struct {
 	StripePublishableKeyEncrypted *string `json:"-"`
 	StripeSecretKeyEncrypted      *string `json:"-"`
 	StripeWebhookSecretEncrypted  *string `json:"-"`
+	GooglePlacesAPIKeyEncrypted   *string `json:"-"`
 
-	IsActive *bool `json:"is_active,omitempty"`
+	IsActive             *bool `json:"is_active,omitempty"`
+	GooglePlacesIsActive *bool `json:"google_places_is_active,omitempty"`
 }
 
 type PlatformBillingConfigRepo struct {
@@ -74,9 +80,9 @@ func (r *PlatformBillingConfigRepo) GetOrCreate(ctx context.Context) (*PlatformB
 	query := `
 		WITH existing AS (
 			SELECT id, per_member_price_usd, currency,
-			       stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted,
+			       stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted, google_places_api_key_encrypted,
 			       stripe_product_id, stripe_price_id,
-			       is_active
+			       is_active, google_places_is_active
 			FROM platform_billing_config
 			ORDER BY updated_at DESC
 			LIMIT 1
@@ -86,9 +92,9 @@ func (r *PlatformBillingConfigRepo) GetOrCreate(ctx context.Context) (*PlatformB
 			SELECT 2.00, 'USD', false
 			WHERE NOT EXISTS (SELECT 1 FROM existing)
 			RETURNING id, per_member_price_usd, currency,
-			          stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted,
+			          stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted, google_places_api_key_encrypted,
 			          stripe_product_id, stripe_price_id,
-			          is_active
+			          is_active, google_places_is_active
 		)
 		SELECT * FROM existing
 		UNION ALL
@@ -103,9 +109,11 @@ func (r *PlatformBillingConfigRepo) GetOrCreate(ctx context.Context) (*PlatformB
 		&c.StripePublishableKeyEncrypted,
 		&c.StripeSecretKeyEncrypted,
 		&c.StripeWebhookSecretEncrypted,
+		&c.GooglePlacesAPIKeyEncrypted,
 		&c.StripeProductID,
 		&c.StripePriceID,
 		&c.IsActive,
+		&c.GooglePlacesIsActive,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("getting/creating platform billing config: %w", err)
@@ -124,13 +132,15 @@ func (r *PlatformBillingConfigRepo) Update(ctx context.Context, id uuid.UUID, in
 			stripe_publishable_key_encrypted = COALESCE($6, stripe_publishable_key_encrypted),
 			stripe_secret_key_encrypted = COALESCE($7, stripe_secret_key_encrypted),
 			stripe_webhook_secret_encrypted = COALESCE($8, stripe_webhook_secret_encrypted),
-			is_active = COALESCE($9, is_active),
+			google_places_api_key_encrypted = COALESCE($9, google_places_api_key_encrypted),
+			is_active = COALESCE($10, is_active),
+			google_places_is_active = COALESCE($11, google_places_is_active),
 			updated_at = NOW()
 		WHERE id = $1
 		RETURNING id, per_member_price_usd, currency,
-		          stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted,
+		          stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted, google_places_api_key_encrypted,
 		          stripe_product_id, stripe_price_id,
-		          is_active`
+		          is_active, google_places_is_active`
 
 	var c PlatformBillingConfig
 	err := r.db.Pool.QueryRow(ctx, query,
@@ -142,7 +152,9 @@ func (r *PlatformBillingConfigRepo) Update(ctx context.Context, id uuid.UUID, in
 		in.StripePublishableKeyEncrypted,
 		in.StripeSecretKeyEncrypted,
 		in.StripeWebhookSecretEncrypted,
+		in.GooglePlacesAPIKeyEncrypted,
 		in.IsActive,
+		in.GooglePlacesIsActive,
 	).Scan(
 		&c.ID,
 		&c.PerMemberPriceUSD,
@@ -150,9 +162,11 @@ func (r *PlatformBillingConfigRepo) Update(ctx context.Context, id uuid.UUID, in
 		&c.StripePublishableKeyEncrypted,
 		&c.StripeSecretKeyEncrypted,
 		&c.StripeWebhookSecretEncrypted,
+		&c.GooglePlacesAPIKeyEncrypted,
 		&c.StripeProductID,
 		&c.StripePriceID,
 		&c.IsActive,
+		&c.GooglePlacesIsActive,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -165,14 +179,15 @@ func (r *PlatformBillingConfigRepo) Update(ctx context.Context, id uuid.UUID, in
 
 func (c *PlatformBillingConfig) ToPublic() PlatformBillingConfigPublic {
 	return PlatformBillingConfigPublic{
-		PerMemberPriceUSD: c.PerMemberPriceUSD,
-		Currency:          c.Currency,
-		HasPublishableKey: c.StripePublishableKeyEncrypted != nil && *c.StripePublishableKeyEncrypted != "",
-		HasSecretKey:      c.StripeSecretKeyEncrypted != nil && *c.StripeSecretKeyEncrypted != "",
-		HasWebhookSecret:  c.StripeWebhookSecretEncrypted != nil && *c.StripeWebhookSecretEncrypted != "",
-		StripeProductID:   c.StripeProductID,
-		StripePriceID:     c.StripePriceID,
-		IsActive:          c.IsActive,
+		PerMemberPriceUSD:    c.PerMemberPriceUSD,
+		Currency:             c.Currency,
+		HasPublishableKey:    c.StripePublishableKeyEncrypted != nil && *c.StripePublishableKeyEncrypted != "",
+		HasSecretKey:         c.StripeSecretKeyEncrypted != nil && *c.StripeSecretKeyEncrypted != "",
+		HasWebhookSecret:     c.StripeWebhookSecretEncrypted != nil && *c.StripeWebhookSecretEncrypted != "",
+		HasGooglePlacesKey:   c.GooglePlacesAPIKeyEncrypted != nil && *c.GooglePlacesAPIKeyEncrypted != "",
+		StripeProductID:      c.StripeProductID,
+		StripePriceID:        c.StripePriceID,
+		IsActive:             c.IsActive,
+		GooglePlacesIsActive: c.GooglePlacesIsActive,
 	}
 }
-
