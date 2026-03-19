@@ -34,7 +34,7 @@ func NewMembershipTypeRepo(db *database.Postgres) *MembershipTypeRepo {
 	return &MembershipTypeRepo{db: db}
 }
 
-// List returns all membership types for a tenant.
+// List returns all membership types for a tenant, with term options attached.
 func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]models.MembershipType, error) {
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
@@ -50,7 +50,49 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 		return nil, fmt.Errorf("listing membership types: %w", err)
 	}
 	defer rows.Close()
-	return r.scanMany(rows)
+	types, err := r.scanMany(rows)
+	if err != nil || len(types) == 0 {
+		return types, err
+	}
+
+	allOpts, err := r.allTermOptionsForTenant(ctx, tenantID)
+	if err != nil {
+		return types, nil
+	}
+	for i := range types {
+		types[i].TermOptions = allOpts[types[i].ID]
+	}
+	return types, nil
+}
+
+// allTermOptionsForTenant fetches every term option for a tenant in one query, keyed by membership_type_id.
+func (r *MembershipTypeRepo) allTermOptionsForTenant(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID][]models.TermOption, error) {
+	query := `
+		SELECT id, tenant_id, membership_type_id, duration_months,
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
+		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
+		FROM membership_term_options
+		WHERE tenant_id = $1
+		ORDER BY duration_months`
+	rows, err := r.db.Pool.Query(ctx, query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[uuid.UUID][]models.TermOption)
+	for rows.Next() {
+		var to models.TermOption
+		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
+			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
+			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+			&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
+			&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments); err != nil {
+			return nil, err
+		}
+		m[to.MembershipTypeID] = append(m[to.MembershipTypeID], to)
+	}
+	return m, rows.Err()
 }
 
 // FindByID returns a membership type with its term options.
