@@ -337,11 +337,17 @@ type ClientMembershipRow struct {
 	Status               string   `json:"status"`
 	MandateID            *string  `json:"mandate_id"`
 	SubscriptionID       *string  `json:"subscription_id"`
+	HasAgreement         bool     `json:"has_agreement"`
 	TotalPaid            float64  `json:"total_paid"`
 	TotalExpected        float64  `json:"total_expected"`
 	FailedCount          int      `json:"failed_count"`
 	LastPaymentDate      *string  `json:"last_payment_date"`
 	LastPaymentStatus    *string  `json:"last_payment_status"`
+	PaymentCurrencyCode  *string  `json:"payment_currency_code"`
+	LastPaymentAmount    *float64 `json:"last_payment_amount"`
+	LastBaseAmount       *float64 `json:"last_base_amount"`
+	LastTaxAmount        *float64 `json:"last_tax_amount"`
+	LastProcessingFeeAmount *float64 `json:"last_processing_fee_amount"`
 }
 
 // GetMemberships returns all memberships for a client with enriched data.
@@ -366,14 +372,29 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			m.status,
 			m.gocardless_mandate_id,
 			m.gocardless_subscription_id,
+			EXISTS(
+				SELECT 1 FROM membership_agreement_snapshots mas
+				WHERE mas.membership_id = m.id AND mas.tenant_id = m.tenant_id
+			),
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
-			CASE
-				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
-				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
-			END,
+			membership_expected_total(
+				COALESCE(m.payment_amount, 0),
+				m.num_payments,
+				m.payment_frequency,
+				m.payment_interval_unit,
+				m.payment_interval_count,
+				m.start_date,
+				m.min_term_end_date,
+				mto.duration_months
+			),
 			(SELECT COUNT(*) FROM payments p WHERE p.membership_id = m.id AND p.status = 'failed'),
 			(SELECT TO_CHAR(p.paid_date, 'YYYY-MM-DD') FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
-			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1)
+			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
+			(SELECT p.currency_code FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
+			(SELECT p.amount FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
+			(SELECT p.base_amount FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
+			(SELECT p.tax_amount FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
+			(SELECT p.processing_fee_amount FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1)
 		FROM memberships m
 		JOIN membership_types mt ON mt.id = m.membership_type_id
 		JOIN membership_term_options mto ON mto.id = m.term_option_id
@@ -396,8 +417,10 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			&row.TermMonths, &row.StartDate, &row.EndDate,
 			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentIntervalUnit, &row.PaymentIntervalCount, &row.PaymentAmount, &row.NumPayments,
 			&row.Status, &row.MandateID, &row.SubscriptionID,
+			&row.HasAgreement,
 			&row.TotalPaid, &row.TotalExpected,
 			&row.FailedCount, &row.LastPaymentDate, &row.LastPaymentStatus,
+			&row.PaymentCurrencyCode, &row.LastPaymentAmount, &row.LastBaseAmount, &row.LastTaxAmount, &row.LastProcessingFeeAmount,
 		); err != nil {
 			log.Printf("Error scanning client membership: %v", err)
 			continue
@@ -603,13 +626,20 @@ func (h *ClientHandler) CompleteMandateLink(w http.ResponseWriter, r *http.Reque
 			// Create subscription for recurring payments (pass num_payments from term option if set)
 			if m.PaymentFrequency != nil && *m.PaymentFrequency != "upfront" && m.PaymentAmount != nil {
 				var numPay *int
+				continueAfterTerm := false
 				if h.mtRepo != nil {
-					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil && to.NumPayments != nil {
-						numPay = to.NumPayments
+					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil {
+						if to.NumPayments != nil {
+							numPay = to.NumPayments
+						}
+						continueAfterTerm = to.ContinueAfterTerm
 					}
 				}
+				if continueAfterTerm {
+					numPay = nil
+				}
 				subID, _ := createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
-					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
 				subscriptionID = subID
 			}
 			break

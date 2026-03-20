@@ -154,8 +154,8 @@ export default function ActiveMembershipsPage() {
                               Direct Debit
                             </span>
                           ) : m.payment_method === "direct_debit" ? (
-                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">
-                              No mandate
+                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-gray-600 bg-gray-100 rounded px-1.5 py-0.5">
+                              Direct Debit
                             </span>
                           ) : null}
                         </td>

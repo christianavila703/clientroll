@@ -220,6 +220,7 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 						"AUD",
 						chargeDate,
 						gcID,
+						nil,
 					); perr != nil {
 						log.Printf("service.take_payment ledger_insert_failed tenant=%s charge=%s payment_ref=%s err=%v", tenantID, charge.ID, gcID, perr)
 					}
@@ -380,13 +381,20 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 			// Create subscription for recurring payments (pass num_payments from term option if set)
 			if m.PaymentFrequency != nil && *m.PaymentFrequency != "upfront" && m.PaymentAmount != nil {
 				var numPay *int
+				continueAfterTerm := false
 				if h.mtRepo != nil {
-					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil && to.NumPayments != nil {
-						numPay = to.NumPayments
+					if to, _ := h.mtRepo.GetTermOption(r.Context(), m.TermOptionID, tenantID); to != nil {
+						if to.NumPayments != nil {
+							numPay = to.NumPayments
+						}
+						continueAfterTerm = to.ContinueAfterTerm
 					}
 				}
+				if continueAfterTerm {
+					numPay = nil
+				}
 				createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
-					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
 			}
 			break
 		}
@@ -442,6 +450,7 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 			"AUD",
 			chargeDate,
 			gcPaymentID,
+			nil,
 		); perr != nil {
 			log.Printf("service.charge_with_bank_details ledger_insert_failed tenant=%s client=%s payment_ref=%s err=%v", tenantID, clientID, gcPaymentID, perr)
 		}

@@ -15,6 +15,16 @@ interface Bonus {
   updated_at: string;
 }
 
+type NumericField = number | "";
+type BonusFormState = {
+  title: string;
+  description: string;
+  image_url: string;
+  value: NumericField;
+  is_active: boolean;
+  sort_order: NumericField;
+};
+
 export default function BonusesPage() {
   const [searchParams] = useSearchParams();
   const [bonuses, setBonuses] = useState<Bonus[]>([]);
@@ -149,10 +159,9 @@ function BonusForm({ initial, onSaved, onCancel }: {
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  type NumericField = number | "";
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<BonusFormState>({
     title: initial?.title || "",
     description: initial?.description || "",
     image_url: initial?.image_url || "",

@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -139,59 +141,69 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var handleErr error
 	switch event.Type {
 	case "checkout.session.completed":
-		h.handleCheckoutCompleted(r.Context(), tenant.ID, event)
+		handleErr = h.handleCheckoutCompleted(r.Context(), tenant.ID, event)
 	case "checkout.session.expired":
-		h.handleCheckoutFailed(r.Context(), tenant.ID, event)
+		handleErr = h.handleCheckoutFailed(r.Context(), tenant.ID, event)
 	case "invoice.payment_succeeded":
-		h.handleInvoicePayment(r.Context(), tenant.ID, event, true)
+		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, true)
 	case "invoice.payment_failed":
-		h.handleInvoicePayment(r.Context(), tenant.ID, event, false)
+		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, false)
 	case "customer.subscription.deleted":
-		h.handleSubscriptionDeleted(r.Context(), tenant.ID, event)
+		handleErr = h.handleSubscriptionDeleted(r.Context(), tenant.ID, event)
 	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
-		h.handleDisputeEvent(r.Context(), tenant.ID, event)
+		handleErr = h.handleDisputeEvent(r.Context(), tenant.ID, event)
 	case "charge.refunded", "refund.updated":
-		h.handleRefundEvent(r.Context(), tenant.ID, event)
+		handleErr = h.handleRefundEvent(r.Context(), tenant.ID, event)
+	}
+	if handleErr != nil {
+		log.Printf("stripe webhook handler failed tenant=%s event=%s type=%s err=%v", tenant.ID, event.ID, event.Type, handleErr)
+		writeError(w, http.StatusInternalServerError, "Webhook processing failed")
+		return
 	}
 	if event.ID != "" && h.eventRepo != nil {
-		_ = h.eventRepo.MarkProcessed(r.Context(), tenant.ID, "stripe", event.ID)
+		if err := h.eventRepo.MarkProcessed(r.Context(), tenant.ID, "stripe", event.ID); err != nil {
+			log.Printf("stripe webhook mark processed failed tenant=%s event=%s type=%s err=%v", tenant.ID, event.ID, event.Type, err)
+			writeError(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
 	var sess stripe.CheckoutSession
 	if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
-		return
+		return fmt.Errorf("decode checkout.session.completed: %w", err)
 	}
 	metadata := sess.Metadata
 	if metadata["type"] == "service_charge" {
 		if h.serviceRepo == nil {
-			return
+			return nil
 		}
 		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
 		if err != nil {
-			return
+			return nil
 		}
 		now := time.Now().UTC()
 		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
-			log.Printf("stripe webhook update service charge succeeded failed: %v", err)
+			return fmt.Errorf("update service charge succeeded: %w", err)
 		}
-		return
+		return nil
 	}
 	// For subscription checkouts, rely on invoice events for ledger entries.
 	// This avoids double-counting the initial payment from both
 	// checkout.session.completed and invoice.payment_succeeded.
 	if sess.Mode == stripe.CheckoutSessionModeSubscription {
-		return
+		return nil
 	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)
 	if err1 != nil || err2 != nil || err3 != nil {
-		return
+		return nil
 	}
 	currencyCode := strings.ToUpper(strings.TrimSpace(metadata["currency_code"]))
 	if currencyCode == "" {
@@ -201,13 +213,15 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	if sess.PaymentIntent != nil && sess.PaymentIntent.ID != "" {
 		providerRef = sess.PaymentIntent.ID
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef)
+	components := parseMetadataPaymentComponents(metadata, amount)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef, components)
 	if err != nil {
-		log.Printf("stripe webhook create payment failed: %v", err)
-		return
+		return fmt.Errorf("create payment: %w", err)
 	}
 	now := time.Now().UTC()
-	_ = h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil)
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
+		return fmt.Errorf("update payment succeeded status: %w", err)
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
 			"payment_id":    p.ID,
@@ -219,43 +233,47 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 			"source":        "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
-func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
 	var sess stripe.CheckoutSession
 	if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
-		return
+		return fmt.Errorf("decode checkout.session.expired: %w", err)
 	}
 	metadata := sess.Metadata
 	if metadata["type"] == "service_charge" {
 		if h.serviceRepo == nil {
-			return
+			return nil
 		}
 		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
 		if err != nil {
-			return
+			return nil
 		}
 		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil); err != nil {
-			log.Printf("stripe webhook update service charge failed failed: %v", err)
+			return fmt.Errorf("update service charge failed status: %w", err)
 		}
-		return
+		return nil
 	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)
 	if err1 != nil || err2 != nil || err3 != nil {
-		return
+		return nil
 	}
 	currencyCode := strings.ToUpper(strings.TrimSpace(metadata["currency_code"]))
 	if currencyCode == "" {
 		currencyCode = "AUD"
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), sess.ID)
+	components := parseMetadataPaymentComponents(metadata, amount)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), sess.ID, components)
 	if err != nil {
-		return
+		return fmt.Errorf("create failed payment: %w", err)
 	}
 	reason := "checkout expired"
-	_ = h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil)
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
+		return fmt.Errorf("update payment failed status: %w", err)
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentFailed, tenantID, map[string]interface{}{
 			"payment_id":    p.ID,
@@ -267,18 +285,19 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 			"source":        "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
-func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantID uuid.UUID, event stripe.Event, succeeded bool) {
+func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantID uuid.UUID, event stripe.Event, succeeded bool) error {
 	var inv stripe.Invoice
 	if err := json.Unmarshal(event.Data.Raw, &inv); err != nil {
-		return
+		return fmt.Errorf("decode invoice event: %w", err)
 	}
 	metadata := inv.Metadata
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
 	clientID, err2 := uuid.Parse(metadata["client_id"])
 	if err1 != nil || err2 != nil {
-		return
+		return nil
 	}
 	amount := float64(inv.AmountPaid) / 100.0
 	if !succeeded {
@@ -289,13 +308,24 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	if currencyCode == "" {
 		currencyCode = "AUD"
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef)
+	components := parseMetadataPaymentComponents(metadata, amount)
+	if components == nil {
+		components = paymentComponentsFromInvoiceRaw(event.Data.Raw, amount)
+	}
+	if components == nil || components.ProcessingFeeAmount <= 0.004 {
+		if fallback := h.invoicePaymentFallbackComponents(ctx, tenantID, membershipID, amount, components); fallback != nil {
+			components = fallback
+		}
+	}
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), providerRef, components)
 	if err != nil {
-		return
+		return fmt.Errorf("create invoice payment: %w", err)
 	}
 	if succeeded {
 		now := time.Now().UTC()
-		_ = h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil)
+		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
+			return fmt.Errorf("update invoice payment succeeded status: %w", err)
+		}
 		if h.dispatcher != nil {
 			h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
 				"payment_id":    p.ID,
@@ -307,10 +337,12 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 				"source":        "stripe_webhook",
 			}))
 		}
-		return
+		return nil
 	}
 	reason := "invoice payment failed"
-	_ = h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil)
+	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
+		return fmt.Errorf("update invoice payment failed status: %w", err)
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentFailed, tenantID, map[string]interface{}{
 			"payment_id":    p.ID,
@@ -322,30 +354,84 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 			"source":        "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
-func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+// invoicePaymentFallbackComponents derives base/tax/fee when Stripe webhook payload omits split details.
+// It uses membership payment_amount as the organisation amount and treats the remaining delta as processing fee.
+func (h *StripeWebhookHandler) invoicePaymentFallbackComponents(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	membershipID uuid.UUID,
+	total float64,
+	existing *repository.PaymentComponents,
+) *repository.PaymentComponents {
 	if h.memberRepo == nil {
-		return
+		return existing
+	}
+	membership, err := h.memberRepo.FindByID(ctx, membershipID, tenantID)
+	if err != nil || membership == nil || membership.PaymentAmount == nil {
+		return existing
+	}
+	orgAmount := *membership.PaymentAmount
+	if orgAmount <= 0 || orgAmount-total > 0.02 {
+		return existing
+	}
+
+	fee := total - orgAmount
+	if fee < 0 {
+		fee = 0
+	}
+	if existing != nil && existing.ProcessingFeeAmount > 0.004 {
+		fee = existing.ProcessingFeeAmount
+	}
+
+	taxPercent := 10.0
+	if h.tenantRepo != nil {
+		if tenant, tErr := h.tenantRepo.FindByID(ctx, tenantID); tErr == nil && tenant != nil {
+			taxPercent = tenantSalesTaxPercent(tenant)
+		}
+	}
+	applySalesTax := true
+	if membership != nil && h.memberRepo != nil {
+		if v, mtErr := h.memberRepo.MembershipTypeApplySalesTax(ctx, membership.MembershipTypeID, tenantID); mtErr == nil {
+			applySalesTax = v
+		}
+	}
+	base, tax := splitAmountByTaxMode(orgAmount, taxPercent, applySalesTax)
+	out := &repository.PaymentComponents{
+		BaseAmount:          base,
+		TaxAmount:           tax,
+		ProcessingFeeAmount: fee,
+	}
+	if math.Abs((out.BaseAmount+out.TaxAmount+out.ProcessingFeeAmount)-total) > 0.05 {
+		return existing
+	}
+	return out
+}
+
+func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
+	if h.memberRepo == nil {
+		return nil
 	}
 	var sub struct {
 		ID       string            `json:"id"`
 		Metadata map[string]string `json:"metadata"`
 	}
 	if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
-		return
+		return fmt.Errorf("decode subscription.deleted: %w", err)
 	}
 	membershipID, err := uuid.Parse(sub.Metadata["membership_id"])
 	if err != nil {
 		log.Printf("stripe webhook subscription.deleted missing membership metadata subscription=%s", sub.ID)
-		return
+		return nil
 	}
 	m, err := h.memberRepo.FindByID(ctx, membershipID, tenantID)
 	if err != nil || m == nil {
-		return
+		return nil
 	}
 	if err := h.memberRepo.UpdateStatus(ctx, membershipID, tenantID, "cancelled"); err != nil {
-		return
+		return fmt.Errorf("cancel membership from subscription.deleted: %w", err)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.MembershipCancelled, tenantID, map[string]interface{}{
@@ -356,11 +442,12 @@ func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, te
 			"source":          "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
-func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
 	if h.disputeRepo == nil || h.paymentRepo == nil {
-		return
+		return nil
 	}
 	var dispute struct {
 		ID            string      `json:"id"`
@@ -371,14 +458,14 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 		Charge        interface{} `json:"charge"`
 	}
 	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
-		return
+		return fmt.Errorf("decode dispute event: %w", err)
 	}
 
 	chargeID := stripeExpandableID(dispute.Charge)
 	paymentIntentID := stripeExpandableID(dispute.PaymentIntent)
 	p, err := h.paymentRepo.GetByProviderReferences(ctx, tenantID, paymentIntentID, chargeID)
 	if err != nil || p == nil {
-		return
+		return nil
 	}
 
 	disputeStatus, paymentStatus, resolvedAt := mapStripeDisputeState(event.Type, dispute.Status)
@@ -396,7 +483,7 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 	if dispute.Amount > 0 {
 		amount = float64(dispute.Amount) / 100.0
 	}
-	_, _ = h.disputeRepo.UpsertByProviderOrPayment(
+	if _, err := h.disputeRepo.UpsertByProviderOrPayment(
 		ctx,
 		tenantID,
 		p.ID,
@@ -408,10 +495,12 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 		nil,
 		nil,
 		resolvedAt,
-	)
+	); err != nil {
+		return fmt.Errorf("upsert dispute: %w", err)
+	}
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, paymentStatus, nil, nil, nil); err != nil {
-		return
+		return fmt.Errorf("update payment dispute status: %w", err)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentDisputed, tenantID, map[string]interface{}{
@@ -428,11 +517,12 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 			"source":          "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
-func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) {
+func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
 	if h.paymentRepo == nil {
-		return
+		return nil
 	}
 
 	refs := []string{}
@@ -447,7 +537,7 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 			AmountRefunded int64       `json:"amount_refunded"`
 		}
 		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
-			return
+			return fmt.Errorf("decode charge.refunded: %w", err)
 		}
 		refs = append(refs, charge.ID, stripeExpandableID(charge.PaymentIntent), stripeExpandableID(charge.Invoice))
 		if charge.AmountRefunded > 0 {
@@ -462,10 +552,10 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 			PaymentIntent interface{} `json:"payment_intent"`
 		}
 		if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
-			return
+			return fmt.Errorf("decode refund.updated: %w", err)
 		}
 		if refund.Status != "" && refund.Status != "succeeded" {
-			return
+			return nil
 		}
 		refs = append(refs, stripeExpandableID(refund.PaymentIntent), stripeExpandableID(refund.Charge))
 		if refund.Amount > 0 {
@@ -475,10 +565,10 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 
 	p, err := h.paymentRepo.GetByProviderReferences(ctx, tenantID, refs...)
 	if err != nil || p == nil {
-		return
+		return nil
 	}
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
-		return
+		return fmt.Errorf("update payment refunded status: %w", err)
 	}
 	if amount <= 0 {
 		amount = p.Amount
@@ -494,6 +584,7 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 			"source":        "stripe_webhook",
 		}))
 	}
+	return nil
 }
 
 func stripeResourceType(eventType stripe.EventType) string {

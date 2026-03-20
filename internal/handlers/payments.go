@@ -38,8 +38,13 @@ type EnrichedPayment struct {
 	ClientEmail       *string `json:"client_email"`
 	MembershipType    string  `json:"membership_type"`
 	MembershipID      string  `json:"membership_id"`
+	PaymentSource     string  `json:"payment_source"`
+	Description       *string `json:"description"`
 	TermMonths        int     `json:"term_months"`
 	Amount            float64 `json:"amount"`
+	BaseAmount        float64 `json:"base_amount"`
+	TaxAmount         float64 `json:"tax_amount"`
+	ProcessingFeeAmount float64 `json:"processing_fee_amount"`
 	CurrencyCode      string  `json:"currency_code"`
 	Status            string  `json:"status"`
 	DueDate           string  `json:"due_date"`
@@ -61,44 +66,101 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 
 	query := `
+		WITH all_rows AS (
+			SELECT
+				p.id::text AS payment_id,
+				c.id::text AS client_id,
+				c.name AS client_name,
+				c.email AS client_email,
+				mt.title AS membership_type,
+				m.id::text AS membership_id,
+				'membership' AS payment_source,
+				NULL::text AS description,
+				mto.duration_months AS term_months,
+				p.amount AS amount,
+				p.base_amount AS base_amount,
+				p.tax_amount AS tax_amount,
+				p.processing_fee_amount AS processing_fee_amount,
+				p.currency_code AS currency_code,
+				p.status AS status,
+				TO_CHAR(p.due_date, 'YYYY-MM-DD') AS due_date,
+				CASE WHEN p.paid_date IS NOT NULL THEN TO_CHAR(p.paid_date, 'YYYY-MM-DD') ELSE NULL END AS paid_date,
+				p.failure_reason AS failure_reason,
+				p.retry_count AS retry_count,
+				p.provider_reference AS provider_reference,
+				m.payment_method AS payment_method,
+				COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.membership_id = m.id AND p2.status = 'succeeded'), 0) AS total_paid,
+				membership_expected_total(
+					COALESCE(m.payment_amount, 0),
+					m.num_payments,
+					m.payment_frequency,
+					m.payment_interval_unit,
+					m.payment_interval_count,
+					m.start_date,
+					m.min_term_end_date,
+					mto.duration_months
+				) AS total_expected,
+				TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD') AS membership_end,
+				m.status AS membership_status,
+				m.payment_frequency AS payment_frequency,
+				p.created_at AS created_at
+			FROM payments p
+			JOIN clients c ON c.id = p.client_id
+			JOIN memberships m ON m.id = p.membership_id
+			JOIN membership_types mt ON mt.id = m.membership_type_id
+			JOIN membership_term_options mto ON mto.id = m.term_option_id
+			WHERE p.tenant_id = $1
+
+			UNION ALL
+
+			SELECT
+				sc.id::text AS payment_id,
+				c.id::text AS client_id,
+				c.name AS client_name,
+				c.email AS client_email,
+				COALESCE(s.name, sc.description, 'Service Charge') AS membership_type,
+				'' AS membership_id,
+				'service' AS payment_source,
+				sc.description AS description,
+				0 AS term_months,
+				(sc.amount + sc.tax_amount + sc.processing_fee_amount) AS amount,
+				sc.amount AS base_amount,
+				sc.tax_amount AS tax_amount,
+				sc.processing_fee_amount AS processing_fee_amount,
+				COALESCE(s.currency_code, 'AUD') AS currency_code,
+				sc.status AS status,
+				TO_CHAR(sc.created_at, 'YYYY-MM-DD') AS due_date,
+				CASE WHEN sc.paid_date IS NOT NULL THEN TO_CHAR(sc.paid_date, 'YYYY-MM-DD') ELSE NULL END AS paid_date,
+				NULL::text AS failure_reason,
+				0 AS retry_count,
+				NULL::text AS provider_reference,
+				NULL::text AS payment_method,
+				CASE WHEN sc.status = 'succeeded' THEN (sc.amount + sc.tax_amount + sc.processing_fee_amount) ELSE 0 END AS total_paid,
+				(sc.amount + sc.tax_amount + sc.processing_fee_amount) AS total_expected,
+				TO_CHAR(sc.created_at, 'YYYY-MM-DD') AS membership_end,
+				sc.status AS membership_status,
+				NULL::text AS payment_frequency,
+				sc.created_at AS created_at
+			FROM service_charges sc
+			JOIN clients c ON c.id = sc.client_id
+			LEFT JOIN services s ON s.id = sc.service_id
+			WHERE sc.tenant_id = $1
+		)
 		SELECT
-			p.id::text,
-			c.id::text,
-			c.name,
-			c.email,
-			mt.title,
-			m.id::text,
-			mto.duration_months,
-			p.amount,
-			p.currency_code,
-			p.status,
-			TO_CHAR(p.due_date, 'YYYY-MM-DD'),
-			CASE WHEN p.paid_date IS NOT NULL THEN TO_CHAR(p.paid_date, 'YYYY-MM-DD') ELSE NULL END,
-			p.failure_reason,
-			p.retry_count,
-			p.provider_reference,
-			m.payment_method,
-			COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.membership_id = m.id AND p2.status = 'succeeded'), 0),
-			CASE
-				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
-				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
-			END,
-			TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD'),
-			m.status,
-			m.payment_frequency
-		FROM payments p
-		JOIN clients c ON c.id = p.client_id
-		JOIN memberships m ON m.id = p.membership_id
-		JOIN membership_types mt ON mt.id = m.membership_type_id
-		JOIN membership_term_options mto ON mto.id = m.term_option_id
-		WHERE p.tenant_id = $1`
+			payment_id, client_id, client_name, client_email,
+			membership_type, membership_id, payment_source, description, term_months,
+			amount, base_amount, tax_amount, processing_fee_amount, currency_code, status, due_date, paid_date,
+			failure_reason, retry_count, provider_reference, payment_method,
+			total_paid, total_expected, membership_end, membership_status, payment_frequency
+		FROM all_rows
+		WHERE 1=1`
 
 	args := []interface{}{tenantID}
 	if status != "" {
-		query += " AND p.status = $2"
+		query += " AND status = $2"
 		args = append(args, status)
 	}
-	query += " ORDER BY p.created_at DESC LIMIT 200"
+	query += " ORDER BY created_at DESC LIMIT 200"
 
 	rows, err := h.db.Pool.Query(r.Context(), query, args...)
 	if err != nil {
@@ -113,8 +175,8 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var row EnrichedPayment
 		if err := rows.Scan(
 			&row.PaymentID, &row.ClientID, &row.ClientName, &row.ClientEmail,
-			&row.MembershipType, &row.MembershipID, &row.TermMonths,
-			&row.Amount, &row.CurrencyCode, &row.Status, &row.DueDate, &row.PaidDate,
+			&row.MembershipType, &row.MembershipID, &row.PaymentSource, &row.Description, &row.TermMonths,
+			&row.Amount, &row.BaseAmount, &row.TaxAmount, &row.ProcessingFeeAmount, &row.CurrencyCode, &row.Status, &row.DueDate, &row.PaidDate,
 			&row.FailureReason, &row.RetryCount,
 			&row.ProviderReference, &row.PaymentMethod,
 			&row.TotalPaid, &row.TotalExpected,

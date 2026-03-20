@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
 import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
+import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 import type { Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
 interface Props {
@@ -69,8 +70,10 @@ function resolveFrequencyAmount(termOption: TermOption, frequency: string): numb
 }
 
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], onComplete, onBack }: Props) {
-  const supportsStripe = paymentProviders.includes("stripe");
-  const supportsGoCardless = paymentProviders.includes("gocardless");
+  const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
+  const hasProviderHints = normalizedProviders.length > 0;
+  const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
+  const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
   const supportsDirectDebit = supportsGoCardless || supportsStripe;
   const defaultMethod = supportsDirectDebit ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
   const [formStep, setFormStep] = useState<FormStep>("member");
@@ -94,6 +97,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const [memberSignature, setMemberSignature] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState<Set<string>>(new Set());
   const [sendAgreementEmail, setSendAgreementEmail] = useState(true);
+  const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
   const effectiveEnabledPaymentFrequencies =
     membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
       ? membership.enabled_payment_frequencies
@@ -141,7 +145,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           payment_amount: paymentAmount,
           payment_interval_unit: isCustomSchedule ? termOption.custom_schedule_interval_unit : undefined,
           payment_interval_count: isCustomSchedule ? termOption.custom_schedule_interval_count : undefined,
-          num_payments: isCustomSchedule ? termOption.custom_schedule_num_payments : termOption.num_payments,
+          num_payments: isCustomSchedule
+            ? termOption.custom_schedule_num_payments
+            : ((termOption as any).continue_after_term ? undefined : termOption.num_payments),
           member_signature: memberSignature,
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
@@ -241,13 +247,13 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
                   : "total";
               if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
-                if (w) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
+                if (w) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
               }
               if (resolvedMode === "monthly") {
                 const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
-                if (m) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
+                if (m) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
               }
-              return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
+              return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
             })()}
           </div>
         </div>
@@ -281,7 +287,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               onNext={() => setFormStep("payment")}
             />
           )}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} currencyCode={currencyCode} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} />}
           {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
@@ -411,7 +417,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
 }
 
 /* ─── Section B: Payment Details ─── */
-function PaymentSection({ data, onChange, termOption, paymentProviders, enabledPaymentFrequencies, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void }) {
+function PaymentSection({ data, onChange, termOption, paymentProviders, currencyCode, enabledPaymentFrequencies, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; currencyCode: string; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
@@ -442,6 +448,21 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, enabledP
       amount: termOption.custom_schedule_amount,
     },
   ].filter((f) => f.enabled && enabledSet.has(f.value));
+
+  const selectedFrequency = frequencies.find((f) => f.value === data.payment_frequency);
+  const selectedAmount = selectedFrequency?.amount || 0;
+  const computeFee = (amount: number): number => {
+    if (!amount) return 0;
+    if (data.payment_method === "card" && supportsStripe) {
+      return estimateStripeProcessingFeeCents(Math.round(amount * 100), "card") / 100;
+    }
+    if (data.payment_method === "direct_debit" && !supportsGoCardless && supportsStripe) {
+      return estimateStripeProcessingFeeCents(Math.round(amount * 100), "direct_debit") / 100;
+    }
+    return 0;
+  };
+  const selectedFee = computeFee(selectedAmount);
+  const selectedTotal = selectedAmount + selectedFee;
 
   useEffect(() => {
     if (!frequencies.some((f) => f.value === data.payment_frequency) && frequencies[0]) {
@@ -509,13 +530,39 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, enabledP
                 </div>
                 {f.amount && (
                   <span className="text-[15px] font-bold tabular-nums" style={{ color: data.payment_frequency === f.value ? "var(--brandPrimary)" : "#374151" }}>
-                    ${f.amount.toLocaleString()}
+                    {currencyCode} ${f.amount.toLocaleString()}
                   </span>
                 )}
               </label>
             ))}
           </div>
         </div>
+        {selectedAmount > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-[13px] font-semibold text-gray-800">Customer charge estimate</p>
+            <div className="mt-2 space-y-1.5 text-[12px]">
+              <div className="flex justify-between gap-3">
+                <span className="text-gray-600">Membership amount</span>
+                <span className="font-medium text-gray-900 tabular-nums">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              {selectedFee > 0 ? (
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-600">Processing fee</span>
+                  <span className="font-medium text-gray-900 tabular-nums">{currencyCode} ${selectedFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-600">Processing fee</span>
+                  <span className="font-medium text-gray-900">No processing fee</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-3 border-t border-gray-200 pt-1.5">
+                <span className="text-gray-700 font-semibold">Total charged</span>
+                <span className="font-semibold text-gray-900 tabular-nums">{currencyCode} ${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "direct_debit" && paymentProviders.includes("gocardless") ? "Bank Details" : "Continue"} />

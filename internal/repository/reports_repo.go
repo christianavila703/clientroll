@@ -10,12 +10,42 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	reportCollectedMembershipExpr = "amount"
+	reportTaxMembershipExpr       = "COALESCE(tax_amount, 0)"
+	reportSurchargeMembershipExpr = "COALESCE(processing_fee_amount, 0)"
+	reportToOrgMembershipExpr     = "COALESCE(base_amount, 0) + COALESCE(tax_amount, 0)"
+
+	reportCollectedServiceExpr = "amount + tax_amount + processing_fee_amount"
+	reportTaxServiceExpr       = "COALESCE(tax_amount, 0)"
+	reportSurchargeServiceExpr = "COALESCE(processing_fee_amount, 0)"
+	reportToOrgServiceExpr     = "amount + tax_amount"
+)
+
+func applyDashboardLegacyAliases(s *DashboardSummary) {
+	s.MonthRevenue = s.MonthCollectedAmount
+	s.OrganisationMonthRevenue = s.MonthToOrganisationAmount
+}
+
+func applyComprehensiveLegacyAliases(rpt *ComprehensiveReport) {
+	rpt.MonthRevenue = rpt.MonthCollectedAmount
+	rpt.PrevMonthRevenue = rpt.PrevMonthCollectedAmount
+	rpt.TotalRevenue = rpt.TotalCollectedAmount
+	rpt.OrganisationMonthRevenue = rpt.MonthToOrganisationAmount
+	rpt.OrganisationPrevMonthRevenue = rpt.PrevMonthToOrganisationAmount
+	rpt.OrganisationTotalRevenue = rpt.TotalToOrganisationAmount
+}
+
 // ReportData holds aggregated data for financial reports.
 type MonthlyRevenue struct {
-	Month        string  `json:"month"`
-	CurrencyCode string  `json:"currency_code,omitempty"`
-	Revenue      float64 `json:"revenue"`
-	Expected     float64 `json:"expected"`
+	Month                string  `json:"month"`
+	CurrencyCode         string  `json:"currency_code,omitempty"`
+	CollectedAmount      float64 `json:"collected_amount"`
+	TaxAmount            float64 `json:"tax_amount"`
+	SurchargeAmount      float64 `json:"surcharge_amount"`
+	ToOrganisationAmount float64 `json:"to_organisation_amount"`
+	Revenue              float64 `json:"revenue"` // Backward-compatible alias of collected_amount.
+	Expected             float64 `json:"expected"`
 }
 
 type MembershipBreakdown struct {
@@ -26,20 +56,29 @@ type MembershipBreakdown struct {
 }
 
 type CurrencyTotal struct {
-	CurrencyCode string  `json:"currency_code"`
-	Revenue      float64 `json:"revenue"`
-	Payments     int     `json:"payments"`
+	CurrencyCode         string  `json:"currency_code"`
+	CollectedAmount      float64 `json:"collected_amount"`
+	TaxAmount            float64 `json:"tax_amount"`
+	SurchargeAmount      float64 `json:"surcharge_amount"`
+	ToOrganisationAmount float64 `json:"to_organisation_amount"`
+	Revenue              float64 `json:"revenue"` // Backward-compatible alias of collected_amount.
+	Payments             int     `json:"payments"`
 }
 
 type DashboardSummary struct {
-	ActiveMembers       int     `json:"active_members"`
-	MonthRevenue        float64 `json:"month_revenue"`
-	FailedPayments      int     `json:"failed_payments"`
-	NewSignups          int     `json:"new_signups"`
-	OpenDisputes        int     `json:"open_disputes"`
-	ActiveMandates      int     `json:"active_mandates"`
-	ActiveSubscriptions int     `json:"active_subscriptions"`
-	PendingPayments     int     `json:"pending_payments"`
+	ActiveMembers             int     `json:"active_members"`
+	MonthCollectedAmount      float64 `json:"month_collected_amount"`
+	MonthTaxAmount            float64 `json:"month_tax_amount"`
+	MonthSurchargeAmount      float64 `json:"month_surcharge_amount"`
+	MonthToOrganisationAmount float64 `json:"month_to_organisation_amount"`
+	MonthRevenue              float64 `json:"month_revenue"`              // Backward-compatible alias of month_collected_amount.
+	OrganisationMonthRevenue  float64 `json:"organisation_month_revenue"` // Backward-compatible alias of month_to_organisation_amount.
+	FailedPayments            int     `json:"failed_payments"`
+	NewSignups                int     `json:"new_signups"`
+	OpenDisputes              int     `json:"open_disputes"`
+	ActiveMandates            int     `json:"active_mandates"`
+	ActiveSubscriptions       int     `json:"active_subscriptions"`
+	PendingPayments           int     `json:"pending_payments"`
 }
 
 // ReportsRepo handles aggregated reporting queries.
@@ -66,16 +105,40 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 		  AND c.deleted_at IS NULL
 	`, tenantID).Scan(&s.ActiveMembers)
 
-	// This month revenue (membership payments + service charges)
+	// This month amounts (membership payments + service charges)
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	r.db.Pool.QueryRow(ctx, `
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev), 0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 		) combined
-	`, tenantID, monthStart).Scan(&s.MonthRevenue)
+	`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID, monthStart).Scan(&s.MonthCollectedAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(tax), 0) FROM (
+			SELECT %s AS tax FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT %s AS tax FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) combined
+	`, reportTaxMembershipExpr, reportTaxServiceExpr), tenantID, monthStart).Scan(&s.MonthTaxAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(fee), 0) FROM (
+			SELECT %s AS fee FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT %s AS fee FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) combined
+	`, reportSurchargeMembershipExpr, reportSurchargeServiceExpr), tenantID, monthStart).Scan(&s.MonthSurchargeAmount)
+
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(rev), 0) FROM (
+			SELECT (%s) AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT (%s) AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) combined
+	`, reportToOrgMembershipExpr, reportToOrgServiceExpr), tenantID, monthStart).Scan(&s.MonthToOrganisationAmount)
+	s.MonthRevenue = s.MonthCollectedAmount
+	s.OrganisationMonthRevenue = s.MonthToOrganisationAmount
 
 	// Failed payments (unresolved)
 	r.db.Pool.QueryRow(ctx,
@@ -122,18 +185,34 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 
 // GetMonthlyRevenue returns monthly revenue for the past 12 months (membership payments + service charges).
 func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID) ([]MonthlyRevenue, error) {
-	query := `
-		SELECT month, COALESCE(SUM(revenue), 0) AS revenue FROM (
-			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount AS revenue
+	query := fmt.Sprintf(`
+		SELECT
+			month,
+			COALESCE(SUM(collected_amount), 0) AS collected_amount,
+			COALESCE(SUM(tax_amount), 0) AS tax_amount,
+			COALESCE(SUM(surcharge_amount), 0) AS surcharge_amount,
+			COALESCE(SUM(to_organisation_amount), 0) AS to_organisation_amount
+		FROM (
+			SELECT
+				TO_CHAR(paid_date, 'YYYY-MM') AS month,
+				%s AS collected_amount,
+				%s AS tax_amount,
+				%s AS surcharge_amount,
+				%s AS to_organisation_amount
 			FROM payments
 			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
 			UNION ALL
-			SELECT TO_CHAR(paid_date, 'YYYY-MM') AS month, amount + tax_amount + processing_fee_amount AS revenue
+			SELECT
+				TO_CHAR(paid_date, 'YYYY-MM') AS month,
+				%s AS collected_amount,
+				%s AS tax_amount,
+				%s AS surcharge_amount,
+				%s AS to_organisation_amount
 			FROM service_charges
 			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
 		) combined
 		GROUP BY month
-		ORDER BY month`
+		ORDER BY month`, reportCollectedMembershipExpr, reportTaxMembershipExpr, reportSurchargeMembershipExpr, reportToOrgMembershipExpr, reportCollectedServiceExpr, reportTaxServiceExpr, reportSurchargeServiceExpr, reportToOrgServiceExpr)
 
 	rows, err := r.db.Pool.Query(ctx, query, tenantID)
 	if err != nil {
@@ -144,9 +223,10 @@ func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID)
 	var items []MonthlyRevenue
 	for rows.Next() {
 		var m MonthlyRevenue
-		if err := rows.Scan(&m.Month, &m.Revenue); err != nil {
+		if err := rows.Scan(&m.Month, &m.CollectedAmount, &m.TaxAmount, &m.SurchargeAmount, &m.ToOrganisationAmount); err != nil {
 			return nil, err
 		}
+		m.Revenue = m.CollectedAmount
 		items = append(items, m)
 	}
 	return items, rows.Err()
@@ -191,19 +271,34 @@ func (r *ReportsRepo) GetMembershipBreakdown(ctx context.Context, tenantID uuid.
 // ComprehensiveReport holds all report data.
 type ComprehensiveReport struct {
 	// KPIs
-	ActiveMembers       int     `json:"active_members"`
-	TotalClients        int     `json:"total_clients"`
-	MonthRevenue        float64 `json:"month_revenue"`
-	PrevMonthRevenue    float64 `json:"prev_month_revenue"`
-	TotalRevenue        float64 `json:"total_revenue"`
-	MRR                 float64 `json:"mrr"`
-	ARR                 float64 `json:"arr"`
-	AvgRevenuePerMember float64 `json:"avg_revenue_per_member"`
-	FailedPayments      int     `json:"failed_payments"`
-	NewSignupsMonth     int     `json:"new_signups_month"`
-	ChurnedMonth        int     `json:"churned_month"`
-	CollectionRate      float64 `json:"collection_rate"`
-	AvgMembershipDays   int     `json:"avg_membership_days"`
+	ActiveMembers                 int     `json:"active_members"`
+	TotalClients                  int     `json:"total_clients"`
+	MonthCollectedAmount          float64 `json:"month_collected_amount"`
+	PrevMonthCollectedAmount      float64 `json:"prev_month_collected_amount"`
+	TotalCollectedAmount          float64 `json:"total_collected_amount"`
+	MonthTaxAmount                float64 `json:"month_tax_amount"`
+	PrevMonthTaxAmount            float64 `json:"prev_month_tax_amount"`
+	TotalTaxAmount                float64 `json:"total_tax_amount"`
+	MonthSurchargeAmount          float64 `json:"month_surcharge_amount"`
+	PrevMonthSurchargeAmount      float64 `json:"prev_month_surcharge_amount"`
+	TotalSurchargeAmount          float64 `json:"total_surcharge_amount"`
+	MonthToOrganisationAmount     float64 `json:"month_to_organisation_amount"`
+	PrevMonthToOrganisationAmount float64 `json:"prev_month_to_organisation_amount"`
+	TotalToOrganisationAmount     float64 `json:"total_to_organisation_amount"`
+	MonthRevenue                  float64 `json:"month_revenue"`                   // Backward-compatible alias of month_collected_amount.
+	PrevMonthRevenue              float64 `json:"prev_month_revenue"`              // Backward-compatible alias of prev_month_collected_amount.
+	TotalRevenue                  float64 `json:"total_revenue"`                   // Backward-compatible alias of total_collected_amount.
+	OrganisationMonthRevenue      float64 `json:"organisation_month_revenue"`      // Backward-compatible alias.
+	OrganisationPrevMonthRevenue  float64 `json:"organisation_prev_month_revenue"` // Backward-compatible alias.
+	OrganisationTotalRevenue      float64 `json:"organisation_total_revenue"`      // Backward-compatible alias.
+	MRR                           float64 `json:"mrr"`
+	ARR                           float64 `json:"arr"`
+	AvgRevenuePerMember           float64 `json:"avg_revenue_per_member"`
+	FailedPayments                int     `json:"failed_payments"`
+	NewSignupsMonth               int     `json:"new_signups_month"`
+	ChurnedMonth                  int     `json:"churned_month"`
+	CollectionRate                float64 `json:"collection_rate"`
+	AvgMembershipDays             int     `json:"avg_membership_days"`
 
 	// Time series
 	MonthlyRevenue []MonthlyRevenue `json:"monthly_revenue"`
@@ -292,29 +387,93 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	// Total clients
 	r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM clients WHERE tenant_id=$1", tenantID).Scan(&rpt.TotalClients)
 
-	// This month revenue (membership + service)
-	r.db.Pool.QueryRow(ctx, `
+	// This month amounts (membership + service)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev),0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
-		) x`, tenantID, monthStart).Scan(&rpt.MonthRevenue)
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) x`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID, monthStart).Scan(&rpt.MonthCollectedAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(tax),0) FROM (
+			SELECT %s AS tax FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT %s AS tax FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) x`, reportTaxMembershipExpr, reportTaxServiceExpr), tenantID, monthStart).Scan(&rpt.MonthTaxAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(fee),0) FROM (
+			SELECT %s AS fee FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+			UNION ALL
+			SELECT %s AS fee FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) x`, reportSurchargeMembershipExpr, reportSurchargeServiceExpr), tenantID, monthStart).Scan(&rpt.MonthSurchargeAmount)
 
-	// Previous month revenue
-	r.db.Pool.QueryRow(ctx, `
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev),0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			SELECT (%s) AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
-		) x`, tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthRevenue)
+			SELECT (%s) AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
+		) x`, reportToOrgMembershipExpr, reportToOrgServiceExpr), tenantID, monthStart).Scan(&rpt.MonthToOrganisationAmount)
 
-	// Total revenue all time
-	r.db.Pool.QueryRow(ctx, `
+	// Previous month amounts
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev),0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
-		) x`, tenantID).Scan(&rpt.TotalRevenue)
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+		) x`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthCollectedAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(tax),0) FROM (
+			SELECT %s AS tax FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			UNION ALL
+			SELECT %s AS tax FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+		) x`, reportTaxMembershipExpr, reportTaxServiceExpr), tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthTaxAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(fee),0) FROM (
+			SELECT %s AS fee FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			UNION ALL
+			SELECT %s AS fee FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+		) x`, reportSurchargeMembershipExpr, reportSurchargeServiceExpr), tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthSurchargeAmount)
+
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT (%s) AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+			UNION ALL
+			SELECT (%s) AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2 AND paid_date < $3
+		) x`, reportToOrgMembershipExpr, reportToOrgServiceExpr), tenantID, prevMonthStart, monthStart).Scan(&rpt.PrevMonthToOrganisationAmount)
+
+	// Total amounts all time
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID).Scan(&rpt.TotalCollectedAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(tax),0) FROM (
+			SELECT %s AS tax FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT %s AS tax FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, reportTaxMembershipExpr, reportTaxServiceExpr), tenantID).Scan(&rpt.TotalTaxAmount)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(fee),0) FROM (
+			SELECT %s AS fee FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT %s AS fee FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, reportSurchargeMembershipExpr, reportSurchargeServiceExpr), tenantID).Scan(&rpt.TotalSurchargeAmount)
+
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(rev),0) FROM (
+			SELECT (%s) AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			UNION ALL
+			SELECT (%s) AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, reportToOrgMembershipExpr, reportToOrgServiceExpr), tenantID).Scan(&rpt.TotalToOrganisationAmount)
+
+	rpt.MonthRevenue = rpt.MonthCollectedAmount
+	rpt.PrevMonthRevenue = rpt.PrevMonthCollectedAmount
+	rpt.TotalRevenue = rpt.TotalCollectedAmount
+	rpt.OrganisationMonthRevenue = rpt.MonthToOrganisationAmount
+	rpt.OrganisationPrevMonthRevenue = rpt.PrevMonthToOrganisationAmount
+	rpt.OrganisationTotalRevenue = rpt.TotalToOrganisationAmount
 
 	// MRR (sum of monthly payment amounts for active memberships)
 	r.db.Pool.QueryRow(ctx, `SELECT COALESCE(SUM(
@@ -341,18 +500,18 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 
 	// Collection rate
 	var totalDue, totalCollected float64
-	r.db.Pool.QueryRow(ctx, `
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev),0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1
-		) x`, tenantID).Scan(&totalDue)
-	r.db.Pool.QueryRow(ctx, `
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1
+		) x`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID).Scan(&totalDue)
+	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev),0) FROM (
-			SELECT amount AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
+			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded'
 			UNION ALL
-			SELECT amount + tax_amount + processing_fee_amount AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
-		) x`, tenantID).Scan(&totalCollected)
+			SELECT %s AS rev FROM service_charges WHERE tenant_id=$1 AND status='succeeded'
+		) x`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID).Scan(&totalCollected)
 	if totalDue > 0 {
 		rpt.CollectionRate = (totalCollected / totalDue) * 100
 	}
@@ -364,22 +523,42 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	rpt.MonthlyRevenue, _ = r.GetMonthlyRevenue(ctx, tenantID)
 
 	// Revenue totals by currency (membership + service).
-	rowsCurrency, err := r.db.Pool.Query(ctx, `
-		SELECT currency_code, COALESCE(SUM(revenue), 0) AS revenue, SUM(payments)::int AS payments FROM (
-			SELECT COALESCE(currency_code, 'AUD') AS currency_code, amount AS revenue, 1 AS payments
+	rowsCurrency, err := r.db.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT
+			currency_code,
+			COALESCE(SUM(collected_amount), 0) AS collected_amount,
+			COALESCE(SUM(tax_amount), 0) AS tax_amount,
+			COALESCE(SUM(surcharge_amount), 0) AS surcharge_amount,
+			COALESCE(SUM(to_organisation_amount), 0) AS to_organisation_amount,
+			SUM(payments)::int AS payments
+		FROM (
+			SELECT
+				COALESCE(currency_code, 'AUD') AS currency_code,
+				%s AS collected_amount,
+				%s AS tax_amount,
+				%s AS surcharge_amount,
+				%s AS to_organisation_amount,
+				1 AS payments
 			FROM payments WHERE tenant_id = $1 AND status = 'succeeded'
 			UNION ALL
-			SELECT 'AUD' AS currency_code, amount + tax_amount + processing_fee_amount AS revenue, 1 AS payments
+			SELECT
+				'AUD' AS currency_code,
+				%s AS collected_amount,
+				%s AS tax_amount,
+				%s AS surcharge_amount,
+				%s AS to_organisation_amount,
+				1 AS payments
 			FROM service_charges WHERE tenant_id = $1 AND status = 'succeeded'
 		) combined
 		GROUP BY currency_code
 		ORDER BY currency_code
-	`, tenantID)
+	`, reportCollectedMembershipExpr, reportTaxMembershipExpr, reportSurchargeMembershipExpr, reportToOrgMembershipExpr, reportCollectedServiceExpr, reportTaxServiceExpr, reportSurchargeServiceExpr, reportToOrgServiceExpr), tenantID)
 	if err == nil {
 		defer rowsCurrency.Close()
 		for rowsCurrency.Next() {
 			var c CurrencyTotal
-			rowsCurrency.Scan(&c.CurrencyCode, &c.Revenue, &c.Payments)
+			rowsCurrency.Scan(&c.CurrencyCode, &c.CollectedAmount, &c.TaxAmount, &c.SurchargeAmount, &c.ToOrganisationAmount, &c.Payments)
+			c.Revenue = c.CollectedAmount
 			rpt.RevenueByCurrency = append(rpt.RevenueByCurrency, c)
 		}
 	}
@@ -424,15 +603,15 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	}
 
 	// Top 10 clients by revenue (membership payments + service charges)
-	rows4, err := r.db.Pool.Query(ctx, `
+	rows4, err := r.db.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT c.id::text, c.name,
-			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.client_id=c.id AND p.status='succeeded'), 0)
-			+ COALESCE((SELECT SUM(sc.amount + sc.tax_amount + sc.processing_fee_amount) FROM service_charges sc WHERE sc.client_id=c.id AND sc.status='succeeded'), 0) AS total_rev,
+			COALESCE((SELECT SUM(%s) FROM payments p WHERE p.client_id=c.id AND p.status='succeeded'), 0)
+			+ COALESCE((SELECT SUM(%s) FROM service_charges sc WHERE sc.client_id=c.id AND sc.status='succeeded'), 0) AS total_rev,
 			(SELECT COUNT(DISTINCT m.id) FROM memberships m WHERE m.client_id=c.id) AS memberships
 		FROM clients c
 		WHERE c.tenant_id=$1 AND c.deleted_at IS NULL
 		GROUP BY c.id, c.name
-		ORDER BY total_rev DESC LIMIT 10`, tenantID)
+		ORDER BY total_rev DESC LIMIT 10`, reportCollectedMembershipExpr, reportCollectedServiceExpr), tenantID)
 	if err == nil {
 		defer rows4.Close()
 		for rows4.Next() {

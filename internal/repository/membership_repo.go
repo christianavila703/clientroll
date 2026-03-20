@@ -242,3 +242,19 @@ func (r *MembershipRepo) CountActive(ctx context.Context, tenantID uuid.UUID) (i
 		tenantID).Scan(&count)
 	return count, err
 }
+
+// MembershipTypeApplySalesTax returns the tax toggle for a membership type.
+// Defaults to true when not found, preserving historical behavior.
+func (r *MembershipRepo) MembershipTypeApplySalesTax(ctx context.Context, membershipTypeID, tenantID uuid.UUID) (bool, error) {
+	var applySalesTax bool
+	err := r.db.Pool.QueryRow(ctx,
+		"SELECT apply_sales_tax FROM membership_types WHERE id=$1 AND tenant_id=$2",
+		membershipTypeID, tenantID).Scan(&applySalesTax)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return true, nil
+		}
+		return true, err
+	}
+	return applySalesTax, nil
+}

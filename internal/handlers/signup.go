@@ -310,21 +310,6 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		input.PaymentIntervalUnit = &unit
 	}
-	if input.PaymentFrequency == "custom_schedule" {
-		if input.PaymentIntervalUnit == nil || *input.PaymentIntervalUnit == "" {
-			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_unit")
-			return
-		}
-		if input.PaymentIntervalCount <= 0 {
-			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_count > 0")
-			return
-		}
-		if input.NumPayments == nil || *input.NumPayments <= 0 {
-			writeError(w, http.StatusBadRequest, "custom schedule requires num_payments > 0")
-			return
-		}
-	}
-
 	// Look up existing client by email, or create new
 	var client *models.Client
 	if input.Client.Email != nil && *input.Client.Email != "" {
@@ -360,12 +345,57 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse IDs
-	mtID, _ := uuid.Parse(input.MembershipTypeID)
-	toID, _ := uuid.Parse(input.TermOptionID)
+	mtID, err := uuid.Parse(input.MembershipTypeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid membership_type_id")
+		return
+	}
+	toID, err := uuid.Parse(input.TermOptionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term_option_id")
+		return
+	}
 	staffID := parseOptionalUUID(input.StaffUserID)
 	mtForCreate, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
+	termForCreate, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID)
+	if mtForCreate == nil {
+		writeError(w, http.StatusNotFound, "Membership type not found")
+		return
+	}
+	if termForCreate == nil || termForCreate.MembershipTypeID != mtID {
+		writeError(w, http.StatusBadRequest, "term_option_id does not belong to membership_type_id")
+		return
+	}
+	canonical, err := deriveCanonicalMembershipPricing(termForCreate, input.PaymentFrequency)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.PaymentAmount > 0 && math.Abs(input.PaymentAmount-canonical.Amount) > 0.01 {
+		writeError(w, http.StatusBadRequest, "payment_amount does not match selected term option")
+		return
+	}
+	if input.NumPayments != nil && canonical.NumPayments != nil && *input.NumPayments != *canonical.NumPayments {
+		writeError(w, http.StatusBadRequest, "num_payments does not match selected term option")
+		return
+	}
+	if input.PaymentIntervalUnit != nil && canonical.IntervalUnit != nil && *input.PaymentIntervalUnit != *canonical.IntervalUnit {
+		writeError(w, http.StatusBadRequest, "payment_interval_unit does not match selected term option")
+		return
+	}
+	if input.PaymentIntervalCount > 0 && canonical.IntervalCount > 0 && input.PaymentIntervalCount != canonical.IntervalCount {
+		writeError(w, http.StatusBadRequest, "payment_interval_count does not match selected term option")
+		return
+	}
+	input.PaymentFrequency = canonical.Frequency
+	input.PaymentAmount = canonical.Amount
+	input.PaymentIntervalUnit = canonical.IntervalUnit
+	input.PaymentIntervalCount = canonical.IntervalCount
+	input.NumPayments = canonical.NumPayments
+	applySalesTax := true
+	applySalesTax = mtForCreate.ApplySalesTax
 	membershipCurrency := "AUD"
-	if mtForCreate != nil && strings.TrimSpace(mtForCreate.CurrencyCode) != "" {
+	if strings.TrimSpace(mtForCreate.CurrencyCode) != "" {
 		membershipCurrency = strings.ToUpper(strings.TrimSpace(mtForCreate.CurrencyCode))
 	}
 
@@ -392,7 +422,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// --- Stripe card checkout path ---
 	if input.PaymentMethod == "card" {
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
@@ -493,10 +523,15 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 				subName = mtForSub.Title
 			}
 			numPay := membership.NumPayments
-			if numPay == nil {
-				if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil && to.NumPayments != nil {
+			continueAfterTerm := false
+			if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil {
+				if numPay == nil && to.NumPayments != nil {
 					numPay = to.NumPayments
 				}
+				continueAfterTerm = to.ContinueAfterTerm
+			}
+			if continueAfterTerm {
+				numPay = nil
 			}
 			if _, err := createGoCardlessSubscription(
 				r.Context(),
@@ -512,13 +547,14 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 				subName,
 				membership.MinTermEndDate,
 				numPay,
+				continueAfterTerm,
 			); err != nil {
 				writeError(w, http.StatusBadGateway, "Direct debit subscription setup failed")
 				return
 			}
 		} else {
 			// Stripe BECS Direct Debit path: redirect to Stripe Checkout with au_becs_debit
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount)
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax)
 			if err != nil {
 				log.Printf("Error creating Stripe BECS checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, "Direct debit setup failed")
@@ -725,7 +761,7 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -780,7 +816,11 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 
 	feeCents := stripeProcessingFee(unitAmount, "card")
 	totalAmount := float64(unitAmount+feeCents) / 100.0
+	baseAmount, taxAmount := splitAmountByTaxMode(amount, tenantSalesTaxPercent(tenant), applySalesTax)
 	params.Metadata["payment_amount"] = strconv.FormatFloat(totalAmount, 'f', 2, 64)
+	params.Metadata["base_amount"] = strconv.FormatFloat(baseAmount, 'f', 2, 64)
+	params.Metadata["tax_amount"] = strconv.FormatFloat(taxAmount, 'f', 2, 64)
+	params.Metadata["processing_fee_amount"] = strconv.FormatFloat(float64(feeCents)/100, 'f', 2, 64)
 
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),
@@ -812,10 +852,16 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		feeItem.PriceData.Recurring = recurring
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
-				"tenant_id":     tenant.ID.String(),
-				"tenant_slug":   tenant.Slug,
-				"client_id":     client.ID.String(),
-				"membership_id": membership.ID.String(),
+				"tenant_id":             tenant.ID.String(),
+				"tenant_slug":           tenant.Slug,
+				"client_id":             client.ID.String(),
+				"membership_id":         membership.ID.String(),
+				"payment_amount":        params.Metadata["payment_amount"],
+				"base_amount":           params.Metadata["base_amount"],
+				"tax_amount":            params.Metadata["tax_amount"],
+				"processing_fee_amount": params.Metadata["processing_fee_amount"],
+				"currency_code":         currencyCode,
+				"payment_freq":          frequency,
 			},
 		}
 	}
@@ -831,7 +877,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 // createStripeBECSCheckoutSession creates a Stripe Checkout session restricted to
 // au_becs_debit (Australian direct debit). Stripe's hosted page collects bank details
 // and the BECS mandate agreement from the customer.
-func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64) (string, error) {
+func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -866,10 +912,10 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	}
 
 	params := &stripe.CheckoutSessionParams{
-		Mode:              stripe.String(string(mode)),
-		SuccessURL:        stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
-		CancelURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
-		ClientReferenceID: stripe.String(client.ID.String()),
+		Mode:               stripe.String(string(mode)),
+		SuccessURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
+		CancelURL:          stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
+		ClientReferenceID:  stripe.String(client.ID.String()),
 		PaymentMethodTypes: stripe.StringSlice([]string{"au_becs_debit"}),
 		Metadata: map[string]string{
 			"tenant_id":      tenant.ID.String(),
@@ -877,7 +923,7 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			"client_id":      client.ID.String(),
 			"membership_id":  membership.ID.String(),
 			"payment_amount": strconv.FormatFloat(amount, 'f', 2, 64),
-			"currency_code":  cur,
+			"currency_code":  strings.ToUpper(cur),
 			"payment_freq":   frequency,
 			"payment_method": "direct_debit",
 		},
@@ -888,7 +934,11 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 
 	feeCents := stripeProcessingFee(unitAmount, "direct_debit")
 	totalAmount := float64(unitAmount+feeCents) / 100.0
+	baseAmount, taxAmount := splitAmountByTaxMode(amount, tenantSalesTaxPercent(tenant), applySalesTax)
 	params.Metadata["payment_amount"] = strconv.FormatFloat(totalAmount, 'f', 2, 64)
+	params.Metadata["base_amount"] = strconv.FormatFloat(baseAmount, 'f', 2, 64)
+	params.Metadata["tax_amount"] = strconv.FormatFloat(taxAmount, 'f', 2, 64)
+	params.Metadata["processing_fee_amount"] = strconv.FormatFloat(float64(feeCents)/100, 'f', 2, 64)
 
 	lineItem := &stripe.CheckoutSessionLineItemParams{
 		Quantity: stripe.Int64(1),
@@ -920,11 +970,17 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		feeItem.PriceData.Recurring = recurring
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
-				"tenant_id":      tenant.ID.String(),
-				"tenant_slug":    tenant.Slug,
-				"client_id":      client.ID.String(),
-				"membership_id":  membership.ID.String(),
-				"payment_method": "direct_debit",
+				"tenant_id":             tenant.ID.String(),
+				"tenant_slug":           tenant.Slug,
+				"client_id":             client.ID.String(),
+				"membership_id":         membership.ID.String(),
+				"payment_method":        "direct_debit",
+				"payment_amount":        params.Metadata["payment_amount"],
+				"base_amount":           params.Metadata["base_amount"],
+				"tax_amount":            params.Metadata["tax_amount"],
+				"processing_fee_amount": params.Metadata["processing_fee_amount"],
+				"currency_code":         strings.ToUpper(strings.TrimSpace(currencyCode)),
+				"payment_freq":          frequency,
 			},
 		}
 	}

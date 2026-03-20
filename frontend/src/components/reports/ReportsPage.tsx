@@ -2,32 +2,38 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import api from "../../api/client";
+import type { ComprehensiveReport } from "../../types/reports";
 
-interface Report {
-  active_members: number; total_clients: number;
-  month_revenue: number; prev_month_revenue: number; total_revenue: number;
-  mrr: number; arr: number; avg_revenue_per_member: number;
-  failed_payments: number; new_signups_month: number; churned_month: number;
-  collection_rate: number; avg_membership_days: number;
-  monthly_revenue: { month: string; revenue: number }[];
-  monthly_signups: { month: string; count: number }[];
-  monthly_churn: { month: string; count: number }[];
-  membership_breakdown: { type_title: string; currency_code?: string; revenue: number; count: number }[];
-  revenue_by_currency: { currency_code: string; revenue: number; payments: number }[];
-  payment_statuses: Record<string, number>;
-  frequency_breakdown: { frequency: string; count: number; revenue: number }[];
-  top_clients: { client_id: string; client_name: string; total_paid: number; memberships: number }[];
-  upcoming_expirations: { client_name: string; membership_type: string; end_date: string; days_left: number }[];
-  recent_failures: { client_name: string; amount: number; failure_reason: string; due_date: string }[];
-}
+type Report = ComprehensiveReport;
 
 function normalizeReport(raw: any): Report {
+  const monthCollected = Number(raw?.month_collected_amount ?? raw?.month_revenue ?? 0);
+  const prevMonthCollected = Number(raw?.prev_month_collected_amount ?? raw?.prev_month_revenue ?? 0);
+  const totalCollected = Number(raw?.total_collected_amount ?? raw?.total_revenue ?? 0);
+  const monthToOrganisation = Number(raw?.month_to_organisation_amount ?? raw?.organisation_month_revenue ?? 0);
+  const prevMonthToOrganisation = Number(raw?.prev_month_to_organisation_amount ?? raw?.organisation_prev_month_revenue ?? 0);
+  const totalToOrganisation = Number(raw?.total_to_organisation_amount ?? raw?.organisation_total_revenue ?? 0);
   return {
     active_members: Number(raw?.active_members || 0),
     total_clients: Number(raw?.total_clients || 0),
-    month_revenue: Number(raw?.month_revenue || 0),
-    prev_month_revenue: Number(raw?.prev_month_revenue || 0),
-    total_revenue: Number(raw?.total_revenue || 0),
+    month_collected_amount: monthCollected,
+    prev_month_collected_amount: prevMonthCollected,
+    total_collected_amount: totalCollected,
+    month_revenue: monthCollected,
+    prev_month_revenue: prevMonthCollected,
+    total_revenue: totalCollected,
+    month_tax_amount: Number(raw?.month_tax_amount || 0),
+    prev_month_tax_amount: Number(raw?.prev_month_tax_amount || 0),
+    total_tax_amount: Number(raw?.total_tax_amount || 0),
+    month_surcharge_amount: Number(raw?.month_surcharge_amount || 0),
+    prev_month_surcharge_amount: Number(raw?.prev_month_surcharge_amount || 0),
+    total_surcharge_amount: Number(raw?.total_surcharge_amount || 0),
+    month_to_organisation_amount: monthToOrganisation,
+    prev_month_to_organisation_amount: prevMonthToOrganisation,
+    total_to_organisation_amount: totalToOrganisation,
+    organisation_month_revenue: monthToOrganisation,
+    organisation_prev_month_revenue: prevMonthToOrganisation,
+    organisation_total_revenue: totalToOrganisation,
     mrr: Number(raw?.mrr || 0),
     arr: Number(raw?.arr || 0),
     avg_revenue_per_member: Number(raw?.avg_revenue_per_member || 0),
@@ -150,10 +156,45 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
     <div className="space-y-5">
       {/* KPI row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Monthly Revenue" value={`$${fmtMoney(data.month_revenue)}`} delta={revDelta} />
+        <Kpi
+          label="Collected (this month)"
+          value={`$${fmtMoney(data.month_collected_amount || data.month_revenue)}`}
+          delta={revDelta}
+          sub={
+            data.month_to_organisation_amount != null && data.month_to_organisation_amount > 0
+              ? `Payment: $${fmtMoney(Math.max(0, (data.month_to_organisation_amount || 0) - (data.month_tax_amount || 0)))} · Tax: $${fmtMoney(data.month_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.month_surcharge_amount || 0)} · Total: $${fmtMoney(data.month_collected_amount || data.month_revenue)}`
+              : "Total from customers"
+          }
+        />
         <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} sub="Monthly Recurring Revenue" />
         <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} sub="Annual Recurring Revenue" />
-        <Kpi label="Total Revenue" value={`$${fmtMoney(data.total_revenue)}`} sub="All time" />
+        <Kpi
+          label="Collected (all time)"
+          value={`$${fmtMoney(data.total_collected_amount || data.total_revenue)}`}
+          sub={
+            data.total_to_organisation_amount != null && data.total_to_organisation_amount > 0
+              ? `Payment: $${fmtMoney(Math.max(0, (data.total_to_organisation_amount || 0) - (data.total_tax_amount || 0)))} · Tax: $${fmtMoney(data.total_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.total_surcharge_amount || 0)} · Total: $${fmtMoney(data.total_collected_amount || data.total_revenue)}`
+              : "Total from customers"
+          }
+        />
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] text-gray-600">
+        <strong className="text-gray-800">Payment</strong> + <strong className="text-gray-800">Tax</strong> + <strong className="text-gray-800">Payment processing fee</strong> = <strong className="text-gray-800">Total</strong>.
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Tax This Month</p>
+          <p className="text-xl font-bold text-gray-900 mt-1 tabular-nums">${fmtMoney(data.month_tax_amount || 0)}</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Tax Last Month</p>
+          <p className="text-xl font-bold text-gray-900 mt-1 tabular-nums">${fmtMoney(data.prev_month_tax_amount || 0)}</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Tax All Time</p>
+          <p className="text-xl font-bold text-gray-900 mt-1 tabular-nums">${fmtMoney(data.total_tax_amount || 0)}</p>
+        </div>
       </div>
 
       {/* KPI row 2 */}
@@ -284,13 +325,25 @@ function RevenueTab({ data }: { data: Report }) {
 
   return (
     <div className="space-y-5">
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] text-gray-600">
+        Charts below use <strong>total collected from customers</strong> per month (same as payment <code className="text-[10px] bg-white px-1 rounded">amount</code> including surcharges).{" "}
+        For <strong>to your organisation</strong> (excl. surcharges) see Overview KPIs or the Payments list.
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} />
         <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} />
         <Kpi label="Avg / Member" value={`$${fmtMoney(data.avg_revenue_per_member)}`} sub="Lifetime" />
-        <Kpi label="Total Revenue" value={`$${fmtMoney(data.total_revenue)}`} />
+        <Kpi
+          label="Collected (all time)"
+          value={`$${fmtMoney(data.total_collected_amount || data.total_revenue)}`}
+          sub={
+            data.total_to_organisation_amount != null && data.total_to_organisation_amount > 0
+              ? `Payment: $${fmtMoney(Math.max(0, (data.total_to_organisation_amount || 0) - (data.total_tax_amount || 0)))} · Tax: $${fmtMoney(data.total_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.total_surcharge_amount || 0)} · Total: $${fmtMoney(data.total_collected_amount || data.total_revenue)}`
+              : undefined
+          }
+        />
       </div>
-      <div className="card overflow-hidden"><div className="card-header"><h3>Monthly Revenue Trend</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={areaChart} style={{ height: 320 }} /> : <Empty />}</div></div>
+      <div className="card overflow-hidden"><div className="card-header"><h3>Monthly trend (collected)</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={areaChart} style={{ height: 320 }} /> : <Empty />}</div></div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="card overflow-hidden"><div className="card-header"><h3>Revenue by Month</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={barChart} style={{ height: 280 }} /> : <Empty />}</div></div>
         <div className="card overflow-hidden"><div className="card-header"><h3>Revenue by Membership Type</h3></div><div className="px-5 py-4">{data.membership_breakdown.length > 0 ? <ReactECharts option={typeBar} style={{ height: Math.max(150, data.membership_breakdown.length * 50) }} /> : <Empty />}</div></div>

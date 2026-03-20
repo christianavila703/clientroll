@@ -1,16 +1,18 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
+import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 
 interface Props {
   membership: MembershipType;
   tenantSlug: string;
   priceDisplayMode: "total" | "weekly" | "monthly";
   enabledPaymentFrequencies: string[];
+  paymentProviders: string[];
   onSelectTerm: (term: TermOption) => void;
   onBack: () => void;
 }
 
-export default function MembershipDetail({ membership, tenantSlug, priceDisplayMode, enabledPaymentFrequencies, onSelectTerm, onBack }: Props) {
+export default function MembershipDetail({ membership, tenantSlug, priceDisplayMode, enabledPaymentFrequencies, paymentProviders, onSelectTerm, onBack }: Props) {
   const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
   const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
   const fallbackTitle = (mt: MembershipType) => mt.title;
@@ -31,6 +33,8 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
   };
   const formatMoney = (value: number) =>
     value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
+  const moneyWithCurrency = (value: number) => `${currencyCode} $${formatMoney(value)}`;
   const weeklyFromTerm = currentTerm?.fee_weekly ?? (currentTerm ? toWeekly(currentTerm.fee_total, currentTerm.duration_months) : null);
   const weeklyFallback = terms
     .map((t) => t.fee_weekly || toWeekly(t.fee_total, t.duration_months))
@@ -60,6 +64,32 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
       : "total";
   const showWeekly = resolvedDisplayMode === "weekly";
   const showMonthly = resolvedDisplayMode === "monthly";
+  const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
+  const hasProviderHints = normalizedProviders.length > 0;
+  const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
+  const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
+  const displayAmountForTerm = (term: TermOption): number => {
+    if (resolvedDisplayMode === "weekly") return term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || term.fee_total;
+    if (resolvedDisplayMode === "monthly") return term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || term.fee_total;
+    return term.fee_total;
+  };
+  const processingFeeForDisplay = (amount: number, method: "card" | "direct_debit") =>
+    estimateStripeProcessingFeeCents(Math.round(amount * 100), method) / 100;
+  const processingFeeLabelForTerm = (term: TermOption): string | null => {
+    const amount = displayAmountForTerm(term);
+    const fees: number[] = [];
+    if (supportsStripe) {
+      fees.push(processingFeeForDisplay(amount, "card"));
+      fees.push(processingFeeForDisplay(amount, "direct_debit"));
+    }
+    const positiveFees = fees.filter((v) => v > 0.004);
+    if (positiveFees.length === 0) return null;
+    if (positiveFees.length === 1) {
+      return `+ processing fee ${currencyCode} $${formatMoney(positiveFees[0])}`;
+    }
+    const minFee = Math.min(...positiveFees);
+    return `+ processing fee from ${currencyCode} $${formatMoney(minFee)}`;
+  };
 
   useEffect(() => {
     if (currentTerm) {
@@ -111,10 +141,10 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
             <div className="flex items-baseline gap-3">
               <span className="text-2xl font-medium tabular-nums" style={{ color: "var(--brandPrimary)" }}>
                 {showWeekly
-                  ? `$${formatMoney(weeklyValue!)}`
+                  ? moneyWithCurrency(weeklyValue!)
                   : showMonthly
-                  ? `$${formatMoney(monthlyValue!)}`
-                  : `$${(() => {
+                  ? moneyWithCurrency(monthlyValue!)
+                  : `${currencyCode} $${(() => {
                       if (currentTerm) return currentTerm.fee_total.toLocaleString();
                       const opts = membership.term_options || [];
                       if (opts.length > 0) return opts[0].fee_total.toLocaleString();
@@ -125,9 +155,17 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                 {showWeekly ? "per week" : showMonthly ? "per month" : "total membership value"}
               </span>
             </div>
+            <p className="text-[12px] text-gray-500 mt-1">
+              {membership.apply_sales_tax !== false ? "Includes GST" : "No GST"}
+            </p>
+            {currentTerm && processingFeeLabelForTerm(currentTerm) && (
+              <p className="text-[12px] text-gray-500 mt-1">
+                {processingFeeLabelForTerm(currentTerm)}
+              </p>
+            )}
             {bonuses.length > 0 && (
               <p className="text-[12px] text-gray-400 mt-1">
-                Includes ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm?.duration_months}-month term
+                Includes {currencyCode} ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm?.duration_months}-month term
               </p>
             )}
           </div>
@@ -185,7 +223,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                     <div className="flex items-center justify-between pt-3 border-t border-green-200">
                       <span className="text-sm text-gray-600">Bonus Value</span>
                       <span className="text-xl font-semibold text-green-700 tabular-nums">
-                        ${bonus.value.toLocaleString()}
+                        {currencyCode} ${bonus.value.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -228,10 +266,10 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                     </div>
                     <div className="mt-1 text-xl font-medium text-gray-900 tabular-nums">
                       {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months))
-                        ? `$${formatMoney(term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || 0)}`
+                        ? moneyWithCurrency(term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || 0)
                         : resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months))
-                        ? `$${formatMoney(term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || 0)}`
-                        : `$${term.fee_total.toLocaleString()}`}
+                        ? moneyWithCurrency(term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || 0)
+                        : `${currencyCode} $${term.fee_total.toLocaleString()}`}
                     </div>
                     {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months)) && (
                       <p className="text-[12px] text-gray-500 mt-1">per week</p>
@@ -241,12 +279,17 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                     )}
                     {resolvedDisplayMode === "total" && term.fee_monthly && (
                       <p className="text-[12px] text-gray-500 mt-1">
-                        or ${term.fee_monthly.toLocaleString()}/month
+                        or {currencyCode} ${term.fee_monthly.toLocaleString()}/month
+                      </p>
+                    )}
+                    {processingFeeLabelForTerm(term) && (
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        {processingFeeLabelForTerm(term)}
                       </p>
                     )}
                     {term.custom_schedule_enabled && term.custom_schedule_amount && term.custom_schedule_num_payments && term.custom_schedule_interval_count && (
                       <p className="text-xs font-medium mt-1" style={{ color: "var(--brandPrimary)" }}>
-                        {term.custom_schedule_label || `${term.custom_schedule_num_payments} payments every ${term.custom_schedule_interval_count} ${term.custom_schedule_interval_unit || "month"}${term.custom_schedule_interval_count === 1 ? "" : "s"}`} (${term.custom_schedule_amount.toLocaleString()} each)
+                        {term.custom_schedule_label || `${term.custom_schedule_num_payments} payments every ${term.custom_schedule_interval_count} ${term.custom_schedule_interval_unit || "month"}${term.custom_schedule_interval_count === 1 ? "" : "s"}`} ({currencyCode} ${term.custom_schedule_amount.toLocaleString()} each)
                       </p>
                     )}
                     {(term as any).num_payments && (

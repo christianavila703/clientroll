@@ -1,32 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-
-interface Payment {
-  payment_id: string;
-  client_id: string;
-  client_name: string;
-  client_email?: string;
-  membership_type: string;
-  membership_id: string;
-  term_months: number;
-  amount: number;
-  status: string;
-  due_date: string;
-  paid_date?: string;
-  failure_reason?: string;
-  retry_count: number;
-  provider_reference?: string;
-  payment_method?: string;
-  total_paid: number;
-  total_expected: number;
-  membership_end: string;
-  membership_status: string;
-  payment_frequency?: string;
-}
+import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
+import { customerCharged, fmtMoney } from "../../utils/paymentLabels";
+import type { AdminPaymentRecord } from "../../types/payments";
 
 export default function PaymentsPage() {
   const navigate = useNavigate();
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [payments, setPayments] = useState<AdminPaymentRecord[]>([]);
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,9 +35,6 @@ export default function PaymentsPage() {
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
-  const fmtMoney = (value: number) =>
-    value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
   const daysUntilEnd = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, colour: "text-red-600" };
@@ -77,26 +54,53 @@ export default function PaymentsPage() {
   const totalCount = payments.length;
   const succeededCount = payments.filter(p => p.status === "succeeded").length;
   const failedCount = payments.filter(p => p.status === "failed").length;
-  const totalCollected = payments.filter(p => p.status === "succeeded").reduce((s, p) => s + p.amount, 0);
+  const succeeded = payments.filter(p => p.status === "succeeded");
+  const totalCollected = succeeded.reduce((s, p) => s + customerCharged(p), 0);
+  const totalTax = succeeded.reduce((s, p) => s + (Number(p.tax_amount ?? 0) || 0), 0);
+  const totalProcessingFee = succeeded.reduce((s, p) => s + (Number(p.processing_fee_amount ?? 0) || 0), 0);
+  const totalPayment = succeeded.reduce((s, p) => {
+    const base = Number(p.base_amount ?? 0);
+    if (!Number.isNaN(base) && base > 0) return s + base;
+    const charged = customerCharged(p);
+    return s + Math.max(0, charged - (Number(p.tax_amount ?? 0) || 0) - (Number(p.processing_fee_amount ?? 0) || 0));
+  }, 0);
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Payments</h1>
-          <p className="text-[13px] text-gray-500">Track all payment activity across memberships</p>
+          <p className="text-[13px] text-gray-500">Track all payment activity across memberships and services</p>
         </div>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-5">
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Total Payments</p>
           <p className="text-xl font-bold text-gray-900 mt-1 tabular-nums">{totalCount}</p>
         </div>
         <div className="card px-4 py-3">
-          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Collected</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">${fmtMoney(totalCollected)}</p>
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Total Charged (Succeeded)</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">AUD ${fmtMoney(totalCollected)}</p>
+          <p className="text-[10px] text-gray-500 mt-1">Payment + tax + processing fee</p>
+        </div>
+        <div className="card px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Breakdown (Succeeded)</p>
+          <div className="mt-2 space-y-1 text-[12px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500">Payment</span>
+              <span className="font-semibold text-gray-900 tabular-nums">AUD ${fmtMoney(totalPayment)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500">Tax</span>
+              <span className="font-semibold text-gray-900 tabular-nums">AUD ${fmtMoney(totalTax)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500">Processing fee</span>
+              <span className="font-semibold text-gray-900 tabular-nums">AUD ${fmtMoney(totalProcessingFee)}</span>
+            </div>
+          </div>
         </div>
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Succeeded</p>
@@ -142,7 +146,7 @@ export default function PaymentsPage() {
                   <tr>
                     <th>Client</th>
                     <th>Membership</th>
-                    <th>Amount</th>
+                    <th className="min-w-[9rem]">Customer / organisation</th>
                     <th>Status</th>
                     <th>Due Date</th>
                     <th>Paid Date</th>
@@ -165,7 +169,9 @@ export default function PaymentsPage() {
                           <p className="text-gray-900">{p.membership_type}</p>
                           <p className="text-[11px] text-gray-400">{p.term_months}mo · {fmtFreq(p.payment_frequency)}</p>
                         </td>
-                        <td className="tabular-nums font-medium text-gray-900">${p.amount.toFixed(2)}</td>
+                        <td>
+                          <AdminPaymentAmounts p={p} layout="compact" />
+                        </td>
                         <td>
                           <span className={`badge ${p.status === "succeeded" || p.status === "confirmed" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" || p.status === "submitted" ? "badge-yellow" : "badge-gray"}`}>
                             {p.status === "succeeded" ? "paid" : p.status}
@@ -185,8 +191,8 @@ export default function PaymentsPage() {
                         <td>
                           <div className="w-28">
                             <div className="flex items-center justify-between text-[11px] mb-1">
-                              <span className="text-gray-500 tabular-nums">${fmtMoney(p.total_paid)}</span>
-                              <span className="text-gray-400 tabular-nums">${fmtMoney(p.total_expected)}</span>
+                              <span className="text-gray-500 tabular-nums">{(p.currency_code || "AUD")} ${fmtMoney(p.total_paid)}</span>
+                              <span className="text-gray-400 tabular-nums">{(p.currency_code || "AUD")} ${fmtMoney(p.total_expected)}</span>
                             </div>
                             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                               <div
@@ -194,7 +200,7 @@ export default function PaymentsPage() {
                                 style={{ width: `${Math.min(paidPct, 100)}%` }}
                               />
                             </div>
-                            <p className="text-[10px] text-gray-400 mt-0.5">${fmtMoney(remaining)} remaining</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">AUD ${fmtMoney(remaining)} remaining</p>
                           </div>
                         </td>
                         <td>
@@ -221,9 +227,9 @@ export default function PaymentsPage() {
                       <p className="text-[13px] font-medium text-gray-900">{p.client_name}</p>
                       <p className="text-[12px] text-gray-500">{p.membership_type} · {p.term_months}mo</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[14px] font-semibold text-gray-900 tabular-nums">${p.amount.toFixed(2)}</p>
-                      <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
+                    <div className="text-right min-w-[8rem]">
+                      <AdminPaymentAmounts p={p} layout="compact" />
+                      <span className={`badge mt-1 inline-block ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
                         {p.status}
                       </span>
                     </div>
@@ -231,7 +237,7 @@ export default function PaymentsPage() {
                   <div className="grid grid-cols-2 gap-2 text-[12px]">
                     <div><span className="text-gray-400">Due</span><p className="text-gray-700">{fmtDate(p.due_date)}</p></div>
                     <div><span className="text-gray-400">Paid</span><p className="text-gray-700">{p.paid_date ? fmtDate(p.paid_date) : "—"}</p></div>
-                    <div><span className="text-gray-400">Contract</span><p className="tabular-nums">${fmtMoney(p.total_paid)} / ${fmtMoney(p.total_expected)}</p></div>
+                    <div><span className="text-gray-400">Contract</span><p className="tabular-nums">AUD ${fmtMoney(p.total_paid)} / AUD ${fmtMoney(p.total_expected)}</p></div>
                     <div><span className="text-gray-400">Ends</span><p className={end.colour}>{fmtDate(p.membership_end)} ({end.text})</p></div>
                   </div>
                   {p.failure_reason && <p className="mt-2 text-[11px] text-red-500">{p.failure_reason}</p>}

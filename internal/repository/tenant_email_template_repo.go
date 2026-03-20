@@ -143,3 +143,28 @@ func (r *TenantEmailTemplateRepo) IsEnabled(ctx context.Context, tenantID uuid.U
 	}
 	return enabled, nil
 }
+
+func (r *TenantEmailTemplateRepo) GetByKey(ctx context.Context, tenantID uuid.UUID, templateKey string) (*TenantEmailTemplate, error) {
+	var item TenantEmailTemplate
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT tenant_id, template_key, category, enabled, subject_override, body_override, created_at, updated_at
+		FROM tenant_email_templates
+		WHERE tenant_id = $1 AND template_key = $2
+	`, tenantID, templateKey).Scan(
+		&item.TenantID,
+		&item.TemplateKey,
+		&item.Category,
+		&item.Enabled,
+		&item.SubjectOverride,
+		&item.BodyOverride,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get tenant email template by key: %w", err)
+	}
+	return &item, nil
+}

@@ -15,6 +15,16 @@ interface Service {
 }
 
 const AVAILABLE_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "CAD", "SGD"];
+type NumericField = number | "";
+type ServiceFormState = {
+  name: string;
+  description: string;
+  price: NumericField;
+  currency_code: string;
+  tax_rate: NumericField;
+  is_active: boolean;
+  sort_order: NumericField;
+};
 
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
@@ -133,11 +143,10 @@ export default function ServicesPage() {
 }
 
 function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; onSaved: () => void; onCancel: () => void }) {
-  type NumericField = number | "";
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<ServiceFormState>({
     name: initial?.name || "",
     description: initial?.description || "",
     price: initial ? initial.price : "",

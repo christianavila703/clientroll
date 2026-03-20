@@ -39,7 +39,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, apply_sales_tax, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE tenant_id = $1 AND deleted_at IS NULL
@@ -69,7 +69,7 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 func (r *MembershipTypeRepo) allTermOptionsForTenant(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID][]models.TermOption, error) {
 	query := `
 		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
 		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
 		FROM membership_term_options
@@ -85,7 +85,7 @@ func (r *MembershipTypeRepo) allTermOptionsForTenant(ctx context.Context, tenant
 		var to models.TermOption
 		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
 			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
-			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
 			&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
 			&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments); err != nil {
 			return nil, err
@@ -116,15 +116,15 @@ func (r *MembershipTypeRepo) FindBySlug(ctx context.Context, slug string, tenant
 }
 
 // Create inserts a new membership type.
-func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, sortOrder int, currencyCode string) (*models.MembershipType, error) {
+func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, membershipName, membershipLevel *string, title, slug string, description, inclusions, topImageURL *string, sortOrder int, currencyCode string, applySalesTax bool) (*models.MembershipType, error) {
 	query := `
 		INSERT INTO membership_types (tenant_id, membership_name, membership_level, title, slug,
 		    summary, description, inclusions, benefits,
-		    top_image_url, currency_code, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		    top_image_url, currency_code, sort_order, apply_sales_tax)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, apply_sales_tax, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
@@ -132,7 +132,7 @@ func (r *MembershipTypeRepo) Create(ctx context.Context, tenantID uuid.UUID, mem
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipName, membershipLevel, title, slug,
 		nil, description, inclusions, nil,
-		topImageURL, currencyCode, sortOrder).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
+		topImageURL, currencyCode, sortOrder, applySalesTax).Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership type: %w", err)
 	}
@@ -152,7 +152,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 
 	mt, err := r.Create(ctx, tenantID, source.MembershipName, source.MembershipLevel, newTitle, newSlug,
 		source.Description, source.Inclusions, source.TopImageURL,
-		source.SortOrder+1, source.CurrencyCode)
+		source.SortOrder+1, source.CurrencyCode, source.ApplySalesTax)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func (r *MembershipTypeRepo) Duplicate(ctx context.Context, id, tenantID uuid.UU
 	for _, to := range source.TermOptions {
 		_, err := r.CreateTermOption(ctx, tenantID, mt.ID, to.DurationMonths,
 			to.FeeTotal, to.FeeWeekly, to.FeeFortnightly, to.FeeMonthly, to.FeeQuarterly, to.AllowUpfront, to.NumPayments,
-			to.CustomScheduleEnabled, to.CustomScheduleLabel, to.CustomScheduleAmount, to.CustomScheduleIntervalUnit, to.CustomScheduleIntervalCount, to.CustomScheduleNumPayments)
+			to.ContinueAfterTerm, to.CustomScheduleEnabled, to.CustomScheduleLabel, to.CustomScheduleAmount, to.CustomScheduleIntervalUnit, to.CustomScheduleIntervalCount, to.CustomScheduleNumPayments)
 		if err != nil {
 			return nil, fmt.Errorf("duplicating term option: %w", err)
 		}
@@ -179,6 +179,7 @@ func (r *MembershipTypeRepo) CreateTermOption(
 	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly *float64,
 	allowUpfront bool,
 	numPayments *int,
+	continueAfterTerm bool,
 	customScheduleEnabled bool,
 	customScheduleLabel *string,
 	customScheduleAmount *float64,
@@ -189,20 +190,21 @@ func (r *MembershipTypeRepo) CreateTermOption(
 	query := `
 		INSERT INTO membership_term_options (tenant_id, membership_type_id, duration_months,
 		    fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		    continue_after_term,
 		    custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		    custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
 		          custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		          custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments`
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipTypeID, durationMonths,
 		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments,
-		customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
+		continueAfterTerm, customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
 		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
 		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
 		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
 	if err != nil {
@@ -220,6 +222,7 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly *float64,
 	allowUpfront bool,
 	numPayments *int,
+	continueAfterTerm bool,
 	customScheduleEnabled bool,
 	customScheduleLabel *string,
 	customScheduleAmount *float64,
@@ -230,22 +233,22 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 	query := `
 		UPDATE membership_term_options SET duration_months=$3, fee_total=$4,
 		    fee_weekly=$5, fee_fortnightly=$6, fee_monthly=$7, fee_quarterly=$8,
-		    allow_upfront=$9, num_payments=$10, custom_schedule_enabled=$11,
-		    custom_schedule_label=$12, custom_schedule_amount=$13,
-		    custom_schedule_interval_unit=$14, custom_schedule_interval_count=$15,
-		    custom_schedule_num_payments=$16, updated_at=NOW()
+		    allow_upfront=$9, num_payments=$10, continue_after_term=$11, custom_schedule_enabled=$12,
+		    custom_schedule_label=$13, custom_schedule_amount=$14,
+		    custom_schedule_interval_unit=$15, custom_schedule_interval_count=$16,
+		    custom_schedule_num_payments=$17, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2
 		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
 		          custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		          custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments`
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, durationMonths,
 		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments,
-		customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
+		continueAfterTerm, customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
 		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
 		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
 		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
 	if err != nil {
@@ -309,7 +312,7 @@ func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID 
 func (r *MembershipTypeRepo) GetTermOption(ctx context.Context, termOptionID, tenantID uuid.UUID) (*models.TermOption, error) {
 	query := `
 		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
 		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
 		FROM membership_term_options
@@ -317,7 +320,7 @@ func (r *MembershipTypeRepo) GetTermOption(ctx context.Context, termOptionID, te
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, termOptionID, tenantID).Scan(
 		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
 		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
 		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
 	if err != nil {
@@ -329,7 +332,7 @@ func (r *MembershipTypeRepo) GetTermOption(ctx context.Context, termOptionID, te
 func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeID, tenantID uuid.UUID) ([]models.TermOption, error) {
 	query := `
 		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
+		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
 		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
 		FROM membership_term_options
@@ -347,7 +350,7 @@ func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeI
 		var to models.TermOption
 		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
 			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
-			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments,
+			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
 			&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
 			&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments); err != nil {
 			return nil, err
@@ -361,7 +364,7 @@ func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...
 	query := `
 		SELECT id, tenant_id, membership_name, membership_level, title, slug,
 		       summary, description, inclusions, benefits,
-		       top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
+		       top_image_url, currency_code, enabled_payment_frequencies, apply_sales_tax, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		       thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		       created_at, updated_at
 		FROM membership_types WHERE ` + where
@@ -383,7 +386,7 @@ func (r *MembershipTypeRepo) scanFields(mt *models.MembershipType, enabledPaymen
 	return []interface{}{
 		&mt.ID, &mt.TenantID, &mt.MembershipName, &mt.MembershipLevel, &mt.Title, &mt.Slug,
 		&mt.Summary, &mt.Description, &mt.Inclusions, &mt.Benefits,
-		&mt.TopImageURL, &mt.CurrencyCode, enabledPaymentFrequenciesRaw, &mt.IsActive, &mt.IsMostPopular, &mt.SortOrder,
+		&mt.TopImageURL, &mt.CurrencyCode, enabledPaymentFrequenciesRaw, &mt.ApplySalesTax, &mt.IsActive, &mt.IsMostPopular, &mt.SortOrder,
 		&mt.UseCustomThankyou, &mt.ThankyouHeading, &mt.ThankyouBody,
 		&mt.ThankyouImageURL, &mt.ThankyouRedirectURL, &mt.CreatedAt, &mt.UpdatedAt,
 	}
@@ -445,6 +448,7 @@ func (r *MembershipTypeRepo) UpdateBasics(
 	currencyCode *string,
 	sortOrder *int,
 	enabledPaymentFrequencies *[]string,
+	applySalesTax *bool,
 ) (*models.MembershipType, error) {
 	query := `
 		UPDATE membership_types SET
@@ -463,11 +467,12 @@ func (r *MembershipTypeRepo) UpdateBasics(
 				WHEN $14::jsonb IS NULL THEN enabled_payment_frequencies
 				ELSE $14::jsonb
 			END,
+			apply_sales_tax = COALESCE($15, apply_sales_tax),
 			updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $2
 		RETURNING id, tenant_id, membership_name, membership_level, title, slug,
 		          summary, description, inclusions, benefits,
-		          top_image_url, currency_code, enabled_payment_frequencies, is_active, is_most_popular, sort_order, use_custom_thankyou,
+		          top_image_url, currency_code, enabled_payment_frequencies, apply_sales_tax, is_active, is_most_popular, sort_order, use_custom_thankyou,
 		          thankyou_heading, thankyou_body, thankyou_image_url, thankyou_redirect_url,
 		          created_at, updated_at`
 
@@ -481,7 +486,7 @@ func (r *MembershipTypeRepo) UpdateBasics(
 		}
 		enabledPaymentFrequenciesJSON = encoded
 	}
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, sortOrder, enabledPaymentFrequenciesJSON).
+	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, membershipName, membershipLevel, title, slug, summary, description, inclusions, benefits, topImageURL, currencyCode, sortOrder, enabledPaymentFrequenciesJSON, applySalesTax).
 		Scan(r.scanFields(&mt, &enabledPaymentFrequenciesRaw)...)
 	if err != nil {
 		if err == pgx.ErrNoRows {

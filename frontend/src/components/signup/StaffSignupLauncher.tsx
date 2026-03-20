@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import api from "../../api/client";
+import type { MembershipType } from "../../types/memberships";
+import type { TenantSettings } from "../../types/tenant";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -26,18 +28,6 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-interface MembershipType {
-  id: string;
-  membership_name?: string;
-  membership_level?: string;
-  title: string;
-  slug: string;
-  description?: string;
-  is_active: boolean;
-  top_image_url?: string;
-  term_options?: { id: string; duration_months: number; fee_total: number }[];
-}
-
 interface TenantInfo {
   slug: string;
   name: string;
@@ -55,9 +45,9 @@ export default function StaffSignupLauncher() {
       api.getTenantSettings(),
     ]).then(([mtData, tenantData]) => {
       const membershipData = mtData as any;
-      const tenantSettings = tenantData as any;
+      const tenantSettings = tenantData as TenantSettings;
       setTypes((membershipData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
-      setTenant({ slug: tenantSettings.slug, name: tenantSettings.name });
+      setTenant({ slug: tenantSettings.slug || "", name: tenantSettings.name || "" });
     }).catch((e) => { console.error(e); setError("Failed to load signup launcher"); }).finally(() => setLoading(false));
   }, []);
 
@@ -67,6 +57,7 @@ export default function StaffSignupLauncher() {
   const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
   const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
   const fallbackTitle = (mt: MembershipType) => mt.title;
+  const currencyCode = (mt: MembershipType) => (mt.currency_code || "AUD").toUpperCase();
 
   return (
     <div>
@@ -127,12 +118,14 @@ export default function StaffSignupLauncher() {
                   <p className="text-[12px] text-gray-500 mt-1 line-clamp-2">{mt.description}</p>
                 )}
                 <div className="flex items-baseline gap-1 mt-3">
-                  <span className="text-xl font-bold text-indigo-600 tabular-nums">${(() => {
+                  <span className="text-xl font-bold text-indigo-600 tabular-nums">{currencyCode(mt)} ${(() => {
                     const opts = mt.term_options || [];
                     if (opts.length === 0) return "0";
                     if (opts.length === 1) return opts[0].fee_total.toLocaleString();
                     const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
-                    return fees[0] === fees[fees.length - 1] ? fees[0].toLocaleString() : `${fees[0].toLocaleString()} – ${fees[fees.length - 1].toLocaleString()}`;
+                    return fees[0] === fees[fees.length - 1]
+                      ? fees[0].toLocaleString()
+                      : `${fees[0].toLocaleString()} – ${currencyCode(mt)} ${fees[fees.length - 1].toLocaleString()}`;
                   })()}</span>
                   <span className="text-[12px] text-gray-400">total value</span>
                 </div>

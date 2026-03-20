@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -97,20 +98,6 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "Invalid payment details")
 		return
 	}
-	if input.PaymentFrequency == "custom_schedule" {
-		if input.PaymentIntervalUnit == "" || (input.PaymentIntervalUnit != "week" && input.PaymentIntervalUnit != "month") {
-			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_unit (week or month)")
-			return
-		}
-		if input.PaymentIntervalCount <= 0 {
-			writeError(w, http.StatusBadRequest, "custom schedule requires payment_interval_count > 0")
-			return
-		}
-		if input.NumPayments == nil || *input.NumPayments <= 0 {
-			writeError(w, http.StatusBadRequest, "custom schedule requires num_payments > 0")
-			return
-		}
-	}
 
 	clientID, err := uuid.Parse(input.ClientID)
 	if err != nil {
@@ -137,6 +124,45 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	if err != nil || mt == nil {
 		writeError(w, http.StatusNotFound, "Membership type not found")
 		return
+	}
+	term, err := h.mtRepo.GetTermOption(r.Context(), toID, tenantID)
+	if err != nil || term == nil {
+		writeError(w, http.StatusBadRequest, "Term option not found")
+		return
+	}
+	if term.MembershipTypeID != mtID {
+		writeError(w, http.StatusBadRequest, "term_option_id does not belong to membership_type_id")
+		return
+	}
+	canonical, err := deriveCanonicalMembershipPricing(term, input.PaymentFrequency)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if math.Abs(input.PaymentAmount-canonical.Amount) > 0.01 {
+		writeError(w, http.StatusBadRequest, "payment_amount does not match selected term option")
+		return
+	}
+	if input.NumPayments != nil && canonical.NumPayments != nil && *input.NumPayments != *canonical.NumPayments {
+		writeError(w, http.StatusBadRequest, "num_payments does not match selected term option")
+		return
+	}
+	if input.PaymentIntervalUnit != "" && canonical.IntervalUnit != nil && input.PaymentIntervalUnit != *canonical.IntervalUnit {
+		writeError(w, http.StatusBadRequest, "payment_interval_unit does not match selected term option")
+		return
+	}
+	if input.PaymentIntervalCount > 0 && canonical.IntervalCount > 0 && input.PaymentIntervalCount != canonical.IntervalCount {
+		writeError(w, http.StatusBadRequest, "payment_interval_count does not match selected term option")
+		return
+	}
+	input.PaymentFrequency = canonical.Frequency
+	input.PaymentAmount = canonical.Amount
+	input.PaymentIntervalCount = canonical.IntervalCount
+	input.NumPayments = canonical.NumPayments
+	if canonical.IntervalUnit != nil {
+		input.PaymentIntervalUnit = *canonical.IntervalUnit
+	} else {
+		input.PaymentIntervalUnit = ""
 	}
 	membershipCurrency := strings.ToUpper(strings.TrimSpace(mt.CurrencyCode))
 	if membershipCurrency == "" {
@@ -218,14 +244,19 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 
 						// Create subscription for recurring payments (pass num_payments from term option if set)
 						numPay := m.NumPayments
-						if numPay == nil {
-							if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenantID); to != nil && to.NumPayments != nil {
+						continueAfterTerm := false
+						if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenantID); to != nil {
+							if numPay == nil && to.NumPayments != nil {
 								numPay = to.NumPayments
 							}
+							continueAfterTerm = to.ContinueAfterTerm
+						}
+						if continueAfterTerm {
+							numPay = nil
 						}
 						createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, m,
 							tenantID, input.PaymentFrequency, input.PaymentAmount,
-							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay)
+							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
 					}
 				}
 			}
@@ -378,10 +409,16 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 			(SELECT p.amount FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded' ORDER BY p.paid_date DESC LIMIT 1),
 			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
 			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
-			CASE
-				WHEN m.num_payments IS NOT NULL THEN COALESCE(m.payment_amount, 0) * m.num_payments
-				ELSE COALESCE(m.payment_amount, 0) * mto.duration_months
-			END,
+			membership_expected_total(
+				COALESCE(m.payment_amount, 0),
+				m.num_payments,
+				m.payment_frequency,
+				m.payment_interval_unit,
+				m.payment_interval_count,
+				m.start_date,
+				m.min_term_end_date,
+				mto.duration_months
+			),
 			(SELECT COUNT(*) FROM payments p WHERE p.membership_id = m.id AND p.status = 'failed')
 		FROM memberships m
 		JOIN clients c ON c.id = m.client_id

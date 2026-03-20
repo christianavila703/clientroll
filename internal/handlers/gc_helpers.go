@@ -69,6 +69,7 @@ func createGoCardlessSubscription(
 	membershipName string,
 	endDate time.Time,
 	numPayments *int,
+	continueAfterTerm bool,
 ) (string, error) {
 	if paymentFrequency == "upfront" || paymentFrequency == "" {
 		return "", nil // No subscription needed for upfront payments
@@ -94,7 +95,7 @@ func createGoCardlessSubscription(
 	if numPayments != nil && *numPayments > 0 {
 		computed := subscriptionEndDateFromNumPayments(interval, intervalCount, *numPayments)
 		ed = &computed
-	} else if !endDate.IsZero() {
+	} else if !continueAfterTerm && !endDate.IsZero() {
 		ed = &endDate
 	}
 

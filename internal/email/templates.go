@@ -15,6 +15,11 @@ func wrap(body string) string {
 	return fmt.Sprintf(emailWrapper, body)
 }
 
+// WrapHTML wraps a HTML fragment in the standard email shell.
+func WrapHTML(body string) string {
+	return wrap(body)
+}
+
 // VerifyEmail — sent during tenant registration.
 func VerifyEmail(firstName, verifyURL string) SendInput {
 	html := wrap(fmt.Sprintf(`

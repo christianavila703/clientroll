@@ -1,28 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
-
-interface MembershipType {
-  id: string; title: string; membership_name?: string; membership_level?: string; slug: string;
-  summary?: string; description?: string; inclusions?: string; benefits?: string;
-  currency_code?: string;
-  enabled_payment_frequencies?: string[];
-  top_image_url?: string; is_active: boolean;
-  is_most_popular?: boolean;
-  sort_order: number; term_options?: TermOption[];
-}
-interface TermOption {
-  id: string; duration_months: number; fee_total: number;
-  fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
-  allow_upfront: boolean; num_payments?: number; bonuses?: Bonus[];
-  custom_schedule_enabled?: boolean;
-  custom_schedule_label?: string;
-  custom_schedule_amount?: number;
-  custom_schedule_interval_unit?: "week" | "month";
-  custom_schedule_interval_count?: number;
-  custom_schedule_num_payments?: number;
-}
-interface Bonus { id: string; title: string; value: number; image_url?: string; }
+import type { Bonus, MembershipType, TermOption } from "../../types/memberships";
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
 const AVAILABLE_PAYMENT_FREQUENCIES = [
   { key: "upfront", label: "Upfront" },
@@ -55,10 +34,13 @@ export default function MembershipTypeDetail() {
     membership_name: "",
     membership_level: "",
     currency_code: "AUD",
+    apply_sales_tax: true,
     use_tenant_default_payment_frequencies: true,
     enabled_payment_frequencies: ["weekly"] as string[],
   });
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
+  const [salesTaxName, setSalesTaxName] = useState("GST");
+  const [salesTaxPercent, setSalesTaxPercent] = useState(10);
   const [savingContent, setSavingContent] = useState(false);
   const [contentForm, setContentForm] = useState({ summary: "", description: "", inclusions: "", benefits: "" });
   const [tab, setTab] = useState<"terms" | "bonuses" | "tcs">("terms");
@@ -80,6 +62,7 @@ export default function MembershipTypeDetail() {
         membership_name: mtTyped.membership_name || "",
         membership_level: mtTyped.membership_level || "",
         currency_code: mtTyped.currency_code || "AUD",
+        apply_sales_tax: mtTyped.apply_sales_tax !== false,
         use_tenant_default_payment_frequencies: !(mtTyped.enabled_payment_frequencies && mtTyped.enabled_payment_frequencies.length > 0),
         enabled_payment_frequencies: (mtTyped.enabled_payment_frequencies && mtTyped.enabled_payment_frequencies.length > 0)
           ? mtTyped.enabled_payment_frequencies
@@ -111,12 +94,19 @@ export default function MembershipTypeDetail() {
     load();
     api.getTenantSettings()
       .then((res) => {
-        const list = (res as { enabled_currencies?: string[] }).enabled_currencies || ["AUD"];
+        const tenant = res as { enabled_currencies?: string[]; sales_tax_name?: string; sales_tax_percent?: number };
+        const list = tenant.enabled_currencies || ["AUD"];
         const normalized = Array.from(new Set(list.map((c) => String(c).toUpperCase()))).filter(Boolean);
         if (!normalized.includes("AUD")) normalized.unshift("AUD");
         setEnabledCurrencies(normalized);
+        setSalesTaxName(String(tenant.sales_tax_name || "GST"));
+        setSalesTaxPercent(Number.isFinite(Number(tenant.sales_tax_percent)) ? Number(tenant.sales_tax_percent) : 10);
       })
-      .catch(() => setEnabledCurrencies(["AUD"]));
+      .catch(() => {
+        setEnabledCurrencies(["AUD"]);
+        setSalesTaxName("GST");
+        setSalesTaxPercent(10);
+      });
   }, [mtId]);
 
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
@@ -147,6 +137,7 @@ export default function MembershipTypeDetail() {
         membership_name: identityForm.membership_name.trim(),
         membership_level: identityForm.membership_level.trim(),
         currency_code: identityForm.currency_code || "AUD",
+        apply_sales_tax: identityForm.apply_sales_tax,
         enabled_payment_frequencies: identityForm.use_tenant_default_payment_frequencies
           ? null
           : identityForm.enabled_payment_frequencies,
@@ -234,6 +225,20 @@ export default function MembershipTypeDetail() {
             </div>
           </div>
           <div className="mt-4">
+            <label className="flex items-center gap-2 text-[13px] text-gray-700 mb-3">
+              <input
+                type="checkbox"
+                checked={identityForm.apply_sales_tax}
+                onChange={(e) =>
+                  setIdentityForm((prev) => ({
+                    ...prev,
+                    apply_sales_tax: e.target.checked,
+                  }))
+                }
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+              />
+              Apply {salesTaxName} to this membership (inclusive pricing)
+            </label>
             <label className="flex items-center gap-2 text-[13px] text-gray-700">
               <input
                 type="checkbox"
@@ -350,8 +355,8 @@ export default function MembershipTypeDetail() {
         ))}
       </div>
 
-      {tab === "terms" && <TermOptionsTab mt={mt} onReload={load} />}
-      {tab === "bonuses" && <BonusAssignmentTab mt={mt} allBonuses={allBonuses} onReload={load} />}
+      {tab === "terms" && <TermOptionsTab mt={mt} salesTaxName={salesTaxName} salesTaxPercent={salesTaxPercent} onReload={load} />}
+      {tab === "bonuses" && <BonusAssignmentTab mt={mt} allBonuses={allBonuses} currencyCode={(mt.currency_code || "AUD").toUpperCase()} onReload={load} />}
       {tab === "tcs" && <TermsAttachTab mtId={mt.id} allTerms={allTerms} attached={attachedTerms} onReload={load} />}
     </div>
   );
@@ -379,12 +384,13 @@ function toWholeNumber(value: string): number {
 }
 
 // === Term Options Tab ===
-function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => void }) {
+function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: MembershipType; salesTaxName: string; salesTaxPercent: number; onReload: () => void }) {
   type NumericField = number | "";
   const parseNumericInput = (value: string): NumericField => (value === "" ? "" : Number(value));
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
 
   const [showAdd, setShowAdd] = useState(false);
+  const currencyCode = (mt.currency_code || "AUD").toUpperCase();
   const [form, setForm] = useState({
     duration_unit: "month" as "month" | "week",
     duration_value: 6,
@@ -531,7 +537,7 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-[13px] text-gray-500">Define pricing options for different contract lengths</p>
+        <p className="text-[13px] text-gray-500">Define pricing options for different contract lengths. Prices are tax-inclusive ({salesTaxName} {salesTaxPercent.toFixed(2)}%).</p>
         <button onClick={() => setShowAdd(!showAdd)} className="btn-primary text-[12px]">+ Add term option</button>
       </div>
 
@@ -559,13 +565,13 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
               <p className="text-[10px] text-gray-400 mt-0.5">Stored as {durationMonths()} month{durationMonths() === 1 ? "" : "s"} for term-end rules.</p>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ($) *</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ({currencyCode}, incl {salesTaxName}) *</label>
               <input type="number" value={form.fee_total} onChange={(e) => updateWithCalc("fee_total", parseNumericInput(e.target.value))} className="input-field" min="0" step="0.01" required />
             </div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ($) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
+            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" step="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">Use whole numbers only (especially for weekly/fortnightly plans).</p></div>
             <div className="flex items-end pb-1">
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>
@@ -591,7 +597,7 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
                     <input type="text" value={form.custom_schedule_label} onChange={(e) => setForm({ ...form, custom_schedule_label: e.target.value })} className="input-field" placeholder="e.g. 2 payments, 3 months apart" />
                   </div>
                   <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ($)</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ({currencyCode})</label>
                     <input type="number" value={form.custom_schedule_amount} onChange={(e) => setForm({ ...form, custom_schedule_amount: e.target.value })} className="input-field" min="0" step="0.01" />
                   </div>
                   <div>
@@ -625,7 +631,7 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
       ) : (
         <div className="space-y-3">
           {mt.term_options.map((to) => (
-            <TermOptionCard key={to.id} termOption={to} mtId={mt.id} onReload={onReload} onDelete={() => handleDelete(to.id)} />
+            <TermOptionCard key={to.id} termOption={to} currencyCode={currencyCode} salesTaxName={salesTaxName} mtId={mt.id} onReload={onReload} onDelete={() => handleDelete(to.id)} />
           ))}
         </div>
       )}
@@ -634,8 +640,8 @@ function TermOptionsTab({ mt, onReload }: { mt: MembershipType; onReload: () => 
 }
 
 // === Editable Term Option Card ===
-function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
-  termOption: TermOption; mtId: string; onReload: () => void; onDelete: () => void;
+function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onReload, onDelete }: {
+  termOption: TermOption; currencyCode: string; salesTaxName: string; mtId: string; onReload: () => void; onDelete: () => void;
 }) {
   type NumericField = number | "";
   const parseNumericInput = (value: string): NumericField => (value === "" ? "" : Number(value));
@@ -728,7 +734,7 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50/50">
           <div className="flex items-center gap-3">
             <span className="text-[14px] font-semibold text-gray-900">{to.duration_months} months</span>
-            <span className="text-[13px] font-semibold text-gray-900 tabular-nums">${to.fee_total.toLocaleString()}</span>
+            <span className="text-[13px] font-semibold text-gray-900 tabular-nums">{currencyCode} ${to.fee_total.toLocaleString()}</span>
             {to.allow_upfront && <span className="badge badge-green">Upfront OK</span>}
             <span className="text-[12px] text-gray-400">{to.bonuses?.length || 0} bonuses</span>
           </div>
@@ -741,13 +747,13 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
         </div>
         <div className="px-5 py-3">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-[13px]">
-            <div><span className="text-gray-400 block mb-0.5">Weekly</span><span className="tabular-nums text-gray-900">{to.fee_weekly ? `$${to.fee_weekly}` : "—"}</span></div>
-            <div><span className="text-gray-400 block mb-0.5">Fortnightly</span><span className="tabular-nums text-gray-900">{to.fee_fortnightly ? `$${to.fee_fortnightly}` : "—"}</span></div>
-            <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `$${to.fee_monthly}` : "—"}</span></div>
-            <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `$${to.fee_quarterly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Weekly</span><span className="tabular-nums text-gray-900">{to.fee_weekly ? `${currencyCode} $${to.fee_weekly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Fortnightly</span><span className="tabular-nums text-gray-900">{to.fee_fortnightly ? `${currencyCode} $${to.fee_fortnightly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `${currencyCode} $${to.fee_monthly}` : "—"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `${currencyCode} $${to.fee_quarterly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">In Advance</span><span>{to.allow_upfront ? "Yes" : "Post-payment"}</span></div>
             <div><span className="text-gray-400 block mb-0.5"># Payments</span><span className="tabular-nums text-gray-900">{to.num_payments ? `${to.num_payments} then stops` : "Continuous"}</span></div>
-            <div className="sm:col-span-3 lg:col-span-2"><span className="text-gray-400 block mb-0.5">Custom Plan</span><span className="text-gray-900">{to.custom_schedule_enabled ? (to.custom_schedule_label || `${to.custom_schedule_num_payments || 0} payments every ${to.custom_schedule_interval_count || 1} ${to.custom_schedule_interval_unit || "month"}${(to.custom_schedule_interval_count || 1) === 1 ? "" : "s"} @ $${to.custom_schedule_amount || 0}`) : "—"}</span></div>
+            <div className="sm:col-span-3 lg:col-span-2"><span className="text-gray-400 block mb-0.5">Custom Plan</span><span className="text-gray-900">{to.custom_schedule_enabled ? (to.custom_schedule_label || `${to.custom_schedule_num_payments || 0} payments every ${to.custom_schedule_interval_count || 1} ${to.custom_schedule_interval_unit || "month"}${(to.custom_schedule_interval_count || 1) === 1 ? "" : "s"} @ ${currencyCode} $${to.custom_schedule_amount || 0}`) : "—"}</span></div>
           </div>
         </div>
       </div>
@@ -786,23 +792,23 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
             <p className="text-[10px] text-gray-400 mt-0.5">Stored as {editDurationMonths()} month{editDurationMonths() === 1 ? "" : "s"} for term-end rules.</p>
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ($)</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ({currencyCode}, incl {salesTaxName})</label>
             <input type="number" value={form.fee_total} onChange={(e) => updateEditCalc("fee_total", parseNumericInput(e.target.value))} className="input-field" min="0" step="0.01" />
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ($)</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}, incl {salesTaxName})</label>
             <input type="number" value={form.fee_weekly} onChange={(e) => setForm({ ...form, fee_weekly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Fortnightly ($)</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}, incl {salesTaxName})</label>
             <input type="number" value={form.fee_fortnightly} onChange={(e) => setForm({ ...form, fee_fortnightly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ($)</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName})</label>
             <input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Quarterly ($)</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName})</label>
             <input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="—" />
           </div>
           <div>
@@ -828,7 +834,7 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
                   <input type="text" value={form.custom_schedule_label} onChange={(e) => setForm({ ...form, custom_schedule_label: e.target.value })} className="input-field" placeholder="e.g. 2 payments, 3 months apart" />
                 </div>
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ($)</label>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ({currencyCode})</label>
                   <input type="number" value={form.custom_schedule_amount} onChange={(e) => setForm({ ...form, custom_schedule_amount: e.target.value })} className="input-field" min="0" step="0.01" />
                 </div>
                 <div>
@@ -856,7 +862,7 @@ function TermOptionCard({ termOption: to, mtId, onReload, onDelete }: {
 }
 
 // === Bonus Assignment Tab ===
-function BonusAssignmentTab({ mt, allBonuses, onReload }: { mt: MembershipType; allBonuses: Bonus[]; onReload: () => void }) {
+function BonusAssignmentTab({ mt, allBonuses, currencyCode, onReload }: { mt: MembershipType; allBonuses: Bonus[]; currencyCode: string; onReload: () => void }) {
   const [saving, setSaving] = useState<string | null>(null);
 
   const toggleBonus = async (termOptionId: string, bonusId: string, currentBonuses: Bonus[]) => {
@@ -887,7 +893,7 @@ function BonusAssignmentTab({ mt, allBonuses, onReload }: { mt: MembershipType; 
         {mt.term_options.map((to) => (
           <div key={to.id} className="card overflow-hidden">
             <div className="card-header">
-              <h3>{to.duration_months} months — ${to.fee_total.toLocaleString()}</h3>
+              <h3>{to.duration_months} months — {currencyCode} ${to.fee_total.toLocaleString()}</h3>
               <span className="text-[11px] text-gray-400">{to.bonuses?.length || 0} bonus{(to.bonuses?.length || 0) !== 1 ? "es" : ""} assigned</span>
             </div>
             <div className="px-5 py-3">
@@ -912,7 +918,7 @@ function BonusAssignmentTab({ mt, allBonuses, onReload }: { mt: MembershipType; 
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-[13px] font-medium text-gray-900 truncate">{bonus.title}</p>
-                        <p className="text-[11px] text-gray-500">${bonus.value.toLocaleString()} value</p>
+                        <p className="text-[11px] text-gray-500">{currencyCode} ${bonus.value.toLocaleString()} value</p>
                       </div>
                     </button>
                   );

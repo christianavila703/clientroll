@@ -166,7 +166,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, platformBillingConfigRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
-	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
+	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, tenantRepo, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, mtRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo, serviceRepo)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)

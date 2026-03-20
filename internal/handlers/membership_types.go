@@ -88,8 +88,9 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description     *string `json:"description"`
 		Inclusions      *string `json:"inclusions"`
 		TopImageURL     *string `json:"top_image_url"`
-		IsMostPopular bool `json:"is_most_popular"`
-		SortOrder     int  `json:"sort_order"`
+		ApplySalesTax  *bool   `json:"apply_sales_tax"`
+		IsMostPopular  bool    `json:"is_most_popular"`
+		SortOrder      int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
@@ -142,8 +143,13 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "currency_code must be a 3-letter ISO code")
 		return
 	}
+	applySalesTax := true
+	if input.ApplySalesTax != nil {
+		applySalesTax = *input.ApplySalesTax
+	}
+
 	mt, err := h.mtRepo.Create(r.Context(), tenantID, membershipName, membershipLevel, input.Title, input.Slug,
-		input.Description, input.Inclusions, input.TopImageURL, input.SortOrder, input.CurrencyCode)
+		input.Description, input.Inclusions, input.TopImageURL, input.SortOrder, input.CurrencyCode, applySalesTax)
 	if err != nil {
 		log.Printf("Error creating membership type: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership type")
@@ -181,6 +187,7 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		CurrencyCode *string `json:"currency_code"`
 		SortOrder    *int    `json:"sort_order"`
 		EnabledPaymentFrequencies *[]string `json:"enabled_payment_frequencies"`
+		ApplySalesTax             *bool     `json:"apply_sales_tax"`
 		IsActive                  *bool     `json:"is_active"`
 		IsMostPopular             *bool     `json:"is_most_popular"`
 	}
@@ -291,6 +298,7 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		nextCurrency,
 		input.SortOrder,
 		nextEnabledPaymentFrequencies,
+		input.ApplySalesTax,
 	); err != nil {
 		log.Printf("Error updating membership basics: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update")
@@ -416,6 +424,7 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		FeeQuarterly                *float64 `json:"fee_quarterly"`
 		AllowUpfront                bool     `json:"allow_upfront"`
 		NumPayments                 *int     `json:"num_payments"`
+		ContinueAfterTerm           bool     `json:"continue_after_term"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
 		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
@@ -456,6 +465,7 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	to, err := h.mtRepo.CreateTermOption(r.Context(), tenantID, mtID,
 		input.DurationMonths, input.FeeTotal, input.FeeWeekly,
 		input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
 	if err != nil {
@@ -483,6 +493,7 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		FeeQuarterly                *float64 `json:"fee_quarterly"`
 		AllowUpfront                bool     `json:"allow_upfront"`
 		NumPayments                 *int     `json:"num_payments"`
+		ContinueAfterTerm           bool     `json:"continue_after_term"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
 		CustomScheduleAmount        *float64 `json:"custom_schedule_amount"`
@@ -522,6 +533,7 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 	}
 	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
 		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
 	if err != nil {

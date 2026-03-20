@@ -181,6 +181,8 @@ function TenantSettings() {
   const [data, setData] = useState<{
     slug: string;
     timezone: string;
+    sales_tax_name: string;
+    sales_tax_percent: number;
     signup_price_display_mode: string;
     primary_colour: string;
     secondary_colour: string;
@@ -194,6 +196,8 @@ function TenantSettings() {
   }>({
     slug: "",
     timezone: "Australia/Brisbane",
+    sales_tax_name: "GST",
+    sales_tax_percent: 10,
     signup_price_display_mode: "weekly",
     primary_colour: "#6366f1",
     secondary_colour: "",
@@ -216,6 +220,8 @@ function TenantSettings() {
       setData({
         slug: String(t.slug || ""),
         timezone: String(t.timezone || "Australia/Brisbane"),
+        sales_tax_name: String(t.sales_tax_name || "GST"),
+        sales_tax_percent: Number(t.sales_tax_percent ?? 10),
         signup_price_display_mode: String(t.signup_price_display_mode || "weekly"),
         primary_colour: String(t.primary_colour || "#6366f1"),
         secondary_colour: String(t.secondary_colour || ""),
@@ -304,6 +310,49 @@ function TenantSettings() {
       {message && (
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("success") ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-600"}`}>{message}</div>
       )}
+
+      {/* Sales tax */}
+      <div className="card">
+        <div className="card-header"><h3>Sales Tax</h3></div>
+        <div className="card-body space-y-3">
+          <p className="text-[11px] text-gray-500">
+            Configure your default sales tax used for memberships and one-off service charging.
+          </p>
+          <div className="flex items-center gap-2">
+            <span className={`badge ${Number(data.sales_tax_percent || 0) > 0 ? "badge-green" : "badge-gray"}`}>
+              {Number(data.sales_tax_percent || 0) > 0 ? "Active" : "Inactive"}
+            </span>
+            <span className="text-[12px] text-gray-500">
+              Tax is active when rate is greater than 0%.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+            <div>
+              <label className="block text-[12px] text-gray-500 mb-1">Tax label</label>
+              <input
+                type="text"
+                value={data.sales_tax_name || "GST"}
+                onChange={(e) => setData({ ...data, sales_tax_name: e.target.value.toUpperCase() })}
+                className="input-field"
+                maxLength={30}
+                placeholder="GST"
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] text-gray-500 mb-1">Rate (%)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={Number.isFinite(data.sales_tax_percent) ? data.sales_tax_percent : 0}
+                onChange={(e) => setData({ ...data, sales_tax_percent: Number(e.target.value) })}
+                className="input-field"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* General */}
       <div className="card">
@@ -478,7 +527,6 @@ function TenantSettings() {
 function IntegrationsSettings() {
   const [integrations, setIntegrations] = useState<{ provider: string; environment: string; is_active: boolean; has_key: boolean; has_secret: boolean; key_hint: string }[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [message, setMessage] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
 
@@ -497,8 +545,6 @@ function IntegrationsSettings() {
   }, []);
 
   const providers = [
-    { id: "gocardless", name: "GoCardless", desc: "Direct debit payments for your members. Add your API key from the GoCardless developer dashboard.", hasSecret: false,
-      fields: { key: "API key", secret: "" } },
     { id: "stripe", name: "Stripe", desc: "Card payments and billing. Add your Stripe secret key and webhook signing secret per tenant.", hasSecret: true,
       fields: { key: "Secret key", secret: "Webhook signing secret" } },
   ];
@@ -513,50 +559,13 @@ function IntegrationsSettings() {
     finally { setSaving(null); }
   };
 
-  const handleDisconnectGoCardless = async () => {
-    if (!window.confirm("Remove GoCardless? You can reconnect later.")) return;
-    setDisconnecting(true); setMessage("");
-    try {
-      await api.deleteIntegration("gocardless");
-      setMessage("GoCardless disconnected");
-      refreshIntegrations();
-    } catch { setMessage("Failed to disconnect"); }
-    finally { setDisconnecting(false); }
-  };
-
-  const gocardlessExisting = integrations.find(i => i.provider === "gocardless");
-  const gocardlessConnected = !!gocardlessExisting?.has_key;
-
   return (
     <div className="space-y-5">
       {message && (
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("Failed") ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
       )}
 
-      {/* GoCardless: API key only */}
-      <div className="space-y-2">
-        <IntegrationCard
-          provider={providers[0]}
-          existing={gocardlessExisting || null}
-          saving={saving === "gocardless"}
-          onSave={(data) => handleSave("gocardless", data)}
-          tenantSlug={tenantSlug}
-        />
-        {gocardlessConnected && (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleDisconnectGoCardless}
-              disabled={disconnecting}
-              className="text-[12px] text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
-            >
-              {disconnecting ? "Disconnecting..." : "Disconnect GoCardless"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {providers.filter(p => p.id !== "gocardless").map((provider) => {
+      {providers.map((provider) => {
         const existing = integrations.find(i => i.provider === provider.id);
         return (
           <IntegrationCard

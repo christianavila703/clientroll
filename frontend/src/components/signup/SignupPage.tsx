@@ -4,61 +4,8 @@ import MembershipSelect from "./MembershipSelect";
 import MembershipDetail from "./MembershipDetail";
 import AgreementForm from "./AgreementForm";
 import ThankYouPage from "./ThankYouPage";
-
-interface Tenant {
-  name: string;
-  slug: string;
-  logo_url?: string;
-  primary_colour: string;
-  secondary_colour?: string;
-  signup_price_display_mode?: "total" | "weekly" | "monthly";
-  enabled_payment_frequencies?: string[];
-  google_places_api_key?: string;
-  payment_providers?: string[];
-}
-
-interface MembershipType {
-  id: string;
-  membership_name?: string;
-  membership_level?: string;
-  title: string;
-  slug: string;
-  is_most_popular?: boolean;
-  summary?: string;
-  description?: string;
-  inclusions?: string;
-  benefits?: string;
-  top_image_url?: string;
-  enabled_payment_frequencies?: string[];
-  term_options: TermOption[];
-}
-
-interface TermOption {
-  id: string;
-  duration_months: number;
-  fee_total: number;
-  fee_weekly?: number;
-  fee_fortnightly?: number;
-  fee_monthly?: number;
-  fee_quarterly?: number;
-  allow_upfront: boolean;
-  num_payments?: number;
-  custom_schedule_enabled?: boolean;
-  custom_schedule_label?: string;
-  custom_schedule_amount?: number;
-  custom_schedule_interval_unit?: "week" | "month";
-  custom_schedule_interval_count?: number;
-  custom_schedule_num_payments?: number;
-  bonuses?: Bonus[];
-}
-
-interface Bonus {
-  id: string;
-  title: string;
-  description?: string;
-  image_url?: string;
-  value: number;
-}
+import type { Bonus, MembershipType, TermOption } from "../../types/memberships";
+import type { TenantBranding } from "../../types/tenant";
 
 interface TermsDoc {
   id: string;
@@ -69,6 +16,7 @@ interface TermsDoc {
 }
 
 type Step = "select" | "detail" | "form" | "thankyou";
+type Tenant = TenantBranding;
 
 export default function SignupPage() {
   const { tenantSlug, membershipSlug } = useParams();
@@ -220,6 +168,7 @@ export default function SignupPage() {
             tenantSlug={tenantSlug || ""}
             priceDisplayMode={tenant?.signup_price_display_mode || "weekly"}
             enabledPaymentFrequencies={tenant?.enabled_payment_frequencies || ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"]}
+            paymentProviders={tenant?.payment_providers || []}
             onSelectTerm={(term) => { setSelectedTerm(term); setStep("form"); }}
             onBack={() => {
               if (membershipSlug) {
@@ -239,7 +188,7 @@ export default function SignupPage() {
             termOption={selectedTerm}
             tenantSlug={tenantSlug || ""}
             paymentProviders={tenant.payment_providers || []}
-            terms={terms.filter((t) => t.is_active)}
+            terms={terms}
             onComplete={(ty) => { setThankyou(ty); setStep("thankyou"); }}
             onBack={() => setStep("detail")}
           />

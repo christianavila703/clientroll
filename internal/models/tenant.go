@@ -12,6 +12,8 @@ type Tenant struct {
 	Name                       string     `json:"name"`
 	Slug                       string     `json:"slug"`
 	Timezone                   string     `json:"timezone"`
+	SalesTaxName               string     `json:"sales_tax_name"`
+	SalesTaxPercent            float64    `json:"sales_tax_percent"`
 	EnabledCurrencies          []string   `json:"enabled_currencies"`
 	EnabledPaymentFrequencies  []string   `json:"enabled_payment_frequencies"`
 	IsActive                   bool       `json:"is_active"`
@@ -40,6 +42,8 @@ type UpdateTenantInput struct {
 	Name                       *string  `json:"name,omitempty"`
 	Slug                       *string  `json:"slug,omitempty"`
 	Timezone                   *string  `json:"timezone,omitempty"`
+	SalesTaxName               *string  `json:"sales_tax_name,omitempty"`
+	SalesTaxPercent            *float64 `json:"sales_tax_percent,omitempty"`
 	EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
 	EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
 	IsActive                   *bool    `json:"is_active,omitempty"`

@@ -65,9 +65,10 @@ fi
 
 echo "Running migrations..."
 if [[ -n "${DATABASE_URL:-}" ]]; then
-  go run ./cmd/migrate up || true
+  go run ./cmd/migrate up
 else
-  echo "Skipping migration (DATABASE_URL not set)."
+  echo "DATABASE_URL is required for migrations."
+  exit 1
 fi
 
 echo "Preparing deploy directories..."
@@ -86,23 +87,30 @@ echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/web_new/build.txt"
 echo "$GIT_SHA $BUILD_TIME" > "$DEPLOY_PATH/BUILD_SHA"
 
 echo "Switching release files..."
-sudo systemctl stop "$SERVICE" 2>/dev/null || true
+if sudo systemctl is-active --quiet "$SERVICE"; then
+  sudo systemctl stop "$SERVICE"
+fi
 mv -f "$DEPLOY_PATH/server_new" "$DEPLOY_PATH/server"
-chmod +x "$DEPLOY_PATH/server" 2>/dev/null || true
+chmod +x "$DEPLOY_PATH/server"
 rm -rf "$DEPLOY_PATH/web_old"
 [[ -d "$DEPLOY_PATH/web" ]] && mv "$DEPLOY_PATH/web" "$DEPLOY_PATH/web_old"
 mv -f "$DEPLOY_PATH/web_new" "$DEPLOY_PATH/web"
 
 # If your systemd unit points at bin/clientroll, keep it in sync.
 if [[ -d "$DEPLOY_PATH/bin" ]]; then
-  cp -f "$DEPLOY_PATH/server" "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
-  chmod +x "$DEPLOY_PATH/bin/clientroll" 2>/dev/null || true
+  cp -f "$DEPLOY_PATH/server" "$DEPLOY_PATH/bin/clientroll"
+  chmod +x "$DEPLOY_PATH/bin/clientroll"
 fi
 
 echo "Service ExecStart (for verification):"
 systemctl show -p ExecStart "$SERVICE" 2>/dev/null || true
 
 echo "Starting $SERVICE..."
-sudo systemctl start "$SERVICE" 2>/dev/null || true
+sudo systemctl start "$SERVICE"
+if ! sudo systemctl is-active --quiet "$SERVICE"; then
+  echo "Service $SERVICE failed to start."
+  sudo systemctl status "$SERVICE" --no-pager -l || true
+  exit 1
+fi
 
 echo "Deploy complete."

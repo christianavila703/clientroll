@@ -28,6 +28,48 @@ const AVAILABLE_PAYMENT_FREQUENCIES = [
 
 type StepKey = (typeof STEPS)[number]["key"];
 
+type AgreementSettings = {
+  company_name: string;
+  business_name: string;
+  abn: string;
+  acn: string;
+  trading_name: string;
+  address: string;
+  state: string;
+  postcode: string;
+  email: string;
+  phone: string;
+};
+
+const DEFAULT_AGREEMENT_SETTINGS: AgreementSettings = {
+  company_name: "",
+  business_name: "",
+  abn: "",
+  acn: "",
+  trading_name: "",
+  address: "",
+  state: "",
+  postcode: "",
+  email: "",
+  phone: "",
+};
+
+function parseAgreementSettings(raw: unknown): AgreementSettings {
+  const r = raw as Record<string, unknown>;
+  return {
+    company_name: String(r.company_name || ""),
+    business_name: String(r.business_name || ""),
+    abn: String(r.abn || ""),
+    acn: String(r.acn || ""),
+    trading_name: String(r.trading_name || ""),
+    address: String(r.address || ""),
+    state: String(r.state || ""),
+    postcode: String(r.postcode || ""),
+    email: String(r.email || ""),
+    phone: String(r.phone || ""),
+  };
+}
+
 export default function SetupWizard({ onClose }: Props) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -186,26 +228,14 @@ export default function SetupWizard({ onClose }: Props) {
 
 /* ─── Step 1: Agreement Details ─── */
 function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: string) => void }) {
-  const [data, setData] = useState<{
-    slug: string;
-    primary_colour: string;
-    secondary_colour: string;
-    logo_url: string;
-    enabled_currencies: string[];
-  }>({
-    slug: "",
-    primary_colour: "#6366f1",
-    secondary_colour: "",
-    logo_url: "",
-    enabled_currencies: ["AUD"],
-  });
+  const [data, setData] = useState<AgreementSettings>(DEFAULT_AGREEMENT_SETTINGS);
   const [saving, setSaving] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     api.getAgreementSettings()
-      .then((res) => { setData(res as Record<string, string>); setLoaded(true); })
+      .then((res) => { setData(parseAgreementSettings(res)); setLoaded(true); })
       .catch(() => { onError("Failed to load agreement settings"); setLoaded(true); });
   }, []);
 
@@ -218,10 +248,10 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
     finally { setSaving(false); }
   };
 
-  const update = (field: string, value: string) => setData((prev) => ({ ...prev, [field]: value }));
+  const update = (field: keyof AgreementSettings, value: string) => setData((prev) => ({ ...prev, [field]: value }));
 
   const handleLookupBusiness = async () => {
-    const company = (data.company_name || "").trim();
+    const company = data.company_name.trim();
     if (!company) {
       onError("Enter company name first");
       return;

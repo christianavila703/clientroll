@@ -31,6 +31,13 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
+interface MeResponse {
+  user_id: string;
+  tenant_id: string;
+  role: string;
+  setup_completed_at?: string | null;
+}
+
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -44,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       api
         .me()
         .then((data: unknown) => {
-          const d = data as { user_id: string; tenant_id: string; role: string; setup_completed_at?: string | null };
+          const d = data as MeResponse;
           setUser({
             id: d.user_id,
             tenant_id: d.tenant_id,
@@ -89,6 +96,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("access_token", data.tokens.access_token);
     localStorage.setItem("refresh_token", data.tokens.refresh_token);
     setUser(data.user);
+    // Hydrate setup_completed_at from canonical /me payload.
+    try {
+      const me = (await api.me()) as MeResponse;
+      setUser((prev) => (prev
+        ? {
+            ...prev,
+            tenant_id: me.tenant_id || prev.tenant_id,
+            role: me.role || prev.role,
+            setup_completed_at: me.setup_completed_at ?? null,
+          }
+        : prev));
+    } catch {
+      // If /me fails here, keep login session and fall back to current user payload.
+    }
   }, []);
 
   const platformLogin = useCallback(
@@ -100,6 +121,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("access_token", data.tokens.access_token);
       localStorage.setItem("refresh_token", data.tokens.refresh_token);
       setUser(data.user);
+      // Hydrate setup_completed_at from canonical /me payload.
+      try {
+        const me = (await api.me()) as MeResponse;
+        setUser((prev) => (prev
+          ? {
+              ...prev,
+              tenant_id: me.tenant_id || prev.tenant_id,
+              role: me.role || prev.role,
+              setup_completed_at: me.setup_completed_at ?? null,
+            }
+          : prev));
+      } catch {
+        // If /me fails here, keep login session and fall back to current user payload.
+      }
     },
     []
   );

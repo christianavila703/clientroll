@@ -303,6 +303,8 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	var input struct {
 		Timezone                   *string  `json:"timezone,omitempty"`
 		Slug                       *string  `json:"slug,omitempty"`
+		SalesTaxName               *string  `json:"sales_tax_name,omitempty"`
+		SalesTaxPercent            *float64 `json:"sales_tax_percent,omitempty"`
 		EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
 		EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
 		PrimaryColour              *string  `json:"primary_colour,omitempty"`
@@ -341,6 +343,29 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 			return
 		}
 		nextDisplayMode = &mode
+	}
+
+	var nextSalesTaxName *string
+	if input.SalesTaxName != nil {
+		name := strings.ToUpper(strings.TrimSpace(*input.SalesTaxName))
+		if name == "" {
+			name = "GST"
+		}
+		if len(name) > 30 {
+			writeError(w, http.StatusBadRequest, "sales_tax_name must be 30 characters or fewer")
+			return
+		}
+		nextSalesTaxName = &name
+	}
+
+	var nextSalesTaxPercent *float64
+	if input.SalesTaxPercent != nil {
+		v := *input.SalesTaxPercent
+		if v < 0 || v > 100 {
+			writeError(w, http.StatusBadRequest, "sales_tax_percent must be between 0 and 100")
+			return
+		}
+		nextSalesTaxPercent = &v
 	}
 
 	var nextEnabledCurrencies []string
@@ -398,6 +423,8 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	updateInput := models.UpdateTenantInput{
 		Timezone:                   input.Timezone,
 		Slug:                       nextSlug,
+		SalesTaxName:               nextSalesTaxName,
+		SalesTaxPercent:            nextSalesTaxPercent,
 		EnabledCurrencies:          nextEnabledCurrencies,
 		EnabledPaymentFrequencies:  nextEnabledPaymentFrequencies,
 		PrimaryColour:              input.PrimaryColour,

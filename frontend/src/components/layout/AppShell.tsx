@@ -13,6 +13,8 @@ export default function AppShell() {
   useEffect(() => {
     if (needsSetup) {
       setShowWizard(true);
+    } else {
+      setShowWizard(false);
     }
   }, [needsSetup]);
 

@@ -2,11 +2,8 @@ import { useState, useEffect } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import api from "../../api/client";
+import type { DashboardSummary, MembershipBreakdownItem, MonthlyRevenuePoint, PaymentStatusMap } from "../../types/reports";
 
-interface Summary { active_members: number; month_revenue: number; failed_payments: number; new_signups: number; open_disputes: number; active_mandates: number; active_subscriptions: number; pending_payments: number; }
-interface MonthlyData { month: string; revenue: number; }
-interface BreakdownData { type_title: string; revenue: number; count: number; }
-interface StatusData { [key: string]: number; }
 interface RecentClient { id: string; name: string; email?: string; created_at: string; }
 interface MixSlice { name: string; count: number; revenue: number; colour: string; }
 
@@ -15,10 +12,10 @@ const fmtMoney = (value: number) =>
   value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function DashboardPage() {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [monthly, setMonthly] = useState<MonthlyData[]>([]);
-  const [breakdown, setBreakdown] = useState<BreakdownData[]>([]);
-  const [statuses, setStatuses] = useState<StatusData>({});
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [monthly, setMonthly] = useState<MonthlyRevenuePoint[]>([]);
+  const [breakdown, setBreakdown] = useState<MembershipBreakdownItem[]>([]);
+  const [statuses, setStatuses] = useState<PaymentStatusMap>({});
   const [recentClients, setRecentClients] = useState<RecentClient[]>([]);
   const [loadError, setLoadError] = useState("");
 
@@ -27,16 +24,17 @@ export default function DashboardPage() {
       console.error(e);
       setLoadError((prev) => prev || "Some dashboard data failed to load.");
     };
-    api.getDashboardReport().then((d) => setSummary(d as Summary)).catch(markError);
+    api.getDashboardReport().then((d) => setSummary(d as DashboardSummary)).catch(markError);
     api.getMonthlyRevenueReport().then((d: any) => setMonthly(d.months || [])).catch(markError);
     api.getMembershipBreakdownReport().then((d: any) => setBreakdown(d.breakdown || [])).catch(markError);
     api.getPaymentStatusReport().then((d: any) => setStatuses(d.statuses || {})).catch(markError);
     api.listClients("").then((d: any) => setRecentClients((d.clients || []).slice(0, 7))).catch(markError);
   }, []);
 
-  const totalRevenue = monthly.reduce((s, m) => s + m.revenue, 0);
-  const prevMonthRevenue = monthly.length >= 2 ? monthly[monthly.length - 2]?.revenue || 0 : 0;
-  const curMonthRevenue = summary?.month_revenue || 0;
+  const pointCollected = (m: MonthlyRevenuePoint) => Number(m.collected_amount ?? m.revenue ?? 0);
+  const totalRevenue = monthly.reduce((s, m) => s + pointCollected(m), 0);
+  const prevMonthRevenue = monthly.length >= 2 ? pointCollected(monthly[monthly.length - 2]) : 0;
+  const curMonthRevenue = summary?.month_collected_amount ?? (summary?.month_revenue || 0);
   const revDelta = prevMonthRevenue > 0 ? Math.round(((curMonthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100) : 0;
 
   const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
@@ -77,7 +75,7 @@ export default function DashboardPage() {
       {
         name: "Revenue",
         type: "bar" as const,
-        data: monthly.map(m => m.revenue),
+        data: monthly.map(pointCollected),
         barWidth: "60%",
         itemStyle: {
           borderRadius: [4, 4, 0, 0],
@@ -105,7 +103,7 @@ export default function DashboardPage() {
         name: "Trend",
         type: "line" as const,
         yAxisIndex: 1,
-        data: monthly.map(m => m.revenue),
+        data: monthly.map(pointCollected),
         smooth: true,
         symbol: "circle",
         symbolSize: 5,
@@ -205,7 +203,17 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <KpiCard label="Active Members" value={summary?.active_members ?? "–"} colour="indigo" />
-        <KpiCard label="Revenue This Month" value={`$${fmtMoney(curMonthRevenue)}`} colour="emerald" delta={revDelta} />
+        <KpiCard
+          label="Collected this month"
+          value={`$${fmtMoney(curMonthRevenue)}`}
+          colour="emerald"
+          delta={revDelta}
+          sub={
+            summary?.month_to_organisation_amount != null && summary.month_to_organisation_amount > 0
+              ? `Payment: $${fmtMoney(Math.max(0, (summary.month_to_organisation_amount || 0) - (summary.month_tax_amount || 0)))} · Tax: $${fmtMoney(summary.month_tax_amount || 0)} · Payment processing fee: $${fmtMoney(summary.month_surcharge_amount || 0)} · Total: $${fmtMoney(curMonthRevenue)}`
+              : "Total debited from customers"
+          }
+        />
         <KpiCard label="Failed Payments" value={summary?.failed_payments ?? "–"} colour="red" alert={(summary?.failed_payments || 0) > 0} />
         <KpiCard label="Active Direct Debits" value={summary?.active_subscriptions ?? "–"} colour="violet" />
         <KpiCard label="New Signups" value={summary?.new_signups ?? "–"} colour="blue" />
@@ -216,7 +224,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 space-y-5">
           {/* Revenue Chart */}
           <div className="card overflow-hidden">
-            <div className="card-header"><h3>Revenue</h3><span className="text-[12px] text-gray-400">Monthly revenue over the past year</span></div>
+            <div className="card-header"><h3>Revenue</h3><span className="text-[12px] text-gray-400">Monthly totals collected from customers (incl. surcharges)</span></div>
             <div className="px-5 py-4">
               {monthly.length > 0 ? (
                 <ReactECharts option={revenueChart} style={{ height: 280 }} />
@@ -323,9 +331,9 @@ export default function DashboardPage() {
 }
 
 /* ─── Sub-components ─── */
-function KpiCard({ label, value, colour, delta, alert }: { label: string; value: string | number; colour: string; delta?: number; alert?: boolean }) {
+function KpiCard({ label, value, colour, delta, alert, sub }: { label: string; value: string | number; colour: string; delta?: number; alert?: boolean; sub?: string }) {
   const colourMap: Record<string, string> = {
-    indigo: "border-t-indigo-500", emerald: "border-t-emerald-500", red: "border-t-red-500", blue: "border-t-blue-500",
+    indigo: "border-t-indigo-500", emerald: "border-t-emerald-500", red: "border-t-red-500", blue: "border-t-blue-500", violet: "border-t-violet-500",
   };
   return (
     <div className={`card px-4 py-3 border-t-2 ${colourMap[colour] || "border-t-gray-300"}`}>
@@ -338,6 +346,7 @@ function KpiCard({ label, value, colour, delta, alert }: { label: string; value:
           </span>
         )}
       </div>
+      {sub && <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">{sub}</p>}
     </div>
   );
 }

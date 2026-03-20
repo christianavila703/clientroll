@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
+import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
+import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
+import type { MembershipRecord } from "../../types/memberships";
+import type { PaymentRecord } from "../../types/payments";
 
 /* ─── Types ─── */
 interface Client {
@@ -14,30 +18,7 @@ interface Client {
   created_at: string;
 }
 
-interface Membership {
-  membership_id: string;
-  membership_type: string;
-  membership_type_id: string;
-  term_months: number;
-  start_date: string;
-  end_date: string;
-  payment_method?: string;
-  payment_frequency?: string;
-  payment_interval_unit?: string;
-  payment_interval_count?: number;
-  payment_amount?: number;
-  num_payments?: number;
-  status: string;
-  mandate_id?: string;
-  subscription_id?: string;
-  total_paid: number;
-  total_expected: number;
-  failed_count: number;
-  last_payment_date?: string;
-  last_payment_status?: string;
-}
-
-function membershipFrequencyLabel(m: Membership): string {
+function membershipFrequencyLabel(m: MembershipRecord): string {
   if (!m.payment_frequency) return "—";
   if (m.payment_frequency !== "custom_schedule") return m.payment_frequency;
   const count = m.payment_interval_count || 1;
@@ -48,27 +29,14 @@ function membershipFrequencyLabel(m: Membership): string {
   return `Every ${count} ${unit}`;
 }
 
-interface Payment {
-  id?: string;
-  amount: number;
-  status: string;
-  due_date: string;
-  paid_date?: string;
-  provider_reference?: string;
-  failure_reason?: string;
-  retry_count?: number;
-  _type?: "membership" | "service";
-  _description?: string;
-}
-
 /* ─── Main Component ─── */
 export default function ClientProfilePage() {
   const { clientId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [client, setClient] = useState<Client | null>(null);
-  const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [memberships, setMemberships] = useState<MembershipRecord[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"summary" | "memberships" | "billing" | "payments">("summary");
   const [showEdit, setShowEdit] = useState(false);
@@ -76,7 +44,11 @@ export default function ClientProfilePage() {
   const [showTakePayment, setShowTakePayment] = useState(false);
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
-  const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[] }>({ hasMandate: false, providers: [] });
+  const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean }>({
+    hasMandate: false,
+    providers: [],
+    supportsDirectDebit: false,
+  });
 
   useEffect(() => {
     if (!clientId) return;
@@ -153,15 +125,23 @@ export default function ClientProfilePage() {
         api.getClientMandateStatus(clientId!).catch(() => ({})) as Promise<any>,
       ]);
       setClient(clientRes);
-      setPaymentInfo({ hasMandate: mandateRes?.has_mandate || false, providers: mandateRes?.payment_providers || [] });
+      setPaymentInfo({
+        hasMandate: mandateRes?.has_mandate || false,
+        providers: mandateRes?.payment_providers || [],
+        supportsDirectDebit: !!mandateRes?.supports_direct_debit,
+      });
       setMemberships(memberRes.memberships || []);
 
-      const membershipPayments: Payment[] = (payRes.payments || []).map((p: any) => ({
+      const membershipPayments: PaymentRecord[] = (payRes.payments || []).map((p: any) => ({
         ...p, _type: "membership" as const,
       }));
-      const serviceCharges: Payment[] = ((chargesRes as any).charges || []).map((c: any) => ({
+      const serviceCharges: PaymentRecord[] = ((chargesRes as any).charges || []).map((c: any) => ({
         id: c.id,
-        amount: (c.amount || 0) + (c.tax_amount || 0),
+        amount: (c.amount || 0) + (c.tax_amount || 0) + (c.processing_fee_amount || 0),
+        currency_code: c.currency_code || "AUD",
+        base_amount: c.amount || 0,
+        tax_amount: c.tax_amount || 0,
+        processing_fee_amount: c.processing_fee_amount || 0,
         status: c.status || "succeeded",
         due_date: c.paid_date || c.created_at,
         paid_date: c.paid_date || c.created_at,
@@ -187,10 +167,20 @@ export default function ClientProfilePage() {
 
   const initials = client.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   const activeMemberships = memberships.filter(m => m.status === "active");
+  const hasCardMembership = memberships.some((m) => (m.payment_method || "").toLowerCase() === "card");
+  const hasDirectDebitMembership = memberships.some((m) => (m.payment_method || "").toLowerCase() === "direct_debit");
+  const hasStripe = paymentInfo.providers.includes("stripe");
+  const hasGoCardless = paymentInfo.providers.includes("gocardless");
+  const showDirectDebit = paymentInfo.hasMandate || hasDirectDebitMembership || hasGoCardless || paymentInfo.supportsDirectDebit;
+  const showCardPayments = hasCardMembership || hasStripe;
   const hasActive = activeMemberships.length > 0;
   const succeededPayments = payments.filter(p => p.status === "succeeded");
   const failedPayments = payments.filter(p => p.status === "failed");
-  const totalPaid = succeededPayments.reduce((sum, p) => sum + p.amount, 0);
+  const totalCustomerCharged = succeededPayments.reduce((sum, p) => sum + customerCharged(p), 0);
+  const totalToOrganisation = succeededPayments.reduce((sum, p) => sum + organisationSubtotal(p), 0);
+  const totalTaxAmount = succeededPayments.reduce((sum, p) => sum + (Number(p.tax_amount) || 0), 0);
+  const totalProcessingFees = succeededPayments.reduce((sum, p) => sum + (Number(p.processing_fee_amount) || 0), 0);
+  const totalBaseExTax = Math.max(0, totalToOrganisation - totalTaxAmount);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" }) : "—";
   const fmtShort = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
@@ -357,9 +347,25 @@ export default function ClientProfilePage() {
               <h3 className="text-[13px] font-semibold text-gray-900">Payment Summary</h3>
             </div>
             <div className="px-5 py-3 space-y-2.5">
-              <div className="flex justify-between text-[13px]">
-                <span className="text-gray-500">Total paid</span>
-                <span className="font-semibold text-gray-900 tabular-nums">${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <div className="space-y-1.5 text-[13px]">
+                <div className="flex justify-between gap-2">
+                  <span className="text-gray-500">Payment</span>
+                  <span className="font-medium text-gray-700 tabular-nums">${fmtMoney(totalBaseExTax)}</span>
+                </div>
+                <div className="flex justify-between gap-2 text-[12px]">
+                  <span className="text-gray-500">Tax</span>
+                  <span className="font-medium text-gray-700 tabular-nums">${fmtMoney(totalTaxAmount)}</span>
+                </div>
+                {totalProcessingFees > 0.004 && (
+                  <div className="flex justify-between gap-2 text-[12px]">
+                    <span className="text-gray-500">Payment processing fee</span>
+                    <span className="font-medium text-gray-700 tabular-nums">${fmtMoney(totalProcessingFees)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between gap-2 border-t border-gray-100 pt-1.5">
+                  <span className="text-gray-700 font-semibold">Total</span>
+                  <span className="font-semibold text-gray-900 tabular-nums">${fmtMoney(totalCustomerCharged)}</span>
+                </div>
               </div>
               <div className="flex justify-between text-[13px]">
                 <span className="text-gray-500">Succeeded</span>
@@ -384,39 +390,36 @@ export default function ClientProfilePage() {
               <h3 className="text-[13px] font-semibold text-gray-900">Payment methods</h3>
             </div>
             <div className="px-5 py-3 space-y-2.5">
-              {paymentInfo.providers.length === 0 && !paymentInfo.hasMandate && (
+              {!showCardPayments && !showDirectDebit && (
                 <p className="text-[12px] text-gray-400">No payment providers configured</p>
               )}
-              {paymentInfo.hasMandate && (
+              {showDirectDebit && (
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-9 w-11 items-center justify-center rounded bg-green-50">
                     <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
                   </div>
                   <div>
                     <p className="text-[13px] font-medium text-gray-700">Direct Debit</p>
-                    <p className="text-[11px] text-green-600">Mandate active</p>
+                    <p className={`text-[11px] ${paymentInfo.hasMandate ? "text-green-600" : "text-gray-500"}`}>
+                      {paymentInfo.hasMandate
+                        ? "Mandate active"
+                        : hasDirectDebitMembership
+                        ? "Configured on membership"
+                        : "Available"}
+                    </p>
                   </div>
                 </div>
               )}
-              {paymentInfo.providers.includes("gocardless") && !paymentInfo.hasMandate && (
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-11 items-center justify-center rounded bg-gray-100">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-gray-700">Direct Debit</p>
-                    <p className="text-[11px] text-amber-600">No mandate set up</p>
-                  </div>
-                </div>
-              )}
-              {paymentInfo.providers.includes("stripe") && (
+              {showCardPayments && (
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-9 w-11 items-center justify-center rounded bg-blue-50">
                     <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
                   </div>
                   <div>
                     <p className="text-[13px] font-medium text-gray-700">Card Payments</p>
-                    <p className="text-[11px] text-blue-600">Stripe available</p>
+                    <p className={`text-[11px] ${hasCardMembership ? "text-blue-600" : "text-gray-500"}`}>
+                      {hasCardMembership ? "Configured on membership" : "Stripe available"}
+                    </p>
                   </div>
                 </div>
               )}
@@ -459,7 +462,7 @@ export default function ClientProfilePage() {
 
 /* ─── Summary Tab ─── */
 function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
-  memberships: Membership[]; payments: Payment[]; fmtShort: (d: string) => string; onViewAll: () => void;
+  memberships: MembershipRecord[]; payments: PaymentRecord[]; fmtShort: (d: string) => string; onViewAll: () => void;
 }) {
   const active = memberships.filter(m => m.status === "active");
   const past = memberships.filter(m => m.status !== "active");
@@ -516,7 +519,7 @@ function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
                 {payments.slice(0, 5).map((p, i) => (
                   <tr key={i}>
                     <td className="text-[13px] text-gray-700">{fmtShort(p.due_date)}</td>
-                    <td className="text-[13px] tabular-nums font-medium text-gray-900">${p.amount.toFixed(2)}</td>
+                    <td className="text-[13px] tabular-nums font-medium text-gray-900">{p.currency_code || "AUD"} ${customerCharged(p).toFixed(2)}</td>
                     <td>
                       <span className={`badge ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
                         {p.status}
@@ -534,7 +537,7 @@ function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
 }
 
 /* ─── Membership Summary Row ─── */
-function MembershipSummaryRow({ m, fmtShort }: { m: Membership; fmtShort: (d: string) => string }) {
+function MembershipSummaryRow({ m, fmtShort }: { m: MembershipRecord; fmtShort: (d: string) => string }) {
   const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
@@ -597,7 +600,7 @@ function MembershipSummaryRow({ m, fmtShort }: { m: Membership; fmtShort: (d: st
 }
 
 /* ─── Memberships Tab (detailed cards) ─── */
-function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Membership[]; fmtShort: (d: string) => string; onRefresh: () => void }) {
+function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: MembershipRecord[]; fmtShort: (d: string) => string; onRefresh: () => void }) {
   const active = memberships.filter(m => m.status === "active");
   const inactive = memberships.filter(m => m.status !== "active");
 
@@ -645,7 +648,7 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
   );
 }
 
-function MembershipCard({ m, fmtShort, onCancel }: { m: Membership; fmtShort: (d: string) => string; onCancel?: () => void }) {
+function MembershipCard({ m, fmtShort, onCancel }: { m: MembershipRecord; fmtShort: (d: string) => string; onCancel?: () => void }) {
   const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
@@ -679,26 +682,34 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: Membership; fmtShort: (d
             <p className="text-[20px] font-bold text-gray-900 tabular-nums">${m.payment_amount?.toFixed(2) || "0.00"}</p>
             <p className="text-[12px] text-gray-400">{membershipFrequencyLabel(m)}</p>
             <div className="flex items-center gap-2 mt-1">
-              <button
-                onClick={async () => {
-                  const token = localStorage.getItem("access_token");
-                  const res = await fetch(`/api/tenant/memberships/${m.membership_id}/agreement.pdf`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  if (!res.ok) { alert("No agreement found for this membership"); return; }
-                  const blob = await res.blob();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `Agreement-${m.membership_id.slice(0,8)}.pdf`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                }}
-                className="text-[11px] text-indigo-500 hover:text-indigo-700"
-                title="Download signed agreement PDF"
-              >Agreement PDF</button>
+              {m.has_agreement ? (
+                <button
+                  onClick={async () => {
+                    try {
+                      const token = localStorage.getItem("access_token");
+                      const res = await fetch(`/api/tenant/memberships/${m.membership_id}/agreement.pdf`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      if (!res.ok) { alert("No agreement found for this membership"); return; }
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `Agreement-${m.membership_id.slice(0,8)}.pdf`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch {
+                      alert("Unable to download agreement PDF right now.");
+                    }
+                  }}
+                  className="text-[11px] text-indigo-500 hover:text-indigo-700"
+                  title="Download signed agreement PDF"
+                >Agreement PDF</button>
+              ) : (
+                <span className="text-[11px] text-gray-400" title="No signed agreement available for this membership">No Agreement</span>
+              )}
               {m.status === "active" && onCancel && (
                 <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700">Cancel</button>
               )}
@@ -767,11 +778,39 @@ function BillingScheduleTab({
   subscriptionDetails,
   fmtDate,
 }: {
-  memberships: Membership[];
+  memberships: MembershipRecord[];
   subscriptionDetails: Record<string, { next_charge_date: string; amount: number; status: string }>;
   fmtDate: (d: string) => string;
 }) {
-  const upcoming: { date: Date; membership: Membership; fromGoCardless?: boolean }[] = [];
+  const upcoming: { date: Date; membership: MembershipRecord; fromGoCardless?: boolean }[] = [];
+
+  const toNumber = (v?: number) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const paymentLikeForUpcoming = (membership: MembershipRecord, goCardlessAmount?: number) => {
+    const lastAmount = membership.last_payment_amount;
+    const fallbackAmount = membership.payment_amount;
+    const amount = typeof goCardlessAmount === "number" && Number.isFinite(goCardlessAmount)
+      ? goCardlessAmount
+      : (typeof lastAmount === "number" && Number.isFinite(lastAmount) ? lastAmount : toNumber(fallbackAmount));
+
+    let base = membership.last_base_amount;
+    let tax = membership.last_tax_amount;
+    let fee = membership.last_processing_fee_amount;
+
+    if (typeof amount === "number" && typeof lastAmount === "number" && lastAmount > 0 && Math.abs(amount - lastAmount) > 0.009) {
+      const scale = amount / lastAmount;
+      if (typeof base === "number") base = base * scale;
+      if (typeof tax === "number") tax = tax * scale;
+      if (typeof fee === "number") fee = fee * scale;
+    }
+
+    return {
+      amount,
+      base_amount: base,
+      tax_amount: tax,
+      processing_fee_amount: fee,
+      currency_code: membership.payment_currency_code || "AUD",
+    };
+  };
 
   memberships.forEach(m => {
     const subDetail = m.membership_id ? subscriptionDetails[m.membership_id] : undefined;
@@ -849,9 +888,15 @@ function BillingScheduleTab({
                       {item.fromGoCardless && <span className="ml-1.5 text-indigo-600">(DD)</span>}
                     </p>
                   </div>
-                  <p className="text-[15px] font-semibold text-gray-900 tabular-nums">
-                    ${(subscriptionDetails[item.membership.membership_id]?.amount ?? item.membership.payment_amount)?.toFixed(2)}
-                  </p>
+                  <div className="text-right shrink-0 min-w-[12rem]">
+                    <AdminPaymentAmounts
+                      p={paymentLikeForUpcoming(
+                        item.membership,
+                        subscriptionDetails[item.membership.membership_id]?.amount
+                      )}
+                      layout="stacked"
+                    />
+                  </div>
                 </div>
               </div>
             ))}
@@ -866,7 +911,7 @@ function BillingScheduleTab({
 }
 
 /* ─── Payments Tab (full invoice-style history) ─── */
-function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d: string) => string }) {
+function PaymentsTab({ payments, fmtShort }: { payments: PaymentRecord[]; fmtShort: (d: string) => string }) {
   if (payments.length === 0) {
     return (
       <div className="card px-5 py-12 text-center">
@@ -877,7 +922,7 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
   }
 
   // Group payments by month
-  const grouped: Record<string, Payment[]> = {};
+  const grouped: Record<string, PaymentRecord[]> = {};
   payments.forEach(p => {
     const d = new Date(p.due_date);
     const key = d.toLocaleDateString("en-AU", { month: "long", year: "numeric" });
@@ -895,8 +940,8 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
           <div className="divide-y divide-gray-100">
             {items.map((p, i) => (
               <div key={i} className="px-5 py-3">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-start justify-between gap-4 mb-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[13px] font-medium text-gray-900">{fmtShort(p.due_date)}</span>
                     <span className={`badge ${
                       p.status === "succeeded" ? "badge-green" :
@@ -912,10 +957,12 @@ function PaymentsTab({ payments, fmtShort }: { payments: Payment[]; fmtShort: (d
                     {p._type === "service" ? (
                       <span className="text-[10px] font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">Service</span>
                     ) : p.provider_reference ? (
-                      <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">GoCardless</span>
+                      <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">Provider</span>
                     ) : null}
                   </div>
-                  <span className="text-[15px] font-semibold text-gray-900 tabular-nums">${p.amount.toFixed(2)}</span>
+                  <div className="text-right shrink-0 min-w-[10rem]">
+                    <AdminPaymentAmounts p={p} layout="stacked" />
+                  </div>
                 </div>
                 {p._type === "service" && p._description && (
                   <p className="text-[11px] text-gray-500">{p._description}</p>
@@ -984,10 +1031,6 @@ function MoreActionsMenu({ clientId, clientName, onSetupMembership, onTakePaymen
             Take payment
           </button>
           <div className="my-1 border-t border-gray-100" />
-          <button onClick={() => setOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
-            <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
-            Send email
-          </button>
           <button onClick={() => setOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">
             <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>
             Archive
@@ -1509,12 +1552,12 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
 }) {
   type NumericField = number | "";
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
+  const round2 = (value: number) => Math.round(value * 100) / 100;
 
   const [services, setServices] = useState<{ id: string; name: string; price: number; tax_rate: number; description?: string }[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState<NumericField>("");
-  const [taxAmount, setTaxAmount] = useState<NumericField>("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1525,6 +1568,8 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [providers, setProviders] = useState<string[]>([]);
   const [hasMandate, setHasMandate] = useState(false);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
+  const [salesTaxName, setSalesTaxName] = useState("GST");
+  const [salesTaxPercent, setSalesTaxPercent] = useState(10);
 
   // Selected payment method: "gocardless" | "stripe" | "gocardless_bank" | "stripe_becs"
   const [paymentMethod, setPaymentMethod] = useState<"gocardless" | "stripe" | "gocardless_bank" | "stripe_becs" | "">("");
@@ -1545,12 +1590,16 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     Promise.all([
       api.listServices(),
       api.getClientMandateStatus(clientId),
-    ]).then(([svcData, mandateData]) => {
+      api.getTenantSettings(),
+    ]).then(([svcData, mandateData, tenantData]) => {
       const servicesData = svcData as any;
       const mandate = mandateData as any;
+      const tenant = tenantData as any;
       setServices((servicesData.services || []).filter((s: any) => s.is_active));
       setHasMandate(mandate.has_mandate || false);
       setClientEmail(mandate.client_email || null);
+      setSalesTaxName(String(tenant?.sales_tax_name || "GST"));
+      setSalesTaxPercent(Number.isFinite(Number(tenant?.sales_tax_percent)) ? Number(tenant.sales_tax_percent) : 10);
       const prov: string[] = mandate.payment_providers || [];
       setProviders(prov);
       if (mandate.has_mandate) {
@@ -1570,16 +1619,17 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (svc) {
       setDescription(svc.name);
       setAmount(svc.price);
-      setTaxAmount(svc.tax_rate > 0 ? Math.round(svc.price * svc.tax_rate) / 100 : 0);
     }
   };
+
+  const computedTaxAmount = round2((toNumberOrZero(amount) * Math.max(0, salesTaxPercent)) / 100);
 
   const chargePayload = () => ({
     client_id: clientId,
     service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
     description,
     amount: toNumberOrZero(amount),
-    tax_amount: toNumberOrZero(taxAmount),
+    tax_amount: computedTaxAmount,
     notes: notes || null,
   });
 
@@ -1654,7 +1704,15 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (paymentMethod === "stripe") return handleChargeStripe("card");
   };
 
-  const total = toNumberOrZero(amount) + toNumberOrZero(taxAmount);
+  const total = toNumberOrZero(amount) + computedTaxAmount;
+  const orgTotalCents = Math.round(Math.max(0, total) * 100);
+  const stripeSurchargeCents =
+    orgTotalCents > 0 && paymentMethod === "stripe"
+      ? estimateStripeProcessingFeeCents(orgTotalCents, "card")
+      : orgTotalCents > 0 && paymentMethod === "stripe_becs"
+        ? estimateStripeProcessingFeeCents(orgTotalCents, "direct_debit")
+        : 0;
+  const customerTotalStripe = total + stripeSurchargeCents / 100;
   const noProviders = !hasGC && !hasStripe;
 
   const canSubmit = (() => {
@@ -1827,7 +1885,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                     selectedServiceId === "__custom" ? "border-indigo-500 bg-indigo-50" : "border-gray-200 hover:border-gray-300"
                   }`}>
                     <input type="radio" name="service" value="__custom" checked={selectedServiceId === "__custom"}
-                      onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(""); setTaxAmount(""); }} className="h-4 w-4 text-indigo-600" />
+                      onChange={() => { setSelectedServiceId("__custom"); setDescription(""); setAmount(""); }} className="h-4 w-4 text-indigo-600" />
                     <span className="text-[13px] font-medium text-gray-700">Custom charge</span>
                   </label>
                 </div>
@@ -1840,20 +1898,42 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" placeholder="What is this charge for?" />
                 </div>
                 <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Amount ($)</label>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Service amount ($)</label>
                   <input type="number" value={amount} onChange={e => setAmount(e.target.value === "" ? "" : Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                  <p className="text-[10px] text-gray-400 mt-0.5">Before {salesTaxName} — what you earn ex tax</p>
                 </div>
                 <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Tax ($)</label>
-                  <input type="number" value={taxAmount} onChange={e => setTaxAmount(e.target.value === "" ? "" : Number(e.target.value))} className="input-field" min="0" step="0.01" />
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">{salesTaxName} ({salesTaxPercent.toFixed(2)}%)</label>
+                  <p className="input-field bg-gray-50 flex items-center text-[14px] font-semibold text-gray-900 tabular-nums">
+                    ${computedTaxAmount.toFixed(2)}
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Total</label>
-                  <p className="input-field bg-gray-50 flex items-center text-[14px] font-bold text-gray-900 tabular-nums">
+                <div className="col-span-2">
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">To your organisation (service + {salesTaxName})</label>
+                  <p className="input-field bg-emerald-50/60 border-emerald-100 flex items-center text-[14px] font-bold text-emerald-950 tabular-nums">
                     ${total.toFixed(2)}
                   </p>
                 </div>
               </div>
+
+              {(paymentMethod === "stripe" || paymentMethod === "stripe_becs") && total > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-[12px] text-amber-950 space-y-1">
+                  <p className="font-semibold text-amber-900">Stripe checkout (customer view)</p>
+                  <p>
+                    Customer will be charged an estimated{" "}
+                    <strong>${(stripeSurchargeCents / 100).toFixed(2)}</strong> processing surcharge on top of your{" "}
+                    <strong>${total.toFixed(2)}</strong>, so they pay about{" "}
+                    <strong>${customerTotalStripe.toFixed(2)}</strong> total. The surcharge covers card/DD processing; your recorded revenue stays{" "}
+                    <strong>${total.toFixed(2)}</strong> (plus any processing fee line stored on the charge).
+                  </p>
+                </div>
+              )}
+
+              {(paymentMethod === "gocardless" || paymentMethod === "gocardless_bank") && total > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-[12px] text-gray-700">
+                  <strong>Direct debit:</strong> the customer is charged <strong>${total.toFixed(2)}</strong> — the same as to your organisation (no card surcharge in this flow).
+                </div>
+              )}
 
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-1">Notes (optional)</label>

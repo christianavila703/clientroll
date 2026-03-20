@@ -22,6 +22,7 @@ type MembershipType struct {
 	CurrencyCode    string    `json:"currency_code"`
 	// If set, this overrides tenant-level enabled payment frequencies for this membership.
 	EnabledPaymentFrequencies []string  `json:"enabled_payment_frequencies,omitempty"`
+	ApplySalesTax             bool      `json:"apply_sales_tax"`
 	IsActive      bool `json:"is_active"`
 	IsMostPopular bool `json:"is_most_popular"`
 	SortOrder     int  `json:"sort_order"`
@@ -49,6 +50,7 @@ type TermOption struct {
 	FeeQuarterly                *float64  `json:"fee_quarterly"`
 	AllowUpfront                bool      `json:"allow_upfront"`
 	NumPayments                 *int      `json:"num_payments"` // if set, payments stop after N (membership stays active)
+	ContinueAfterTerm           bool      `json:"continue_after_term"`
 	CustomScheduleEnabled       bool      `json:"custom_schedule_enabled"`
 	CustomScheduleLabel         *string   `json:"custom_schedule_label"`
 	CustomScheduleAmount        *float64  `json:"custom_schedule_amount"`

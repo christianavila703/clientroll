@@ -2,22 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 import ImageUpload from "../common/ImageUpload";
-
-interface MembershipType {
-  id: string;
-  membership_name?: string;
-  membership_level?: string;
-  title: string;
-  slug: string;
-  description?: string;
-  currency_code?: string;
-  is_active: boolean;
-  is_most_popular?: boolean;
-  sort_order: number;
-  term_options?: TermOption[];
-  created_at: string;
-  updated_at: string;
-}
+import type { MembershipType } from "../../types/memberships";
 
 const membershipDisplayTitle = (mt: Pick<MembershipType, "membership_name" | "membership_level" | "title">) => {
   const name = (mt.membership_name || "").trim();
@@ -26,13 +11,6 @@ const membershipDisplayTitle = (mt: Pick<MembershipType, "membership_name" | "me
   if (name) return name;
   return mt.title;
 };
-
-interface TermOption {
-  id: string;
-  duration_months: number;
-  fee_total: number;
-  fee_monthly?: number;
-}
 
 export default function MembershipTypesPage() {
   const [searchParams] = useSearchParams();
@@ -195,6 +173,9 @@ export default function MembershipTypesPage() {
                       <span className={`badge ${mt.is_active ? "badge-green" : "badge-gray"}`}>
                         {mt.is_active ? "Active" : "Draft"}
                       </span>
+                      <span className={`badge ${mt.apply_sales_tax !== false ? "badge-green" : "badge-gray"}`}>
+                        {mt.apply_sales_tax !== false ? "GST On" : "GST Off"}
+                      </span>
                       {mt.is_most_popular && <span className="badge badge-purple">Most Popular</span>}
                     </div>
                   </td>
@@ -312,8 +293,18 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
   const toNumberOrZero = (value: NumericField) => (value === "" ? 0 : value);
 
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
-  const [form, setForm] = useState({
-    membership_name: "", membership_level: "", description: "", inclusions: "", sort_order: "", top_image_url: "", is_most_popular: false, currency_code: "AUD",
+  const [form, setForm] = useState<{
+    membership_name: string;
+    membership_level: string;
+    description: string;
+    inclusions: string;
+    sort_order: NumericField;
+    top_image_url: string;
+    is_most_popular: boolean;
+    currency_code: string;
+    apply_sales_tax: boolean;
+  }>({
+    membership_name: "", membership_level: "", description: "", inclusions: "", sort_order: "", top_image_url: "", is_most_popular: false, currency_code: "AUD", apply_sales_tax: true,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -349,6 +340,7 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
         top_image_url: form.top_image_url || "",
         is_most_popular: form.is_most_popular,
         currency_code: form.currency_code || "AUD",
+        apply_sales_tax: form.apply_sales_tax,
       });
       onCreated();
     }
@@ -414,6 +406,15 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
             </select>
           </div>
         </div>
+        <label className="flex items-center gap-2 text-[13px] text-gray-700">
+          <input
+            type="checkbox"
+            checked={form.apply_sales_tax}
+            onChange={(e) => setForm({ ...form, apply_sales_tax: e.target.checked })}
+            className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+          />
+          Apply GST to this membership (inclusive pricing)
+        </label>
         <label className="flex items-center gap-2 text-[13px] text-gray-700">
           <input
             type="checkbox"

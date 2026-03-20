@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -61,11 +62,13 @@ func writeProviderError(w http.ResponseWriter, err error) {
 // GoCardlessHandler handles GoCardless Connect OAuth, webhooks, and payment creation.
 type GoCardlessHandler struct {
 	cfg               *config.Config
+	tenantRepo        *repository.TenantRepo
 	credRepo          *repository.TenantCredentialRepo
 	eventRepo         *repository.InboundWebhookEventRepo
 	paymentRepo       *repository.PaymentRepo
 	disputeRepo       *repository.PaymentDisputeRepo
 	memberRepo        *repository.MembershipRepo
+	mtRepo            *repository.MembershipTypeRepo
 	clientRepo        *repository.ClientRepo
 	emailTemplateRepo *repository.TenantEmailTemplateRepo
 	encryptor         *database.Encryptor
@@ -74,19 +77,44 @@ type GoCardlessHandler struct {
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
-func NewGoCardlessHandler(cfg *config.Config, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, clientRepo *repository.ClientRepo, etr *repository.TenantEmailTemplateRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
+func NewGoCardlessHandler(cfg *config.Config, tenantRepo *repository.TenantRepo, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, clientRepo *repository.ClientRepo, etr *repository.TenantEmailTemplateRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
 	return &GoCardlessHandler{
 		cfg:               cfg,
+		tenantRepo:        tenantRepo,
 		credRepo:          cr,
 		eventRepo:         eventRepo,
 		paymentRepo:       paymentRepo,
 		disputeRepo:       disputeRepo,
 		memberRepo:        memberRepo,
+		mtRepo:            mtRepo,
 		clientRepo:        clientRepo,
 		emailTemplateRepo: etr,
 		encryptor:         enc,
 		emailSvc:          es,
 	}
+}
+
+func (h *GoCardlessHandler) tenantTaxPercent(ctx context.Context, tenantID uuid.UUID) float64 {
+	if h.tenantRepo == nil {
+		return 10
+	}
+	tenant, err := h.tenantRepo.FindByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		return 10
+	}
+	return tenantSalesTaxPercent(tenant)
+}
+
+func (h *GoCardlessHandler) membershipAppliesSalesTax(ctx context.Context, tenantID uuid.UUID, membershipTypeID uuid.UUID) bool {
+	if h.memberRepo == nil {
+		return true
+	}
+	applySalesTax, err := h.memberRepo.MembershipTypeApplySalesTax(ctx, membershipTypeID, tenantID)
+	if err != nil {
+		log.Printf("gocardless.tax_toggle lookup failed tenant=%s membership_type=%s err=%v", tenantID, membershipTypeID, err)
+		return true
+	}
+	return applySalesTax
 }
 
 // SetDispatcher sets optional outbound webhook event dispatcher.
@@ -726,7 +754,7 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 		}
 	}
 
-	h.sendPaymentEmail(ctx, tenantID, p.ClientID, p.Amount, status, reason)
+	h.sendPaymentEmail(ctx, tenantID, p, status, reason)
 	log.Printf("gocardless.webhook payment_updated tenant=%s payment=%s provider_ref=%s status=%s", tenantID, p.ID, gcPaymentID, status)
 	return nil
 }
@@ -808,7 +836,16 @@ func (h *GoCardlessHandler) reconcileExternalPayment(ctx context.Context, tenant
 	if currencyCode == "" {
 		currencyCode = "AUD"
 	}
-	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membership.ID, membership.ClientID, amount, currencyCode, dueDate, gcPaymentID)
+	baseAmount, taxAmount := splitAmountByTaxMode(
+		amount,
+		h.tenantTaxPercent(ctx, tenantID),
+		h.membershipAppliesSalesTax(ctx, tenantID, membership.MembershipTypeID),
+	)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membership.ID, membership.ClientID, amount, currencyCode, dueDate, gcPaymentID, &repository.PaymentComponents{
+		BaseAmount:          baseAmount,
+		TaxAmount:           taxAmount,
+		ProcessingFeeAmount: 0,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -818,37 +855,124 @@ func (h *GoCardlessHandler) reconcileExternalPayment(ctx context.Context, tenant
 }
 
 // sendPaymentEmail sends payment success/failure emails to the client.
-func (h *GoCardlessHandler) sendPaymentEmail(ctx context.Context, tenantID, clientID uuid.UUID, amount float64, status, failureReason string) {
+func (h *GoCardlessHandler) sendPaymentEmail(ctx context.Context, tenantID uuid.UUID, p *repository.Payment, status, failureReason string) {
 	if h.emailSvc == nil || h.clientRepo == nil {
 		return
 	}
-	client, err := h.clientRepo.FindByID(ctx, clientID, tenantID)
+	if p == nil {
+		return
+	}
+	client, err := h.clientRepo.FindByID(ctx, p.ClientID, tenantID)
 	if err != nil || client == nil || client.Email == nil || *client.Email == "" {
 		return
+	}
+	tenantName := ""
+	if h.tenantRepo != nil {
+		if tenant, tErr := h.tenantRepo.FindByID(ctx, tenantID); tErr == nil && tenant != nil {
+			tenantName = tenant.Name
+		}
+	}
+	membershipTitle := "Membership"
+	if h.memberRepo != nil && h.mtRepo != nil {
+		if membership, mErr := h.memberRepo.FindByID(ctx, p.MembershipID, tenantID); mErr == nil && membership != nil {
+			if mt, mtErr := h.mtRepo.FindByID(ctx, membership.MembershipTypeID, tenantID); mtErr == nil && mt != nil && strings.TrimSpace(mt.Title) != "" {
+				membershipTitle = mt.Title
+			}
+		}
+	}
+	currencyCode := strings.ToUpper(strings.TrimSpace(p.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	reason := strings.TrimSpace(failureReason)
+	if reason == "" && p.FailureReason != nil {
+		reason = strings.TrimSpace(*p.FailureReason)
+	}
+	if reason == "" {
+		reason = "payment could not be processed"
+	}
+	money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
+	vars := map[string]string{
+		"admin_name":              "",
+		"client_name":             client.Name,
+		"amount":                  money(p.Amount), // backward compatibility in existing templates
+		"total_charged":           money(p.Amount),
+		"amount_due":              money(p.Amount),
+		"base_amount":             money(p.BaseAmount),
+		"tax_amount":              money(p.TaxAmount),
+		"processing_fee_amount":   money(p.ProcessingFeeAmount),
+		"to_organisation_amount":  money(p.BaseAmount + p.TaxAmount),
+		"currency_code":           currencyCode,
+		"membership_title":        membershipTitle,
+		"payment_date":            time.Now().Format("2 January 2006"),
+		"failure_reason":          reason,
+		"company_name":            tenantName,
 	}
 
 	go func() {
 		switch status {
 		case "succeeded", "confirmed", "paid_out":
-			if !h.isEmailTemplateEnabled(context.Background(), tenantID, "payment_receipt") {
+			input, ok := h.buildOperationalTemplateEmail(context.Background(), tenantID, "payment_receipt", vars)
+			if !ok {
 				return
 			}
-			input := email.PaymentReceiptEmail(client.Name, amount, "Membership", time.Now().Format("2 January 2006"), "")
 			input.To = *client.Email
-			if _, err := h.emailSvc.Send(context.Background(), input); err != nil {
+			if _, err := h.emailSvc.Send(context.Background(), *input); err != nil {
 				log.Printf("Error sending payment receipt to %s: %v", *client.Email, err)
 			}
 		case "failed":
-			if !h.isEmailTemplateEnabled(context.Background(), tenantID, "payment_failed") {
+			input, ok := h.buildOperationalTemplateEmail(context.Background(), tenantID, "payment_failed", vars)
+			if !ok {
 				return
 			}
-			input := email.PaymentFailedEmail(client.Name, amount, "Membership", failureReason, "")
 			input.To = *client.Email
-			if _, err := h.emailSvc.Send(context.Background(), input); err != nil {
+			if _, err := h.emailSvc.Send(context.Background(), *input); err != nil {
 				log.Printf("Error sending payment failed email to %s: %v", *client.Email, err)
 			}
 		}
 	}()
+}
+
+func (h *GoCardlessHandler) buildOperationalTemplateEmail(ctx context.Context, tenantID uuid.UUID, templateKey string, vars map[string]string) (*email.SendInput, bool) {
+	def, ok := email.OperationalTemplateByKey(templateKey)
+	if !ok {
+		return nil, false
+	}
+	enabled := def.DefaultEnabled
+	subject := def.Subject
+	body := def.Body
+	if h.emailTemplateRepo != nil {
+		override, err := h.emailTemplateRepo.GetByKey(ctx, tenantID, templateKey)
+		if err != nil {
+			log.Printf("gocardless.email template lookup failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		} else if override != nil {
+			enabled = override.Enabled
+			if override.SubjectOverride != nil && strings.TrimSpace(*override.SubjectOverride) != "" {
+				subject = *override.SubjectOverride
+			}
+			if override.BodyOverride != nil && strings.TrimSpace(*override.BodyOverride) != "" {
+				body = *override.BodyOverride
+			}
+		}
+	}
+	if !enabled {
+		return nil, false
+	}
+	render := func(input string) string {
+		output := input
+		for k, v := range vars {
+			output = strings.ReplaceAll(output, "{{"+k+"}}", v)
+		}
+		return output
+	}
+	renderedSubject := render(subject)
+	renderedBody := render(body)
+	emailInput := &email.SendInput{
+		Subject: renderedSubject,
+		HTML:    email.WrapHTML(renderedBody),
+		Text:    renderedSubject,
+	}
+	return emailInput, true
 }
 
 func (h *GoCardlessHandler) isEmailTemplateEnabled(ctx context.Context, tenantID uuid.UUID, templateKey string) bool {
@@ -984,7 +1108,16 @@ func (h *GoCardlessHandler) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	pay, err := h.paymentRepo.Create(r.Context(), tenantID, membershipID, membership.ClientID, input.Amount, currencyCode, dueDate, gcPaymentID)
+	baseAmount, taxAmount := splitAmountByTaxMode(
+		input.Amount,
+		h.tenantTaxPercent(r.Context(), tenantID),
+		h.membershipAppliesSalesTax(r.Context(), tenantID, membership.MembershipTypeID),
+	)
+	pay, err := h.paymentRepo.Create(r.Context(), tenantID, membershipID, membership.ClientID, input.Amount, currencyCode, dueDate, gcPaymentID, &repository.PaymentComponents{
+		BaseAmount:          baseAmount,
+		TaxAmount:           taxAmount,
+		ProcessingFeeAmount: 0,
+	})
 	if err != nil {
 		log.Printf("PaymentRepo.Create: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to save payment")
