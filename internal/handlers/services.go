@@ -586,7 +586,13 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	if input.PaymentMethod == "direct_debit" {
 		params.PaymentMethodTypes = stripe.StringSlice([]string{"au_becs_debit"})
 	}
-	if client.Email != nil && *client.Email != "" {
+	if h.paymentRepo != nil {
+		if stripeCustomerID, _ := h.paymentRepo.FindLatestStripeCustomerIDByClient(r.Context(), tenantID, clientID); stripeCustomerID != "" {
+			params.Customer = stripe.String(stripeCustomerID)
+			params.PaymentMethodCollection = stripe.String("if_required")
+		}
+	}
+	if params.Customer == nil && client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
 	}
 

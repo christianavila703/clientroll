@@ -1615,7 +1615,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                   {frequency !== "upfront" && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
-                      <p className="text-[12px] text-gray-500 mb-3">Enter bank details to set up automatic payments now. Leave blank to set up later via a link sent to the client.</p>
+                      <p className="text-[12px] text-gray-500 mb-3">If this client already has a stored mandate, it will be reused automatically. Enter bank details only to create a new mandate.</p>
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[12px] font-medium text-gray-600 mb-1">Account holder name</label>

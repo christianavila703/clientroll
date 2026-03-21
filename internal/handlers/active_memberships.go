@@ -262,8 +262,57 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 			}
 		}
 	}
+	// If no bank details were supplied, reuse an existing client mandate when possible.
+	if input.BSB == "" && input.AccountNumber == "" && strings.EqualFold(input.PaymentMethod, "direct_debit") {
+		prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
+		if provErr == nil && prov != nil {
+			if existingMandateID := h.findReusableMandateForClient(r.Context(), tenantID, clientID); existingMandateID != "" {
+				if err := h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, existingMandateID); err != nil {
+					log.Printf("membership.create reuse mandate set failed tenant=%s membership=%s mandate=%s err=%v", tenantID, m.ID, existingMandateID, err)
+				} else {
+					// Create GoCardless subscription for recurring frequencies so future debits run automatically.
+					if input.PaymentFrequency != "upfront" {
+						numPay := m.NumPayments
+						continueAfterTerm := false
+						if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenantID); to != nil {
+							if numPay == nil && to.NumPayments != nil {
+								numPay = to.NumPayments
+							}
+							continueAfterTerm = to.ContinueAfterTerm
+						}
+						if continueAfterTerm {
+							numPay = nil
+						}
+						createGoCardlessSubscription(r.Context(), prov, h.memberRepo, existingMandateID, m,
+							tenantID, input.PaymentFrequency, input.PaymentAmount,
+							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
+					}
+				}
+			}
+		}
+	}
 
 	writeJSON(w, http.StatusCreated, m)
+}
+
+func (h *ActiveMembershipsHandler) findReusableMandateForClient(ctx context.Context, tenantID, clientID uuid.UUID) string {
+	memberships, err := h.clientRepo.GetMemberships(ctx, clientID, tenantID)
+	if err != nil {
+		return ""
+	}
+	// Prefer active mandate first.
+	for _, m := range memberships {
+		if m.Status == "active" && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+			return *m.GoCardlessMandateID
+		}
+	}
+	// Fallback: any stored mandate reference.
+	for _, m := range memberships {
+		if m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+			return *m.GoCardlessMandateID
+		}
+	}
+	return ""
 }
 
 // CancelMembership cancels a membership and its GoCardless subscription+mandate.

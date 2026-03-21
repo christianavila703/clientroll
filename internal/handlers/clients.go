@@ -322,31 +322,31 @@ func (h *ClientHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 
 // ClientMembershipRow is the enriched membership data for the client profile.
 type ClientMembershipRow struct {
-	MembershipID         string   `json:"membership_id"`
-	MembershipType       string   `json:"membership_type"`
-	MembershipTypeID     string   `json:"membership_type_id"`
-	TermMonths           int      `json:"term_months"`
-	StartDate            string   `json:"start_date"`
-	EndDate              string   `json:"end_date"`
-	PaymentMethod        *string  `json:"payment_method"`
-	PaymentFrequency     *string  `json:"payment_frequency"`
-	PaymentIntervalUnit  *string  `json:"payment_interval_unit"`
-	PaymentIntervalCount int      `json:"payment_interval_count"`
-	PaymentAmount        *float64 `json:"payment_amount"`
-	NumPayments          *int     `json:"num_payments"`
-	Status               string   `json:"status"`
-	MandateID            *string  `json:"mandate_id"`
-	SubscriptionID       *string  `json:"subscription_id"`
-	HasAgreement         bool     `json:"has_agreement"`
-	TotalPaid            float64  `json:"total_paid"`
-	TotalExpected        float64  `json:"total_expected"`
-	FailedCount          int      `json:"failed_count"`
-	LastPaymentDate      *string  `json:"last_payment_date"`
-	LastPaymentStatus    *string  `json:"last_payment_status"`
-	PaymentCurrencyCode  *string  `json:"payment_currency_code"`
-	LastPaymentAmount    *float64 `json:"last_payment_amount"`
-	LastBaseAmount       *float64 `json:"last_base_amount"`
-	LastTaxAmount        *float64 `json:"last_tax_amount"`
+	MembershipID            string   `json:"membership_id"`
+	MembershipType          string   `json:"membership_type"`
+	MembershipTypeID        string   `json:"membership_type_id"`
+	TermMonths              int      `json:"term_months"`
+	StartDate               string   `json:"start_date"`
+	EndDate                 string   `json:"end_date"`
+	PaymentMethod           *string  `json:"payment_method"`
+	PaymentFrequency        *string  `json:"payment_frequency"`
+	PaymentIntervalUnit     *string  `json:"payment_interval_unit"`
+	PaymentIntervalCount    int      `json:"payment_interval_count"`
+	PaymentAmount           *float64 `json:"payment_amount"`
+	NumPayments             *int     `json:"num_payments"`
+	Status                  string   `json:"status"`
+	MandateID               *string  `json:"mandate_id"`
+	SubscriptionID          *string  `json:"subscription_id"`
+	HasAgreement            bool     `json:"has_agreement"`
+	TotalPaid               float64  `json:"total_paid"`
+	TotalExpected           float64  `json:"total_expected"`
+	FailedCount             int      `json:"failed_count"`
+	LastPaymentDate         *string  `json:"last_payment_date"`
+	LastPaymentStatus       *string  `json:"last_payment_status"`
+	PaymentCurrencyCode     *string  `json:"payment_currency_code"`
+	LastPaymentAmount       *float64 `json:"last_payment_amount"`
+	LastBaseAmount          *float64 `json:"last_base_amount"`
+	LastTaxAmount           *float64 `json:"last_tax_amount"`
 	LastProcessingFeeAmount *float64 `json:"last_processing_fee_amount"`
 }
 
@@ -483,12 +483,23 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 
 	memberships, err := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
 	if err == nil {
+		// Prefer active memberships, but fall back to any membership with a stored mandate.
 		for _, m := range memberships {
 			if m.Status == "active" && m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
 				result["has_mandate"] = true
 				result["mandate_id"] = *m.GoCardlessMandateID
 				result["membership_id"] = m.ID.String()
 				break
+			}
+		}
+		if result["has_mandate"] == false {
+			for _, m := range memberships {
+				if m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+					result["has_mandate"] = true
+					result["mandate_id"] = *m.GoCardlessMandateID
+					result["membership_id"] = m.ID.String()
+					break
+				}
 			}
 		}
 	}
