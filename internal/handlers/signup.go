@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +18,7 @@ import (
 	"clientroll/internal/database"
 	"clientroll/internal/email"
 	"clientroll/internal/events"
+	"clientroll/internal/middleware"
 	"clientroll/internal/models"
 	"clientroll/internal/payment"
 	pdfpkg "clientroll/internal/pdf"
@@ -86,9 +90,18 @@ func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/signup/{tenantSlug}/submit", h.SubmitSignup)
 }
 
+// RegisterTenantRoutes registers authenticated tenant routes related to signup operations.
+func (h *SignupHandler) RegisterTenantRoutes(r chi.Router) {
+	r.Get("/signup-links", h.GetSignupLinks)
+}
+
 // GetTenantMemberships returns all active memberships for a tenant (public browsing).
 func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "tenantSlug")
+	if err := h.verifySignupAccess(r, slug, "", true); err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), slug)
 	if err != nil || tenant == nil || !tenant.IsActive {
 		writeError(w, http.StatusNotFound, "Organisation not found")
@@ -135,6 +148,10 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Request) {
 	tenantSlug := chi.URLParam(r, "tenantSlug")
 	membershipSlug := chi.URLParam(r, "membershipSlug")
+	if err := h.verifySignupAccess(r, tenantSlug, membershipSlug, true); err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
 	if err != nil || tenant == nil || !tenant.IsActive {
@@ -177,6 +194,11 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 // GetTermBonuses returns bonuses for a specific term option (for dynamic display).
 func (h *SignupHandler) GetTermBonuses(w http.ResponseWriter, r *http.Request) {
 	tenantSlug := chi.URLParam(r, "tenantSlug")
+	membershipSlug := chi.URLParam(r, "membershipSlug")
+	if err := h.verifySignupAccess(r, tenantSlug, membershipSlug, true); err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 	termOptionID, err := uuid.Parse(chi.URLParam(r, "termOptionID"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid term option ID")
@@ -201,6 +223,10 @@ func (h *SignupHandler) GetTermBonuses(w http.ResponseWriter, r *http.Request) {
 // SubmitSignup processes a completed signup form.
 func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	tenantSlug := chi.URLParam(r, "tenantSlug")
+	if err := h.verifySignupAccess(r, tenantSlug, "", true); err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
 
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
 	if err != nil || tenant == nil || !tenant.IsActive {
@@ -422,7 +448,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// --- Stripe card checkout path ---
 	if input.PaymentMethod == "card" {
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
@@ -554,7 +580,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// Stripe BECS Direct Debit path: redirect to Stripe Checkout with au_becs_debit
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate)
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
 			if err != nil {
 				log.Printf("Error creating Stripe BECS checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, "Direct debit setup failed")
@@ -631,6 +657,132 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		resp["gocardless_mandate_id"] = gcMandateID
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// GetSignupLinks returns signed public signup links for the authenticated tenant.
+func (h *SignupHandler) GetSignupLinks(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil || tenantID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	tenant, err := h.tenantRepo.FindByID(r.Context(), tenantID)
+	if err != nil || tenant == nil {
+		writeError(w, http.StatusNotFound, "Tenant not found")
+		return
+	}
+	types, err := h.mtRepo.List(r.Context(), tenant.ID)
+	if err != nil {
+		log.Printf("signup links: membership list failed tenant=%s err=%v", tenant.ID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to load signup links")
+		return
+	}
+	expiresAt := time.Now().UTC().Add(h.signupLinkTTL())
+	exp := strconv.FormatInt(expiresAt.Unix(), 10)
+	browseSig := h.signSignupPayload(tenant.Slug, "", exp)
+	browsePath := fmt.Sprintf("/join/%s?exp=%s&sig=%s", tenant.Slug, exp, browseSig)
+
+	type membershipLink struct {
+		MembershipID   uuid.UUID `json:"membership_id"`
+		MembershipSlug string    `json:"membership_slug"`
+		Path           string    `json:"path"`
+	}
+	links := make([]membershipLink, 0, len(types))
+	for _, mt := range types {
+		if !mt.IsActive {
+			continue
+		}
+		mslug := strings.TrimSpace(mt.Slug)
+		if mslug == "" {
+			continue
+		}
+		sig := h.signSignupPayload(tenant.Slug, mslug, exp)
+		path := fmt.Sprintf("/%s/%s?m=%s&exp=%s&sig=%s", tenant.Slug, mslug, mslug, exp, sig)
+		links = append(links, membershipLink{
+			MembershipID:   mt.ID,
+			MembershipSlug: mslug,
+			Path:           path,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tenant_slug": tenant.Slug,
+		"expires_at":  expiresAt.Format(time.RFC3339),
+		"browse_path": browsePath,
+		"links":       links,
+	})
+}
+
+func (h *SignupHandler) signupLinkTTL() time.Duration {
+	if h.cfg != nil && h.cfg.SignupLinkTTLMinutes > 0 {
+		return time.Duration(h.cfg.SignupLinkTTLMinutes) * time.Minute
+	}
+	return 7 * 24 * time.Hour
+}
+
+func (h *SignupHandler) signupSigningSecret() string {
+	if h.cfg == nil {
+		return ""
+	}
+	if strings.TrimSpace(h.cfg.SignupLinkSigningSecret) != "" {
+		return strings.TrimSpace(h.cfg.SignupLinkSigningSecret)
+	}
+	return strings.TrimSpace(h.cfg.MasterEncryptionKey)
+}
+
+func (h *SignupHandler) signSignupPayload(tenantSlug, membershipSlug, exp string) string {
+	secret := h.signupSigningSecret()
+	if secret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(strings.ToLower(strings.TrimSpace(tenantSlug))))
+	mac.Write([]byte("|"))
+	mac.Write([]byte(strings.ToLower(strings.TrimSpace(membershipSlug))))
+	mac.Write([]byte("|"))
+	mac.Write([]byte(strings.TrimSpace(exp)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (h *SignupHandler) verifySignupAccess(r *http.Request, tenantSlug, pathMembershipSlug string, allowTenantWideFallback bool) error {
+	secret := h.signupSigningSecret()
+	requireSig := h.cfg != nil && h.cfg.SignupLinksRequireSignature
+	if secret == "" && !requireSig {
+		return nil
+	}
+	q := r.URL.Query()
+	sig := strings.TrimSpace(q.Get("sig"))
+	exp := strings.TrimSpace(q.Get("exp"))
+	queryMembership := strings.TrimSpace(q.Get("m"))
+
+	if sig == "" || exp == "" {
+		if !requireSig {
+			return nil
+		}
+		return errors.New("Signup link is invalid or expired")
+	}
+
+	expUnix, err := strconv.ParseInt(exp, 10, 64)
+	if err != nil || expUnix <= 0 || time.Now().UTC().Unix() > expUnix {
+		return errors.New("Signup link is invalid or expired")
+	}
+
+	candidates := []string{strings.TrimSpace(pathMembershipSlug), queryMembership}
+	if allowTenantWideFallback {
+		candidates = append(candidates, "")
+	}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		key := strings.ToLower(strings.TrimSpace(candidate))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		expected := h.signSignupPayload(tenantSlug, candidate, exp)
+		if expected != "" && hmac.Equal([]byte(strings.ToLower(sig)), []byte(strings.ToLower(expected))) {
+			return nil
+		}
+	}
+	return errors.New("Signup link is invalid or expired")
 }
 
 // SignupSubmission is the full signup form data.
@@ -761,7 +913,7 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -870,6 +1022,13 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 				"payment_freq":          frequency,
 			},
 		}
+		// When membership starts in the future, defer first invoice/charge until start date.
+		if !membershipStart.IsZero() {
+			startAt := membershipStart.UTC().Truncate(time.Second)
+			if startAt.After(time.Now().UTC()) {
+				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+			}
+		}
 	}
 	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 
@@ -883,7 +1042,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 // createStripeBECSCheckoutSession creates a Stripe Checkout session restricted to
 // au_becs_debit (Australian direct debit). Stripe's hosted page collects bank details
 // and the BECS mandate agreement from the customer.
-func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time) (string, error) {
+func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -994,6 +1153,13 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 				"currency_code":         strings.ToUpper(strings.TrimSpace(currencyCode)),
 				"payment_freq":          frequency,
 			},
+		}
+		// When membership starts in the future, defer first invoice/charge until start date.
+		if !membershipStart.IsZero() {
+			startAt := membershipStart.UTC().Truncate(time.Second)
+			if startAt.After(time.Now().UTC()) {
+				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+			}
 		}
 	}
 	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}

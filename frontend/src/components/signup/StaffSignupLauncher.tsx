@@ -33,9 +33,24 @@ interface TenantInfo {
   name: string;
 }
 
+interface SignedSignupLink {
+  membership_id: string;
+  membership_slug: string;
+  path: string;
+}
+
+interface SignupLinksResponse {
+  tenant_slug: string;
+  expires_at: string;
+  browse_path: string;
+  links: SignedSignupLink[];
+}
+
 export default function StaffSignupLauncher() {
   const [types, setTypes] = useState<MembershipType[]>([]);
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
+  const [signedBrowsePath, setSignedBrowsePath] = useState<string>("");
+  const [signedMembershipPaths, setSignedMembershipPaths] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -43,17 +58,36 @@ export default function StaffSignupLauncher() {
     Promise.all([
       api.listMembershipTypes(),
       api.getTenantSettings(),
-    ]).then(([mtData, tenantData]) => {
+      api.getSignupLinks().catch(() => null),
+    ]).then(([mtData, tenantData, signupLinks]) => {
+      const linkData = signupLinks as SignupLinksResponse | null;
       const membershipData = mtData as any;
       const tenantSettings = tenantData as TenantSettings;
       setTypes((membershipData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
       setTenant({ slug: tenantSettings.slug || "", name: tenantSettings.name || "" });
+      if (linkData && typeof linkData.browse_path === "string") {
+        setSignedBrowsePath(linkData.browse_path);
+        const map: Record<string, string> = {};
+        for (const item of linkData.links || []) {
+          if (item?.membership_slug && item?.path) {
+            map[item.membership_slug] = item.path;
+          }
+        }
+        setSignedMembershipPaths(map);
+      }
     }).catch((e) => { console.error(e); setError("Unable to load signup links. Please refresh and try again."); }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
 
   const baseUrl = window.location.origin;
+  const browseUrl = signedBrowsePath ? `${baseUrl}${signedBrowsePath}` : `${baseUrl}/join/${tenant?.slug}`;
+  const membershipUrl = (slug?: string) => {
+    if (!slug) return `${baseUrl}/join/${tenant?.slug}`;
+    const signed = signedMembershipPaths[slug];
+    if (signed) return `${baseUrl}${signed}`;
+    return `${baseUrl}/${tenant?.slug}/${slug}`;
+  };
   const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
   const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
   const fallbackTitle = (mt: MembershipType) => mt.title;
@@ -82,10 +116,10 @@ export default function StaffSignupLauncher() {
           <p className="text-[13px] text-gray-500 mb-3">Or share this link for clients to browse all memberships:</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-[13px] font-mono text-gray-700 truncate">
-              {baseUrl}/join/{tenant?.slug}
+              {browseUrl}
             </code>
             <button
-              onClick={() => { navigator.clipboard.writeText(`${baseUrl}/join/${tenant?.slug}`); }}
+              onClick={() => { navigator.clipboard.writeText(browseUrl); }}
               className="btn-secondary text-[12px] flex-shrink-0"
             >
               Copy link
@@ -136,7 +170,7 @@ export default function StaffSignupLauncher() {
                 <div className="mt-4 flex gap-2">
                   {/* Start signup on this device (iPad handoff) */}
                   <a
-                    href={`/${tenant?.slug}/${mt.slug}`}
+                    href={membershipUrl(mt.slug)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-primary flex-1 justify-center"
@@ -144,7 +178,7 @@ export default function StaffSignupLauncher() {
                     Open signup
                   </a>
                   {/* Copy link */}
-                  <CopyButton text={`${baseUrl}/${tenant?.slug}/${mt.slug}`} />
+                  <CopyButton text={membershipUrl(mt.slug)} />
                 </div>
               </div>
             </div>
@@ -159,9 +193,9 @@ export default function StaffSignupLauncher() {
           <div className="px-5 py-3 flex items-center justify-between">
             <div>
               <p className="text-[13px] font-medium text-gray-900">Browse all memberships</p>
-              <p className="text-[11px] text-gray-400 font-mono">{baseUrl}/join/{tenant?.slug}</p>
+              <p className="text-[11px] text-gray-400 font-mono">{browseUrl}</p>
             </div>
-            <button onClick={() => navigator.clipboard.writeText(`${baseUrl}/join/${tenant?.slug}`)} className="btn-secondary text-[12px]">Copy</button>
+            <button onClick={() => navigator.clipboard.writeText(browseUrl)} className="btn-secondary text-[12px]">Copy</button>
           </div>
           {types.map((mt) => (
             <div key={mt.id} className="px-5 py-3 flex items-center justify-between">
@@ -172,9 +206,9 @@ export default function StaffSignupLauncher() {
                     {membershipLevel(mt)}
                   </p>
                 )}
-                <p className="text-[11px] text-gray-400 font-mono">{baseUrl}/{tenant?.slug}/{mt.slug}</p>
+                <p className="text-[11px] text-gray-400 font-mono">{membershipUrl(mt.slug)}</p>
               </div>
-              <button onClick={() => navigator.clipboard.writeText(`${baseUrl}/${tenant?.slug}/${mt.slug}`)} className="btn-secondary text-[12px]">Copy</button>
+              <button onClick={() => navigator.clipboard.writeText(membershipUrl(mt.slug))} className="btn-secondary text-[12px]">Copy</button>
             </div>
           ))}
         </div>

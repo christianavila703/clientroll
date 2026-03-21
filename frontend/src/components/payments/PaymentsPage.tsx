@@ -217,12 +217,12 @@ export default function PaymentsPage() {
                   <tr>
                     <th>Client</th>
                     <th>Membership</th>
-                    <th className="min-w-[9rem]">Amount</th>
-                    <th>Status</th>
+                    <th className="min-w-[11rem]">Amount</th>
+                    <th className="min-w-[11rem]">Status</th>
                     <th>Due Date</th>
                     <th>Paid Date</th>
-                    <th>Contract Paid</th>
-                    <th>Contract Ends</th>
+                    <th className="min-w-[12rem]">Contract Paid</th>
+                    <th className="min-w-[10rem]">Contract Ends</th>
                     <th className="w-[1%] whitespace-nowrap">Stripe</th>
                   </tr>
                 </thead>
@@ -246,23 +246,25 @@ export default function PaymentsPage() {
                           <p className="text-gray-900">{p.membership_type}</p>
                           <p className="text-[11px] text-gray-400">{p.term_months}mo · {fmtFreq(p.payment_frequency)}</p>
                         </td>
-                        <td>
-                          <AdminPaymentAmounts p={p} layout="compact" />
+                        <td className="align-top">
+                          <AdminPaymentAmounts p={p} layout="compact" className="leading-tight" />
                         </td>
-                        <td>
-                          <span className={`badge ${p.status === "succeeded" || p.status === "confirmed" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" || p.status === "submitted" ? "badge-yellow" : "badge-gray"}`}>
-                            {p.status === "succeeded" ? "paid" : p.status}
-                          </span>
-                          {paymentMethodBadge && (
-                            <span className={`ml-1 text-[10px] font-medium rounded px-1 py-0.5 ${paymentMethodBadge.className}`}>
-                              {paymentMethodBadge.label}
+                        <td className="align-top">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className={`badge whitespace-nowrap ${p.status === "succeeded" || p.status === "confirmed" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" || p.status === "submitted" ? "badge-yellow" : "badge-gray"}`}>
+                              {p.status === "succeeded" ? "Paid" : p.status}
                             </span>
-                          )}
-                          {p.retry_count > 0 && (
-                            <span className="ml-1 text-[10px] text-red-500">{p.retry_count} retries</span>
-                          )}
+                            {paymentMethodBadge && (
+                              <span className={`inline-flex items-center whitespace-nowrap text-[10px] font-medium rounded px-1.5 py-0.5 ${paymentMethodBadge.className}`}>
+                                {paymentMethodBadge.label}
+                              </span>
+                            )}
+                            {p.retry_count > 0 && (
+                              <span className="text-[10px] text-red-500 whitespace-nowrap">{p.retry_count} retries</span>
+                            )}
+                          </div>
                           {p.failure_reason && (
-                            <p className="text-[10px] text-red-400 mt-0.5 truncate max-w-[150px]" title={p.failure_reason}>{p.failure_reason}</p>
+                            <p className="text-[10px] text-red-400 mt-1 truncate max-w-[180px]" title={p.failure_reason}>{p.failure_reason}</p>
                           )}
                         </td>
                         <td className="text-[13px] text-gray-700">{fmtDate(p.due_date)}</td>
@@ -290,7 +292,7 @@ export default function PaymentsPage() {
                           {hasStripeDetails(p.stripe_details) ? (
                             <button
                               type="button"
-                              className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800"
+                              className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
                               onClick={() => setStripeDetail(p)}
                             >
                               Details

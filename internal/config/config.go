@@ -29,27 +29,35 @@ type Config struct {
 	GoCardlessLiveClientID        string
 	GoCardlessLiveClientSecret    string
 	GoCardlessWebhookSecret       string
+
+	// Public signup link protection.
+	SignupLinkSigningSecret     string
+	SignupLinksRequireSignature bool
+	SignupLinkTTLMinutes        int
 }
 
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:               getEnvInt("PORT", 8080),
-		DatabaseURL:        getEnvRequired("DATABASE_URL"),
-		RedisURL:           getEnvRequired("REDIS_URL"),
-		MasterEncryptionKey: getEnvRequired("MASTER_ENCRYPTION_KEY"),
-		CORSAllowedOrigins: getEnvSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
-		Environment:        getEnv("ENVIRONMENT", "development"),
-		JWTAccessDuration:   getEnvInt("JWT_ACCESS_DURATION_MINUTES", 15),
-		JWTRefreshDuration:  getEnvInt("JWT_REFRESH_DURATION_DAYS", 7),
-		MailerSendAPIKey:    getEnv("MAILERSEND_API_KEY", ""),
-		MailerSendFromEmail: getEnv("MAILERSEND_FROM_EMAIL", "clientroll@app.businessnet.com"),
-		AppURL:              getEnv("APP_URL", "https://app.clientroll.com"),
+		Port:                          getEnvInt("PORT", 8080),
+		DatabaseURL:                   getEnvRequired("DATABASE_URL"),
+		RedisURL:                      getEnvRequired("REDIS_URL"),
+		MasterEncryptionKey:           getEnvRequired("MASTER_ENCRYPTION_KEY"),
+		CORSAllowedOrigins:            getEnvSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
+		Environment:                   getEnv("ENVIRONMENT", "development"),
+		JWTAccessDuration:             getEnvInt("JWT_ACCESS_DURATION_MINUTES", 15),
+		JWTRefreshDuration:            getEnvInt("JWT_REFRESH_DURATION_DAYS", 7),
+		MailerSendAPIKey:              getEnv("MAILERSEND_API_KEY", ""),
+		MailerSendFromEmail:           getEnv("MAILERSEND_FROM_EMAIL", "clientroll@app.businessnet.com"),
+		AppURL:                        getEnv("APP_URL", "https://app.clientroll.com"),
 		GoCardlessSandboxClientID:     getEnv("GOCARDLESS_SANDBOX_CLIENT_ID", ""),
 		GoCardlessSandboxClientSecret: getEnv("GOCARDLESS_SANDBOX_CLIENT_SECRET", ""),
 		GoCardlessLiveClientID:        getEnv("GOCARDLESS_LIVE_CLIENT_ID", ""),
 		GoCardlessLiveClientSecret:    getEnv("GOCARDLESS_LIVE_CLIENT_SECRET", ""),
 		GoCardlessWebhookSecret:       getEnv("GOCARDLESS_WEBHOOK_SECRET", ""),
+		SignupLinkSigningSecret:       getEnv("SIGNUP_LINK_SIGNING_SECRET", ""),
+		SignupLinksRequireSignature:   getEnv("SIGNUP_LINKS_REQUIRE_SIGNATURE", "") == "1" || strings.EqualFold(getEnv("SIGNUP_LINKS_REQUIRE_SIGNATURE", ""), "true"),
+		SignupLinkTTLMinutes:          getEnvInt("SIGNUP_LINK_TTL_MINUTES", 10080),
 	}
 
 	if err := cfg.validate(); err != nil {

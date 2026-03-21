@@ -133,7 +133,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       const paymentAmount = isCustomSchedule
         ? (termOption.custom_schedule_amount || termOption.fee_total)
         : resolveFrequencyAmount(termOption, payment.payment_frequency);
-      const res = await fetch(`/api/signup/${tenantSlug}/submit`, {
+      const res = await fetch(`/api/signup/${tenantSlug}/submit${window.location.search || ""}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

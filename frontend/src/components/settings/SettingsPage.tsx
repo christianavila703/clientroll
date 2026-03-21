@@ -213,9 +213,10 @@ function TenantSettings() {
   const [message, setMessage] = useState("");
   const [detectingColors, setDetectingColors] = useState(false);
   const [colorMessage, setColorMessage] = useState("");
+  const [signedBrowsePath, setSignedBrowsePath] = useState("");
 
   useEffect(() => {
-    api.getTenantSettings().then((res) => {
+    Promise.all([api.getTenantSettings(), api.getSignupLinks().catch(() => null)]).then(([res, links]) => {
       const t = res as Record<string, unknown>;
       setData({
         slug: String(t.slug || ""),
@@ -237,6 +238,10 @@ function TenantSettings() {
           ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
           : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
       });
+      const linkData = links as { browse_path?: string } | null;
+      if (linkData?.browse_path) {
+        setSignedBrowsePath(linkData.browse_path);
+      }
     }).catch((e) => { console.error(e); setMessage("Unable to load organisation settings."); });
   }, []);
 
@@ -249,7 +254,9 @@ function TenantSettings() {
     finally { setSaving(false); }
   };
 
-  const joinUrl = data.slug ? `${window.location.origin}/join/${data.slug}` : "";
+  const joinUrl = signedBrowsePath
+    ? `${window.location.origin}${signedBrowsePath}`
+    : (data.slug ? `${window.location.origin}/join/${data.slug}` : "");
 
   const timezones = [
     "Australia/Brisbane", "Australia/Sydney", "Australia/Melbourne", "Australia/Perth",

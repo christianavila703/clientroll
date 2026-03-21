@@ -586,7 +586,6 @@ func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.
 		SuccessURL:              stripe.String(successURL),
 		CancelURL:               stripe.String(cancelURL),
 		PaymentMethodTypes:      stripe.StringSlice([]string{"card", "au_becs_debit"}),
-		PaymentMethodCollection: stripe.String("if_required"),
 		Metadata: map[string]string{
 			"type":      "client_payment_method_setup",
 			"tenant_id": tenantID.String(),

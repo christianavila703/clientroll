@@ -57,12 +57,17 @@ func (r *MembershipRepo) Create(
 		staffSignedAt = &now
 	}
 
+	status := "active"
+	if startDate.UTC().After(time.Now().UTC()) {
+		status = "scheduled"
+	}
+
 	query := `
 		INSERT INTO memberships (tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments,
 		    status, member_signature_data, member_signed_at,
 		    staff_user_id, staff_signature_data, staff_signed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'active', $14, $15, $16, $17, $18)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id, tenant_id, client_id, membership_type_id, term_option_id,
 		    start_date, min_term_end_date, payment_method, payment_frequency, currency_code, payment_interval_unit, payment_interval_count, payment_amount, num_payments, payments_made,
 		    status, gocardless_mandate_id, member_signature_data, member_signed_at,
@@ -72,7 +77,7 @@ func (r *MembershipRepo) Create(
 	err = r.db.Pool.QueryRow(ctx, query,
 		tenantID, clientID, membershipTypeID, termOptionID,
 		startDate, endDate, paymentMethod, paymentFrequency, currencyCode, paymentIntervalUnit, paymentIntervalCount, paymentAmount, numPayments,
-		memberSignature, memberSignedAt, staffUserID, staffSignature, staffSignedAt,
+		status, memberSignature, memberSignedAt, staffUserID, staffSignature, staffSignedAt,
 	).Scan(
 		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
 		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
@@ -257,4 +262,102 @@ func (r *MembershipRepo) MembershipTypeApplySalesTax(ctx context.Context, member
 		return true, err
 	}
 	return applySalesTax, nil
+}
+
+// ReconcileLifecycleStatuses normalizes membership status from start_date + latest payment status.
+// If tenantID is nil, it reconciles across all tenants.
+func (r *MembershipRepo) ReconcileLifecycleStatuses(ctx context.Context, tenantID *uuid.UUID) (int64, error) {
+	query := `
+		WITH latest_payment AS (
+			SELECT DISTINCT ON (p.tenant_id, p.membership_id)
+				p.tenant_id, p.membership_id, p.status
+			FROM payments p
+			ORDER BY p.tenant_id, p.membership_id, COALESCE(p.paid_date, p.due_date, p.created_at) DESC, p.created_at DESC
+		),
+		targets AS (
+			SELECT
+				m.id,
+				m.tenant_id,
+				CASE
+					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
+					WHEN lp.status = 'succeeded' THEN 'active'
+					ELSE m.status
+				END AS target_status
+			FROM memberships m
+			LEFT JOIN latest_payment lp
+				ON lp.tenant_id = m.tenant_id
+				AND lp.membership_id = m.id
+			WHERE m.status NOT IN ('cancelled', 'expired')
+			  AND ($1::uuid IS NULL OR m.tenant_id = $1::uuid)
+		)
+		UPDATE memberships m
+		SET status = t.target_status,
+		    updated_at = NOW()
+		FROM targets t
+		WHERE m.id = t.id
+		  AND m.tenant_id = t.tenant_id
+		  AND m.status <> t.target_status
+	`
+	cmd, err := r.db.Pool.Exec(ctx, query, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("reconcile membership lifecycle statuses: %w", err)
+	}
+	return cmd.RowsAffected(), nil
+}
+
+// CountLifecycleStatusDrift counts memberships whose current status differs from canonical target status.
+// If tenantID is nil, it counts drift across all tenants.
+func (r *MembershipRepo) CountLifecycleStatusDrift(ctx context.Context, tenantID *uuid.UUID) (int64, error) {
+	query := `
+		WITH latest_payment AS (
+			SELECT DISTINCT ON (p.tenant_id, p.membership_id)
+				p.tenant_id, p.membership_id, p.status
+			FROM payments p
+			ORDER BY p.tenant_id, p.membership_id, COALESCE(p.paid_date, p.due_date, p.created_at) DESC, p.created_at DESC
+		),
+		targets AS (
+			SELECT
+				m.id,
+				m.tenant_id,
+				m.status AS current_status,
+				CASE
+					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
+					WHEN lp.status = 'succeeded' THEN 'active'
+					ELSE m.status
+				END AS target_status
+			FROM memberships m
+			LEFT JOIN latest_payment lp
+				ON lp.tenant_id = m.tenant_id
+				AND lp.membership_id = m.id
+			WHERE m.status NOT IN ('cancelled', 'expired')
+			  AND ($1::uuid IS NULL OR m.tenant_id = $1::uuid)
+		)
+		SELECT COUNT(*)
+		FROM targets
+		WHERE current_status <> target_status
+	`
+	var count int64
+	if err := r.db.Pool.QueryRow(ctx, query, tenantID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count membership lifecycle drift: %w", err)
+	}
+	return count, nil
+}
+
+// ActivateScheduledDue marks scheduled memberships as active when start_date is due.
+// If tenantID is nil, it applies across all tenants.
+func (r *MembershipRepo) ActivateScheduledDue(ctx context.Context, tenantID *uuid.UUID) (int64, error) {
+	cmd, err := r.db.Pool.Exec(ctx, `
+		UPDATE memberships
+		SET status = 'active',
+		    updated_at = NOW()
+		WHERE status = 'scheduled'
+		  AND start_date <= (NOW() AT TIME ZONE 'UTC')::date
+		  AND ($1::uuid IS NULL OR tenant_id = $1::uuid)
+	`, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("activate scheduled due memberships: %w", err)
+	}
+	return cmd.RowsAffected(), nil
 }

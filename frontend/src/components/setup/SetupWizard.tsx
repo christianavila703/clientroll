@@ -338,10 +338,11 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
   const [loaded, setLoaded] = useState(false);
   const [detectingColors, setDetectingColors] = useState(false);
   const [colorMessage, setColorMessage] = useState("");
+  const [signedBrowsePath, setSignedBrowsePath] = useState("");
 
   useEffect(() => {
-    api.getTenantSettings()
-      .then((res) => {
+    Promise.all([api.getTenantSettings(), api.getSignupLinks().catch(() => null)])
+      .then(([res, links]) => {
         const t = res as Record<string, unknown>;
         setData({
           slug: String(t.slug || ""),
@@ -355,6 +356,10 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
             ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
             : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
         });
+        const linkData = links as { browse_path?: string } | null;
+        if (linkData?.browse_path) {
+          setSignedBrowsePath(linkData.browse_path);
+        }
         setLoaded(true);
       })
       .catch(() => { onError("Unable to load settings."); setLoaded(true); });
@@ -369,7 +374,9 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
     finally { setSaving(false); }
   };
 
-  const joinUrl = data.slug ? `${window.location.origin}/join/${data.slug}` : "";
+  const joinUrl = signedBrowsePath
+    ? `${window.location.origin}${signedBrowsePath}`
+    : (data.slug ? `${window.location.origin}/join/${data.slug}` : "");
   const toggleCurrency = (code: string, checked: boolean) => {
     setData((prev) => {
       const next = new Set(prev.enabled_currencies || []);

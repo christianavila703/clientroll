@@ -75,3 +75,23 @@ Retry behavior:
 
 - Failed deliveries are retried with exponential backoff.
 - Due retry jobs are re-queued automatically by the webhook worker.
+
+## Internal Webhook Ops (Platform Admin Only)
+
+These endpoints are internal reliability tooling and are not tenant-facing:
+
+- `GET /api/platform/webhooks/stripe/failures`
+- `POST /api/platform/webhooks/stripe/replay`
+- `POST /api/platform/webhooks/stripe/replay-failures`
+- `GET /api/platform/webhooks/gocardless/failures`
+- `POST /api/platform/webhooks/gocardless/reconcile-payment`
+- `GET /api/platform/webhooks/inbound/failures`
+- `GET /api/platform/ops/membership-status-drift`
+- `POST /api/platform/ops/membership-status-reconcile`
+- `GET /api/platform/ops/health-snapshot`
+- `POST /api/platform/ops/reconcile-runbook`
+
+Notes:
+
+- Use these for operational monitoring/recovery of failed inbound processing.
+- Tenant users should only see friendly payment state messages, never raw webhook internals.

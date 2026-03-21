@@ -224,6 +224,12 @@ func (h *GoCardlessHandler) RegisterTenantRoutes(r chi.Router) {
 	r.Get("/gocardless/payment-status/{paymentID}", h.GetPaymentStatusHandler)
 }
 
+// RegisterPlatformRoutes registers internal platform-admin operational routes.
+func (h *GoCardlessHandler) RegisterPlatformRoutes(r chi.Router) {
+	r.Get("/webhooks/gocardless/failures", h.ListFailedGoCardlessWebhookEvents)
+	r.Post("/webhooks/gocardless/reconcile-payment", h.ReconcileGoCardlessPayment)
+}
+
 // RegisterPublicRoutes registers public routes (no auth: OAuth callback, webhook).
 func (h *GoCardlessHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/gocardless/oauth/callback", h.OAuthCallback)
@@ -520,6 +526,9 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 		if processErr != nil {
 			observability.PaymentLifecycleMetrics.IncWebhookFailed()
+			if ev.ID != "" && h.eventRepo != nil {
+				_ = h.eventRepo.MarkFailed(r.Context(), tenantID, gocardlessProvider, ev.ID, processErr.Error())
+			}
 			log.Printf("gocardless.webhook process_failed tenant=%s resource=%s action=%s event=%s err=%v", tenantID, ev.ResourceType, ev.Action, ev.ID, processErr)
 			processingFailed = true
 			continue
@@ -527,6 +536,7 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		observability.PaymentLifecycleMetrics.IncWebhookProcessed()
 		if ev.ID != "" && h.eventRepo != nil {
 			if err := h.eventRepo.MarkProcessed(r.Context(), tenantID, gocardlessProvider, ev.ID); err != nil {
+				_ = h.eventRepo.MarkFailed(r.Context(), tenantID, gocardlessProvider, ev.ID, err.Error())
 				log.Printf("gocardless.webhook mark_processed_failed tenant=%s event=%s err=%v", tenantID, ev.ID, err)
 				processingFailed = true
 			}
@@ -539,6 +549,104 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// ListFailedGoCardlessWebhookEvents returns recent failed GoCardless inbound webhook processing events.
+func (h *GoCardlessHandler) ListFailedGoCardlessWebhookEvents(w http.ResponseWriter, r *http.Request) {
+	if h.eventRepo == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}, "count": 0})
+		return
+	}
+	limit := 50
+	if s := strings.TrimSpace(r.URL.Query().Get("limit")); s != "" {
+		if parsed, err := strconv.Atoi(s); err == nil {
+			limit = parsed
+		}
+	}
+	events, err := h.eventRepo.ListFailed(r.Context(), gocardlessProvider, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list failed GoCardless events")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
+		"count":  len(events),
+	})
+}
+
+// ReconcileGoCardlessPayment re-fetches a provider payment and re-applies canonical payment/membership status mapping.
+// Platform-admin only route for operational recovery.
+func (h *GoCardlessHandler) ReconcileGoCardlessPayment(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TenantID  string `json:"tenant_id"`
+		PaymentID string `json:"payment_id"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	tenantID, err := uuid.Parse(strings.TrimSpace(input.TenantID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant_id")
+		return
+	}
+	paymentID := strings.TrimSpace(input.PaymentID)
+	if paymentID == "" {
+		writeError(w, http.StatusBadRequest, "payment_id is required")
+		return
+	}
+	prov, err := h.getGoCardlessProvider(r.Context(), tenantID)
+	if err != nil || prov == nil {
+		writeError(w, http.StatusBadGateway, "GoCardless not configured for tenant")
+		return
+	}
+	info, err := prov.GetPayment(r.Context(), paymentID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to fetch GoCardless payment")
+		return
+	}
+	action := reconcileActionFromGoCardlessStatus(info.Status)
+	if action == "" {
+		writeError(w, http.StatusBadRequest, "Unsupported payment status for reconcile")
+		return
+	}
+	if err := h.handlePaymentEvent(r.Context(), tenantID, paymentID, action, "manual_reconcile", "manual_reconcile"); err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to reconcile payment")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "reconciled",
+		"tenant_id":   tenantID,
+		"payment_id":  paymentID,
+		"gc_status":   info.Status,
+		"gc_action":   action,
+		"charge_date": info.ChargeDate,
+	})
+}
+
+func reconcileActionFromGoCardlessStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "paid_out":
+		return "paid_out"
+	case "confirmed":
+		return "confirmed"
+	case "submitted":
+		return "submitted"
+	case "pending_submission":
+		return "pending_submission"
+	case "failed":
+		return "failed"
+	case "late_failure_settled":
+		return "late_failure_settled"
+	case "charged_back":
+		return "charged_back"
+	case "chargeback_settled":
+		return "chargeback_settled"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return ""
+	}
 }
 
 func (h *GoCardlessHandler) handleMandateEvent(ctx context.Context, tenantID uuid.UUID, mandateID, action, reason, cause string) {
@@ -713,6 +821,11 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
 		return err
+	}
+	if p.MembershipID != uuid.Nil {
+		if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, p.MembershipID, status, time.Now().UTC()); err != nil {
+			log.Printf("gocardless membership status sync failed tenant=%s membership=%s payment=%s status=%s err=%v", tenantID, p.MembershipID, p.ID, status, err)
+		}
 	}
 	if status == "disputed" && isDispute && h.disputeRepo != nil {
 		var providerDisputeID *string
@@ -893,20 +1006,20 @@ func (h *GoCardlessHandler) sendPaymentEmail(ctx context.Context, tenantID uuid.
 	}
 	money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
 	vars := map[string]string{
-		"admin_name":              "",
-		"client_name":             client.Name,
-		"amount":                  money(p.Amount), // backward compatibility in existing templates
-		"total_charged":           money(p.Amount),
-		"amount_due":              money(p.Amount),
-		"base_amount":             money(p.BaseAmount),
-		"tax_amount":              money(p.TaxAmount),
-		"processing_fee_amount":   money(p.ProcessingFeeAmount),
-		"to_organisation_amount":  money(p.BaseAmount + p.TaxAmount),
-		"currency_code":           currencyCode,
-		"membership_title":        membershipTitle,
-		"payment_date":            time.Now().Format("2 January 2006"),
-		"failure_reason":          reason,
-		"company_name":            tenantName,
+		"admin_name":             "",
+		"client_name":            client.Name,
+		"amount":                 money(p.Amount), // backward compatibility in existing templates
+		"total_charged":          money(p.Amount),
+		"amount_due":             money(p.Amount),
+		"base_amount":            money(p.BaseAmount),
+		"tax_amount":             money(p.TaxAmount),
+		"processing_fee_amount":  money(p.ProcessingFeeAmount),
+		"to_organisation_amount": money(p.BaseAmount + p.TaxAmount),
+		"currency_code":          currencyCode,
+		"membership_title":       membershipTitle,
+		"payment_date":           time.Now().Format("2 January 2006"),
+		"failure_reason":         reason,
+		"company_name":           tenantName,
 	}
 
 	go func() {

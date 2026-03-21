@@ -97,7 +97,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
       if (currentTerm.bonuses) {
         setBonuses(currentTerm.bonuses);
       } else {
-        fetch(`/api/signup/${tenantSlug}/${membership.slug}/term/${currentTerm.id}/bonuses`)
+        fetch(`/api/signup/${tenantSlug}/${membership.slug}/term/${currentTerm.id}/bonuses${window.location.search || ""}`)
           .then((r) => r.json())
           .then((data) => setBonuses(data.bonuses || []))
           .catch(() => setBonuses([]));

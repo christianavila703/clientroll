@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import MembershipSelect from "./MembershipSelect";
 import MembershipDetail from "./MembershipDetail";
 import AgreementForm from "./AgreementForm";
@@ -21,6 +21,7 @@ type Tenant = TenantBranding;
 export default function SignupPage() {
   const { tenantSlug, membershipSlug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [memberships, setMemberships] = useState<MembershipType[]>([]);
   const [selected, setSelected] = useState<MembershipType | null>(null);
@@ -42,7 +43,7 @@ export default function SignupPage() {
       const stripeState = params.get("stripe");
       if (membershipSlug) {
         // Direct link to specific membership
-        const res = await fetch(`/api/signup/${tenantSlug}/${membershipSlug}`);
+        const res = await fetch(`/api/signup/${tenantSlug}/${membershipSlug}${location.search}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
@@ -54,7 +55,7 @@ export default function SignupPage() {
         setStep("detail");
       } else {
         // Browse all memberships
-        const res = await fetch(`/api/signup/${tenantSlug}`);
+        const res = await fetch(`/api/signup/${tenantSlug}${location.search}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
         setTenant(data.tenant);
@@ -94,7 +95,8 @@ export default function SignupPage() {
     setLoadingDetail(true);
     setError("");
     try {
-      const res = await fetch(`/api/signup/${tenantSlug}/${mt.slug}`);
+      const qs = location.search || "";
+      const res = await fetch(`/api/signup/${tenantSlug}/${mt.slug}${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Unable to load membership details.");
       setSelected((data.membership as MembershipType) || mt);
@@ -173,7 +175,7 @@ export default function SignupPage() {
             onBack={() => {
               if (membershipSlug) {
                 // Came via direct link (/:tenantSlug/:membershipSlug) — navigate to browse page
-                navigate(`/join/${tenantSlug}`);
+                navigate(`/join/${tenantSlug}${location.search || ""}`);
               } else {
                 // Already on browse route, just switch step
                 setStep("select");

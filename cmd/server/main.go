@@ -112,6 +112,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	tenantMW := middleware.NewTenantMiddleware(db)
 	rateLimiter := middleware.NewAuthRateLimiter(rdb)
 	loginLimiter := middleware.NewLoginRateLimiter(rdb)
+	signupLimiter := middleware.NewSignupRateLimiter(rdb)
 	auditMW := middleware.NewAuditMiddleware()
 
 	// Repositories
@@ -142,7 +143,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(userRepo, adminRepo, tenantRepo, jwtMgr, sessionMgr)
-	platformHandler := handlers.NewPlatformHandler(tenantRepo, userRepo)
+	platformHandler := handlers.NewPlatformHandler(db, tenantRepo, userRepo, memberRepo)
 	platformBillingHandler := handlers.NewPlatformBillingHandler(cfg.AppURL, enc, platformBillingConfigRepo, tenantRepo, tenantSubRepo, tenantUsageRepo, tenantInvoiceRepo)
 	platformBillingWebhookHandler := handlers.NewPlatformBillingWebhookHandler(enc, platformBillingConfigRepo, tenantSubRepo, tenantInvoiceRepo)
 	settingsHandler := handlers.NewSettingsHandler(settingsRepo, tenantRepo, tenantEmailTemplateRepo)
@@ -208,8 +209,11 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		// Public files (signup images, no auth)
 		fileHandler.RegisterPublicRoutes(r)
 
-		// Public signup flow (no auth required)
-		signupHandler.RegisterPublicRoutes(r)
+		// Public signup flow (no auth required, but rate-limited)
+		r.Group(func(r chi.Router) {
+			r.Use(signupLimiter.Limit)
+			signupHandler.RegisterPublicRoutes(r)
+		})
 
 		// GoCardless OAuth callback and webhook (no auth)
 		gocardlessHandler.RegisterPublicRoutes(r)
@@ -303,6 +307,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				mtHandler.RegisterRoutes(r)
 				termsHandler.RegisterRoutes(r)
 				clientHandler.RegisterRoutes(r)
+				signupHandler.RegisterTenantRoutes(r)
 
 				// Payments + Reports (Phase 6)
 				paymentHandler.RegisterRoutes(r)
@@ -335,6 +340,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				r.Use(authMW.RequirePlatformAdmin)
 				platformHandler.RegisterRoutes(r)
 				platformBillingHandler.RegisterRoutes(r)
+				stripeWebhookHandler.RegisterPlatformRoutes(r)
+				gocardlessHandler.RegisterPlatformRoutes(r)
+				inboundWebhookHandler.RegisterPlatformRoutes(r)
 				// Phase 8: Platform billing
 			})
 		})

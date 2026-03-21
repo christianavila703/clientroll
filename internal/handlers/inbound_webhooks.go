@@ -32,6 +32,11 @@ type InboundWebhookHandler struct {
 	encryptor  *database.Encryptor
 }
 
+// RegisterPlatformRoutes registers internal platform-admin operational routes.
+func (h *InboundWebhookHandler) RegisterPlatformRoutes(r chi.Router) {
+	r.Get("/webhooks/inbound/failures", h.ListFailedInboundWebhookEvents)
+}
+
 // NewInboundWebhookHandler creates a new inbound webhook handler.
 func NewInboundWebhookHandler(
 	clientRepo *repository.ClientRepo,
@@ -153,6 +158,9 @@ func (h *InboundWebhookHandler) CreateClient(w http.ResponseWriter, r *http.Requ
 
 	if err := h.clientRepo.DB().SetTenantContext(r.Context(), key.TenantID.String()); err != nil {
 		log.Printf("inbound webhook set tenant context failed tenant=%s err=%v", key.TenantID, err)
+		if h.eventRepo != nil {
+			_ = h.eventRepo.MarkFailed(r.Context(), key.TenantID, inboundWebhookProvider, payload.EventID, err.Error())
+		}
 		writeError(w, http.StatusInternalServerError, "Failed to process webhook")
 		return
 	}
@@ -178,6 +186,9 @@ func (h *InboundWebhookHandler) CreateClient(w http.ResponseWriter, r *http.Requ
 	created, err := h.clientRepo.Create(r.Context(), key.TenantID, &client)
 	if err != nil {
 		log.Printf("inbound webhook create client failed tenant=%s key_id=%s err=%v", key.TenantID, key.KeyID, err)
+		if h.eventRepo != nil {
+			_ = h.eventRepo.MarkFailed(r.Context(), key.TenantID, inboundWebhookProvider, payload.EventID, err.Error())
+		}
 		writeError(w, http.StatusInternalServerError, "Failed to create client")
 		return
 	}
@@ -191,6 +202,29 @@ func (h *InboundWebhookHandler) CreateClient(w http.ResponseWriter, r *http.Requ
 		"event_id":  payload.EventID,
 		"tenant_id": key.TenantID,
 		"client":    created,
+	})
+}
+
+// ListFailedInboundWebhookEvents returns recent failed custom inbound webhook processing events.
+func (h *InboundWebhookHandler) ListFailedInboundWebhookEvents(w http.ResponseWriter, r *http.Request) {
+	if h.eventRepo == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}, "count": 0})
+		return
+	}
+	limit := 50
+	if s := strings.TrimSpace(r.URL.Query().Get("limit")); s != "" {
+		if parsed, err := strconv.Atoi(s); err == nil {
+			limit = parsed
+		}
+	}
+	events, err := h.eventRepo.ListFailed(r.Context(), inboundWebhookProvider, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list failed inbound webhook events")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
+		"count":  len(events),
 	})
 }
 

@@ -14,11 +14,13 @@ import (
 
 	"clientroll/internal/database"
 	"clientroll/internal/events"
+	"clientroll/internal/observability"
 	"clientroll/internal/repository"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
+	stripeevent "github.com/stripe/stripe-go/v82/event"
 	"github.com/stripe/stripe-go/v82/subscription"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
@@ -72,15 +74,25 @@ func (h *StripeWebhookHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/webhooks/stripe/{tenantSlug}", h.Webhook)
 }
 
+// RegisterPlatformRoutes registers internal platform-admin webhook ops routes.
+func (h *StripeWebhookHandler) RegisterPlatformRoutes(r chi.Router) {
+	r.Get("/webhooks/stripe/failures", h.ListFailedStripeWebhookEvents)
+	r.Post("/webhooks/stripe/replay", h.ReplayStripeWebhookEvent)
+	r.Post("/webhooks/stripe/replay-failures", h.ReplayFailedStripeWebhookEvents)
+}
+
 // Webhook handles Stripe events for a specific tenant slug.
 func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
+	observability.PaymentLifecycleMetrics.IncWebhookReceived()
 	tenantSlug := chi.URLParam(r, "tenantSlug")
 	if tenantSlug == "" {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusBadRequest, "Missing tenant slug")
 		return
 	}
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
 	if err != nil || tenant == nil {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusNotFound, "Tenant not found")
 		return
 	}
@@ -94,6 +106,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, err := h.encryptor.Decrypt(creds.APISecretEncrypted)
 	if err != nil || secret == "" {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		log.Printf("stripe webhook secret decrypt failed tenant=%s slug=%s err=%v", tenant.ID, tenantSlug, err)
 		writeError(w, http.StatusUnauthorized, "Invalid Stripe webhook secret")
 		return
@@ -102,6 +115,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
@@ -112,6 +126,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true},
 	)
 	if err != nil {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		sigHeader := r.Header.Get("Stripe-Signature")
 		log.Printf("stripe webhook signature verify failed tenant=%s slug=%s payload_len=%d sig_header_len=%d err=%v", tenant.ID, tenantSlug, len(payload), len(sigHeader), err)
 		writeError(w, http.StatusUnauthorized, "Invalid Stripe signature")
@@ -119,6 +134,7 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.SetTenantContext(r.Context(), tenant.ID.String()); err != nil {
+		observability.PaymentLifecycleMetrics.IncWebhookRejected()
 		writeError(w, http.StatusInternalServerError, "Tenant context error")
 		return
 	}
@@ -133,51 +149,274 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 			stripeResourceIDFromRaw(event.Data.Raw, event.ID),
 		)
 		if recErr != nil {
+			observability.PaymentLifecycleMetrics.IncWebhookFailed()
 			writeError(w, http.StatusInternalServerError, "Webhook dedupe failed")
 			return
 		}
 		if !inserted {
+			observability.PaymentLifecycleMetrics.IncWebhookDuplicate()
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 	}
 
-	var handleErr error
-	switch event.Type {
-	case "checkout.session.completed":
-		handleErr = h.handleCheckoutCompleted(r.Context(), tenant.ID, event)
-	case "checkout.session.expired":
-		handleErr = h.handleCheckoutFailed(r.Context(), tenant.ID, event)
-	case "invoice.payment_succeeded":
-		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, true)
-	case "invoice.payment_failed":
-		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, false)
-	case "invoice.finalized":
-		handleErr = h.handleInvoiceFinalized(r.Context(), tenant.ID, event)
-	case "payment_intent.processing", "payment_intent.succeeded", "payment_intent.payment_failed":
-		handleErr = h.handlePaymentIntentStripe(r.Context(), tenant.ID, event)
-	case "charge.succeeded", "charge.updated":
-		handleErr = h.handleChargeStripe(r.Context(), tenant.ID, event)
-	case "customer.subscription.deleted":
-		handleErr = h.handleSubscriptionDeleted(r.Context(), tenant.ID, event)
-	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
-		handleErr = h.handleDisputeEvent(r.Context(), tenant.ID, event)
-	case "charge.refunded", "refund.updated":
-		handleErr = h.handleRefundEvent(r.Context(), tenant.ID, event)
-	}
+	handleErr := h.processStripeEvent(r.Context(), tenant.ID, event)
 	if handleErr != nil {
+		observability.PaymentLifecycleMetrics.IncWebhookFailed()
+		if event.ID != "" && h.eventRepo != nil {
+			_ = h.eventRepo.MarkFailed(r.Context(), tenant.ID, "stripe", event.ID, handleErr.Error())
+		}
 		log.Printf("stripe webhook handler failed tenant=%s event=%s type=%s err=%v", tenant.ID, event.ID, event.Type, handleErr)
 		writeError(w, http.StatusInternalServerError, "Webhook processing failed")
 		return
 	}
 	if event.ID != "" && h.eventRepo != nil {
 		if err := h.eventRepo.MarkProcessed(r.Context(), tenant.ID, "stripe", event.ID); err != nil {
+			observability.PaymentLifecycleMetrics.IncWebhookFailed()
+			_ = h.eventRepo.MarkFailed(r.Context(), tenant.ID, "stripe", event.ID, err.Error())
 			log.Printf("stripe webhook mark processed failed tenant=%s event=%s type=%s err=%v", tenant.ID, event.ID, event.Type, err)
-			writeError(w, http.StatusInternalServerError, "Webhook processing failed")
-			return
 		}
 	}
+	observability.PaymentLifecycleMetrics.IncWebhookProcessed()
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *StripeWebhookHandler) processStripeEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
+	switch event.Type {
+	case "checkout.session.completed":
+		return h.handleCheckoutCompleted(ctx, tenantID, event)
+	case "checkout.session.expired":
+		return h.handleCheckoutFailed(ctx, tenantID, event)
+	case "invoice.payment_succeeded":
+		return h.handleInvoicePayment(ctx, tenantID, event, true)
+	case "invoice.payment_failed":
+		return h.handleInvoicePayment(ctx, tenantID, event, false)
+	case "invoice.finalized":
+		return h.handleInvoiceFinalized(ctx, tenantID, event)
+	case "payment_intent.processing", "payment_intent.succeeded", "payment_intent.payment_failed":
+		return h.handlePaymentIntentStripe(ctx, tenantID, event)
+	case "charge.succeeded", "charge.updated":
+		return h.handleChargeStripe(ctx, tenantID, event)
+	case "customer.subscription.deleted":
+		return h.handleSubscriptionDeleted(ctx, tenantID, event)
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
+		return h.handleDisputeEvent(ctx, tenantID, event)
+	case "charge.refunded", "refund.updated":
+		return h.handleRefundEvent(ctx, tenantID, event)
+	default:
+		return nil
+	}
+}
+
+// ListFailedStripeWebhookEvents returns internal failed Stripe webhook processing events.
+func (h *StripeWebhookHandler) ListFailedStripeWebhookEvents(w http.ResponseWriter, r *http.Request) {
+	if h.eventRepo == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"events": []interface{}{}, "count": 0})
+		return
+	}
+	limit := 50
+	var tenantID *uuid.UUID
+	if rawTenant := strings.TrimSpace(r.URL.Query().Get("tenant_id")); rawTenant != "" {
+		id, err := uuid.Parse(rawTenant)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid tenant_id")
+			return
+		}
+		tenantID = &id
+	}
+	if s := strings.TrimSpace(r.URL.Query().Get("limit")); s != "" {
+		if parsed, err := strconv.Atoi(s); err == nil {
+			limit = parsed
+		}
+	}
+	events, err := h.eventRepo.ListFailedFiltered(r.Context(), "stripe", tenantID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list failed Stripe events")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
+		"count":  len(events),
+	})
+}
+
+// ReplayFailedStripeWebhookEvents reprocesses failed Stripe inbound events in batch.
+// Platform-admin only route; dry_run defaults to true for safety.
+func (h *StripeWebhookHandler) ReplayFailedStripeWebhookEvents(w http.ResponseWriter, r *http.Request) {
+	if h.eventRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Webhook event repository unavailable")
+		return
+	}
+	var input struct {
+		TenantID string `json:"tenant_id"`
+		Limit    *int   `json:"limit"`
+		DryRun   *bool  `json:"dry_run"`
+	}
+	_ = decodeJSON(r, &input) // optional
+
+	var tenantFilter *uuid.UUID
+	if strings.TrimSpace(input.TenantID) != "" {
+		id, err := uuid.Parse(strings.TrimSpace(input.TenantID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid tenant_id")
+			return
+		}
+		tenantFilter = &id
+	}
+	limit := 50
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	dryRun := true
+	if input.DryRun != nil {
+		dryRun = *input.DryRun
+	}
+
+	failedEvents, err := h.eventRepo.ListFailedFiltered(r.Context(), "stripe", tenantFilter, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list failed Stripe events")
+		return
+	}
+	type replayResult struct {
+		TenantID uuid.UUID `json:"tenant_id"`
+		EventID  string    `json:"event_id"`
+		Type     string    `json:"type,omitempty"`
+		Status   string    `json:"status"`
+		Error    string    `json:"error,omitempty"`
+	}
+	results := make([]replayResult, 0, len(failedEvents))
+
+	for _, item := range failedEvents {
+		if dryRun {
+			results = append(results, replayResult{
+				TenantID: item.TenantID,
+				EventID:  item.EventID,
+				Status:   "would_replay",
+			})
+			continue
+		}
+		evType, replayErr := h.replayStripeEventByID(r.Context(), item.TenantID, item.EventID)
+		if replayErr != nil {
+			_ = h.eventRepo.MarkFailed(r.Context(), item.TenantID, "stripe", item.EventID, replayErr.Error())
+			results = append(results, replayResult{
+				TenantID: item.TenantID,
+				EventID:  item.EventID,
+				Type:     string(evType),
+				Status:   "failed",
+				Error:    replayErr.Error(),
+			})
+			continue
+		}
+		results = append(results, replayResult{
+			TenantID: item.TenantID,
+			EventID:  item.EventID,
+			Type:     string(evType),
+			Status:   "replayed",
+		})
+	}
+
+	replayed := 0
+	failed := 0
+	for _, r := range results {
+		if r.Status == "replayed" {
+			replayed++
+		}
+		if r.Status == "failed" {
+			failed++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "ok",
+		"dry_run":      dryRun,
+		"requested":    len(failedEvents),
+		"replayed":     replayed,
+		"failed":       failed,
+		"results":      results,
+		"tenant_scope": tenantFilter,
+	})
+}
+
+// ReplayStripeWebhookEvent re-fetches and reprocesses a Stripe event (platform-admin only).
+func (h *StripeWebhookHandler) ReplayStripeWebhookEvent(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TenantID string `json:"tenant_id"`
+		EventID  string `json:"event_id"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	tenantID, err := uuid.Parse(strings.TrimSpace(input.TenantID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant_id")
+		return
+	}
+	eventID := strings.TrimSpace(input.EventID)
+	if eventID == "" {
+		writeError(w, http.StatusBadRequest, "event_id is required")
+		return
+	}
+	evType, replayErr := h.replayStripeEventByID(r.Context(), tenantID, eventID)
+	if replayErr != nil {
+		if h.eventRepo != nil {
+			_ = h.eventRepo.MarkFailed(r.Context(), tenantID, "stripe", eventID, replayErr.Error())
+		}
+		writeError(w, http.StatusBadGateway, "Stripe replay processing failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":    "replayed",
+		"tenant_id": tenantID,
+		"event_id":  eventID,
+		"type":      evType,
+	})
+}
+
+func (h *StripeWebhookHandler) replayStripeEventByID(ctx context.Context, tenantID uuid.UUID, eventID string) (stripe.EventType, error) {
+	tenant, err := h.tenantRepo.FindByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		return "", fmt.Errorf("tenant not found")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || !creds.IsActive || strings.TrimSpace(creds.APIKeyEncrypted) == "" {
+		return "", fmt.Errorf("stripe not configured for tenant")
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(secretKey) == "" {
+		return "", fmt.Errorf("stripe credentials invalid")
+	}
+	stripe.Key = secretKey
+	ev, err := stripeevent.Get(eventID, nil)
+	if err != nil || ev == nil {
+		return "", fmt.Errorf("failed to fetch stripe event")
+	}
+	if !stripeEventBelongsToTenant(ev.Data.Raw, tenantID, tenant.Slug) {
+		return ev.Type, fmt.Errorf("stripe event does not belong to tenant")
+	}
+	if err := h.db.SetTenantContext(ctx, tenantID.String()); err != nil {
+		return ev.Type, fmt.Errorf("tenant context error")
+	}
+	if processErr := h.processStripeEvent(ctx, tenantID, *ev); processErr != nil {
+		return ev.Type, processErr
+	}
+	if h.eventRepo != nil && strings.TrimSpace(ev.ID) != "" {
+		_, _ = h.eventRepo.RecordReceived(
+			ctx,
+			tenantID,
+			"stripe",
+			ev.ID,
+			stripeResourceType(ev.Type),
+			stripeResourceIDFromRaw(ev.Data.Raw, ev.ID),
+		)
+		_ = h.eventRepo.MarkProcessed(ctx, tenantID, "stripe", ev.ID)
+	}
+	return ev.Type, nil
 }
 
 func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
@@ -255,6 +494,9 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	now := time.Now().UTC()
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
 		return fmt.Errorf("update payment succeeded status: %w", err)
+	}
+	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
+		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
@@ -516,6 +758,9 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
 			return fmt.Errorf("update invoice payment succeeded status: %w", err)
 		}
+		if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
+			log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+		}
 		if h.dispatcher != nil {
 			h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
 				"payment_id":    p.ID,
@@ -532,6 +777,9 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	reason := "invoice payment failed"
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
 		return fmt.Errorf("update invoice payment failed status: %w", err)
+	}
+	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "failed", time.Now().UTC()); err != nil {
+		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentFailed, tenantID, map[string]interface{}{
@@ -885,6 +1133,28 @@ func mapStripeDisputeState(eventType stripe.EventType, stripeStatus string) (str
 		return "resolved", "disputed", &now
 	}
 	return "open", "disputed", nil
+}
+
+func stripeEventBelongsToTenant(raw []byte, tenantID uuid.UUID, tenantSlug string) bool {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	mdRaw, ok := payload["metadata"]
+	if !ok || mdRaw == nil {
+		return false
+	}
+	md, ok := mdRaw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if tid, _ := md["tenant_id"].(string); strings.TrimSpace(tid) != "" && strings.EqualFold(strings.TrimSpace(tid), tenantID.String()) {
+		return true
+	}
+	if slug, _ := md["tenant_slug"].(string); strings.TrimSpace(slug) != "" && strings.EqualFold(strings.TrimSpace(slug), strings.TrimSpace(tenantSlug)) {
+		return true
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

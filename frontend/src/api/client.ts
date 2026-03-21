@@ -217,6 +217,7 @@ export const api = {
   // Memberships
   createMembership: (data: unknown) =>
     request("/tenant/memberships", { method: "POST", body: data }),
+  getSignupLinks: () => request("/tenant/signup-links"),
 
   // Membership Types
   listMembershipTypes: () => request("/tenant/membership-types"),
