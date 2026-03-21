@@ -232,7 +232,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               const mode = tenant.signup_price_display_mode || "total";
               const toWeekly = (total: number, months: number) => months ? total / ((months * 52) / 12) : null;
               const toMonthly = (total: number, months: number) => months ? total / months : null;
-              const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+              const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const weeklyValue = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
               const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
               const resolvedMode =
@@ -247,13 +247,13 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
                   : "total";
               if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
-                if (w) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
+                if (w) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
               }
               if (resolvedMode === "monthly") {
                 const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
-                if (m) return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
+                if (m) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
               }
-              return (<><p className="text-xl font-semibold tabular-nums" style={{ color: "var(--brandPrimary)" }}>{currencyCode} ${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
+              return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
             })()}
           </div>
         </div>
@@ -343,7 +343,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">Your Details</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Your Details</h2>
         <p className="text-[14px] text-gray-500 mt-1">Please fill in your personal information below.</p>
       </div>
 
@@ -407,7 +407,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
         ];
         const missing = required.filter(([k]) => !data[k]?.trim());
         if (missing.length) {
-          alert("Please fill in: " + missing.map(([, l]) => l).join(", "));
+          alert("Please complete: " + missing.map(([, l]) => l).join(", "));
           return;
         }
         onNext();
@@ -474,7 +474,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">Payment Details</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Payment Details</h2>
         <p className="text-[14px] text-gray-500 mt-1">Choose when to start and how you'd like to pay.</p>
       </div>
 
@@ -539,7 +539,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         </div>
         {selectedAmount > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <p className="text-[13px] font-semibold text-gray-800">Customer charge estimate</p>
+            <p className="text-[13px] font-semibold text-gray-800">Estimated charge</p>
             <div className="mt-2 space-y-1.5 text-[12px]">
               <div className="flex justify-between gap-3">
                 <span className="text-gray-600">Membership amount</span>
@@ -578,7 +578,7 @@ function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">Bank Account Details</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Bank Account Details</h2>
         <p className="text-[14px] text-gray-500 mt-1">Your bank details for direct debit payments.</p>
       </div>
 
@@ -622,7 +622,7 @@ function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">Terms & Conditions</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Terms & Conditions</h2>
         <p className="text-[14px] text-gray-500 mt-1">
           Please read and accept the following terms before signing.
         </p>
@@ -669,7 +669,7 @@ function SignSection({ signature, onSign, onSubmit, onBack, submitting, sendEmai
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">Authorisation</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Authorisation</h2>
         <p className="text-[14px] text-gray-500 mt-1">
           Please review and sign to complete your membership agreement.
         </p>
@@ -691,7 +691,7 @@ function SignSection({ signature, onSign, onSubmit, onBack, submitting, sendEmai
         {signature && (
           <div className="mt-3 flex items-center gap-2 text-[13px] text-emerald-600">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            Signature captured successfully
+            Signature saved
           </div>
         )}
       </div>

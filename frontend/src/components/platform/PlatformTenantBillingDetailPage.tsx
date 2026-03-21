@@ -21,7 +21,7 @@ export default function PlatformTenantBillingDetailPage() {
     setError("");
     api.getPlatformBillingTenant(tenantId)
       .then((d) => setData(d as TenantBillingDetail))
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load tenant billing"))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Unable to load tenant billing."))
       .finally(() => setLoading(false));
   };
 
@@ -38,12 +38,12 @@ export default function PlatformTenantBillingDetailPage() {
       if (url) window.open(url, "_blank", "noopener,noreferrer");
       else setError("Portal session did not return a URL");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to open billing portal");
+      setError(e instanceof ApiError ? e.message : "Unable to open billing portal.");
     }
   };
 
-  if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading tenant billing...</div>;
-  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">{error || "No data"}</div>;
+  if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Loading tenant billing...</div>;
+  if (!data) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">{error || "No data"}</div>;
 
   const sub = data.subscription;
 
@@ -51,7 +51,7 @@ export default function PlatformTenantBillingDetailPage() {
     <div className="max-w-5xl">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{data.tenant.name}</h1>
+          <h1 className="page-title">{data.tenant.name}</h1>
           <p className="mt-1 text-sm text-gray-500 font-mono">{data.tenant.slug}</p>
           <div className="mt-2">
             <Link to="/platform/billing" className="text-[13px] text-indigo-600 hover:text-indigo-700">← Back to billing</Link>

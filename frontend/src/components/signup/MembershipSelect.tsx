@@ -60,7 +60,7 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
     return feeTotal / durationMonths;
   };
   const formatMoney = (value: number) =>
-    value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const currencyCode = (mt: MembershipType) => ((mt as any).currency_code || "AUD").toUpperCase();
   const moneyWithCurrency = (mt: MembershipType, value: number) => `${currencyCode(mt)} $${formatMoney(value)}`;
   const minWeekly = (mt: MembershipType): number | null => {
@@ -90,7 +90,7 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
   return (
     <div>
       <div className="text-center mb-10">
-        <h1 className="text-3xl font-semibold text-gray-900 sm:text-4xl">
+        <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl">
           Choose Your Membership
         </h1>
         <p className="mt-3 text-[15px] text-gray-500 max-w-xl mx-auto">

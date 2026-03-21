@@ -40,7 +40,7 @@ export default function ServicesPage() {
       const data = await api.listServices() as { services?: Service[] };
       setServices(data.services || []);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load services");
+      setLoadError(err instanceof Error ? err.message : "Unable to load services.");
     } finally { setLoading(false); }
   };
 
@@ -52,7 +52,7 @@ export default function ServicesPage() {
       await api.deleteService(id);
       await load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete service");
+      alert(err instanceof Error ? err.message : "Unable to delete service. Please try again.");
     }
   };
 
@@ -95,7 +95,7 @@ export default function ServicesPage() {
         <div className="card px-5 py-12 text-center">
           <p className="text-[13px] text-gray-500">No services found</p>
           {services.length === 0 && (
-            <button onClick={() => setShowForm(true)} className="mt-3 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">+ Create your first service</button>
+            <button onClick={() => setShowForm(true)} className="mt-3 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">Create your first service</button>
           )}
         </div>
       ) : (
@@ -208,7 +208,7 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
       onSaved();
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message || "Failed to save service");
+        setError(err.message || "Unable to save service.");
       } else {
         setError(err instanceof Error ? err.message : "Failed");
       }
@@ -222,7 +222,7 @@ function ServiceForm({ initial, onSaved, onCancel }: { initial: Service | null; 
         <h3 className="text-sm font-semibold text-gray-900">{initial ? `Edit: ${initial.name}` : "New Service"}</h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCancel} className="btn-secondary text-[12px]">Cancel</button>
-          <button type="button" onClick={() => { const f = document.getElementById("svc-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+          <button type="button" onClick={() => { const f = document.getElementById("svc-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary">
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

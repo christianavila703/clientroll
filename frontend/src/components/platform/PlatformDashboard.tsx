@@ -23,7 +23,7 @@ export default function PlatformDashboard() {
         const d = data as { tenants: Tenant[] };
         setTenants(d.tenants || []);
       })
-      .catch((e) => { console.error(e); setError("Failed to load tenants"); })
+      .catch((e) => { console.error(e); setError("Unable to load tenants."); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -31,7 +31,7 @@ export default function PlatformDashboard() {
     <div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="page-title">
             Platform Dashboard
           </h1>
           <p className="mt-1 text-sm text-gray-500">

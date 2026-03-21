@@ -48,7 +48,7 @@ export default function StaffSignupLauncher() {
       const tenantSettings = tenantData as TenantSettings;
       setTypes((membershipData.membership_types || []).filter((mt: MembershipType) => mt.is_active));
       setTenant({ slug: tenantSettings.slug || "", name: tenantSettings.name || "" });
-    }).catch((e) => { console.error(e); setError("Failed to load signup launcher"); }).finally(() => setLoading(false));
+    }).catch((e) => { console.error(e); setError("Unable to load signup links. Please refresh and try again."); }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-400">Loading...</div>;
@@ -118,7 +118,7 @@ export default function StaffSignupLauncher() {
                   <p className="text-[12px] text-gray-500 mt-1 line-clamp-2">{mt.description}</p>
                 )}
                 <div className="flex items-baseline gap-1 mt-3">
-                  <span className="text-xl font-bold text-indigo-600 tabular-nums">{currencyCode(mt)} ${(() => {
+                  <span className="text-[15px] font-semibold text-indigo-600 tabular-nums">{currencyCode(mt)} ${(() => {
                     const opts = mt.term_options || [];
                     if (opts.length === 0) return "0";
                     if (opts.length === 1) return opts[0].fee_total.toLocaleString();
@@ -139,9 +139,9 @@ export default function StaffSignupLauncher() {
                     href={`/${tenant?.slug}/${mt.slug}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="btn-primary text-[12px] flex-1 justify-center"
+                    className="btn-primary flex-1 justify-center"
                   >
-                    Open on iPad
+                    Open signup
                   </a>
                   {/* Copy link */}
                   <CopyButton text={`${baseUrl}/${tenant?.slug}/${mt.slug}`} />

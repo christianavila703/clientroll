@@ -90,7 +90,7 @@ export default function PlatformBillingPage() {
         const t = tenantsRes as { tenants: TenantBillingRow[] };
         setTenants(t.tenants || []);
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load billing data"))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Unable to load billing data."))
       .finally(() => setLoading(false));
   };
 
@@ -126,7 +126,7 @@ export default function PlatformBillingPage() {
       setMessage("Billing config saved");
       fetchAll();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to save billing config");
+      setError(e instanceof ApiError ? e.message : "Unable to save billing configuration.");
     } finally {
       setSaving(false);
     }
@@ -140,17 +140,17 @@ export default function PlatformBillingPage() {
       if (url) window.open(url, "_blank", "noopener,noreferrer");
       else setError("Portal session did not return a URL");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to open billing portal");
+      setError(e instanceof ApiError ? e.message : "Unable to open billing portal.");
     }
   };
 
-  if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading billing...</div>;
+  if (loading) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Loading billing...</div>;
 
   return (
     <div>
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Platform Billing</h1>
+          <h1 className="page-title">Platform Billing</h1>
           <p className="mt-1 text-sm text-gray-500">Configure Stripe billing and review tenant billing status.</p>
         </div>
         <button className="btn-secondary" onClick={fetchAll}>Refresh</button>

@@ -103,7 +103,7 @@ export default function SetupWizard({ onClose }: Props) {
       markSetupComplete();
       onClose();
     } catch {
-      setError("Failed to complete setup");
+      setError("Unable to complete setup. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -236,7 +236,7 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
   useEffect(() => {
     api.getAgreementSettings()
       .then((res) => { setData(parseAgreementSettings(res)); setLoaded(true); })
-      .catch(() => { onError("Failed to load agreement settings"); setLoaded(true); });
+      .catch(() => { onError("Unable to load agreement settings."); setLoaded(true); });
   }, []);
 
   const handleSave = async () => {
@@ -244,7 +244,7 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
     try {
       await api.updateAgreementSettings(data);
       onSaved();
-    } catch { onError("Failed to save"); }
+    } catch { onError("Unable to save changes."); }
     finally { setSaving(false); }
   };
 
@@ -310,7 +310,7 @@ function AgreementStep({ onSaved, onError }: { onSaved: () => void; onError: (ms
       </div>
       <div className="mt-4 flex justify-end">
         <button onClick={handleSave} disabled={saving} className="btn-primary text-[13px]">
-          {saving ? "Saving..." : "Save Details"}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
     </div>
@@ -357,7 +357,7 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
         });
         setLoaded(true);
       })
-      .catch(() => { onError("Failed to load settings"); setLoaded(true); });
+      .catch(() => { onError("Unable to load settings."); setLoaded(true); });
   }, []);
 
   const handleSave = async () => {
@@ -365,7 +365,7 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
     try {
       await api.updateTenantSettings(data);
       onSaved();
-    } catch { onError("Failed to save"); }
+    } catch { onError("Unable to save changes."); }
     finally { setSaving(false); }
   };
 
@@ -539,7 +539,7 @@ function BrandingStep({ onSaved, onError }: { onSaved: () => void; onError: (msg
 
       <div className="flex justify-end">
         <button onClick={handleSave} disabled={saving} className="btn-primary text-[13px]">
-          {saving ? "Saving..." : "Save Branding"}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
     </div>
@@ -560,7 +560,7 @@ function IntegrationsStep({ onSaved, onError }: { onSaved: () => void; onError: 
       setIntegrations((intData as { integrations: typeof integrations }).integrations || []);
       setTenantSlug((tenantData as { slug?: string }).slug || "");
       setLoaded(true);
-    }).catch(() => { onError("Failed to load integrations"); setLoaded(true); });
+    }).catch(() => { onError("Unable to load integrations."); setLoaded(true); });
   };
 
   useEffect(() => { refresh(); }, []);
@@ -570,7 +570,7 @@ function IntegrationsStep({ onSaved, onError }: { onSaved: () => void; onError: 
       await api.saveIntegration(providerId, data);
       onSaved();
       refresh();
-    } catch { onError("Failed to save " + providerId); }
+    } catch { onError("Unable to save " + providerId + " settings."); }
   };
 
   const gc = integrations.find((i) => i.provider === "gocardless");
@@ -753,7 +753,7 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
       </div>
 
       <div className="flex justify-end">
-        <button onClick={handleSubmit} disabled={saving} className="btn-primary text-[12px]">
+        <button onClick={handleSubmit} disabled={saving} className="btn-primary">
           {saving ? "Saving..." : "Save"}
         </button>
       </div>
@@ -778,7 +778,7 @@ function MembershipStep({ onSaved, onError }: { onSaved: () => void; onError: (m
       });
       setCreated(true);
       onSaved();
-    } catch { onError("Failed to create membership type"); }
+    } catch { onError("Unable to create membership type."); }
     finally { setSaving(false); }
   };
 
@@ -843,7 +843,7 @@ function TermsStep({ onSaved, onError }: { onSaved: () => void; onError: (msg: s
       await api.createTerms({ title: title.trim(), content: content.trim() });
       setCreated(true);
       onSaved();
-    } catch { onError("Failed to create terms"); }
+    } catch { onError("Unable to create terms."); }
     finally { setSaving(false); }
   };
 

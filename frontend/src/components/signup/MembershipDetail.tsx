@@ -32,7 +32,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
     return feeTotal / durationMonths;
   };
   const formatMoney = (value: number) =>
-    value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
   const moneyWithCurrency = (value: number) => `${currencyCode} $${formatMoney(value)}`;
   const weeklyFromTerm = currentTerm?.fee_weekly ?? (currentTerm ? toWeekly(currentTerm.fee_total, currentTerm.duration_months) : null);
@@ -130,37 +130,12 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
         <div className="lg:col-span-2 space-y-8">
           {/* Title and value */}
           <div>
-            <h1 className="text-3xl sm:text-4xl font-semibold text-gray-900 mb-3">
+            <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-3">
               {membershipName(membership) || fallbackTitle(membership)}
             </h1>
             {membershipLevel(membership) && (
-              <p className="text-lg sm:text-xl font-medium mb-2.5" style={{ color: "var(--brandPrimary)" }}>
+              <p className="text-[15px] font-medium mb-2.5" style={{ color: "var(--brandPrimary)" }}>
                 {membershipLevel(membership)}
-              </p>
-            )}
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-medium tabular-nums" style={{ color: "var(--brandPrimary)" }}>
-                {showWeekly
-                  ? moneyWithCurrency(weeklyValue!)
-                  : showMonthly
-                  ? moneyWithCurrency(monthlyValue!)
-                  : `${currencyCode} $${(() => {
-                      if (currentTerm) return currentTerm.fee_total.toLocaleString();
-                      const opts = membership.term_options || [];
-                      if (opts.length > 0) return opts[0].fee_total.toLocaleString();
-                      return "0";
-                    })()}`}
-              </span>
-              <span className="text-[13px] text-gray-500">
-                {showWeekly ? "per week" : showMonthly ? "per month" : "total membership value"}
-              </span>
-            </div>
-            <p className="text-[12px] text-gray-500 mt-1">
-              {membership.apply_sales_tax !== false ? "Includes GST" : "No GST"}
-            </p>
-            {currentTerm && processingFeeLabelForTerm(currentTerm) && (
-              <p className="text-[12px] text-gray-500 mt-1">
-                {processingFeeLabelForTerm(currentTerm)}
               </p>
             )}
             {bonuses.length > 0 && (
@@ -173,7 +148,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
           {/* Description - selling copy */}
           {membership.description && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-3">About This Membership</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-3">About This Membership</h2>
               <p className="text-gray-700 text-[15px] leading-relaxed whitespace-pre-line">
                 {membership.description}
               </p>
@@ -183,7 +158,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
           {/* Inclusions - what's included */}
           {membership.inclusions && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">What's Included</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">What's Included</h2>
               <div className="text-gray-700 text-[15px] leading-relaxed whitespace-pre-line bg-gray-50 rounded-2xl p-6 border border-gray-200">
                 {membership.inclusions}
               </div>
@@ -193,7 +168,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
           {/* Benefits */}
           {(membership as any).benefits && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Expected Benefits</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Expected Benefits</h2>
               <div className="text-gray-700 text-[15px] leading-relaxed whitespace-pre-line bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-6 border border-green-200">
                 {(membership as any).benefits}
               </div>
@@ -203,7 +178,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
           {/* Bonuses section - visual cards */}
           {bonuses.length > 0 && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
                 Exclusive Bonuses with {currentTerm?.duration_months}-Month Term
               </h2>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -222,7 +197,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                     )}
                     <div className="flex items-center justify-between pt-3 border-t border-green-200">
                       <span className="text-sm text-gray-600">Bonus Value</span>
-                      <span className="text-xl font-semibold text-green-700 tabular-nums">
+                      <span className="text-[15px] font-semibold text-green-700 tabular-nums">
                         {currencyCode} ${bonus.value.toLocaleString()}
                       </span>
                     </div>
@@ -264,7 +239,7 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 text-xl font-medium text-gray-900 tabular-nums">
+                    <div className="mt-1 text-[15px] font-semibold text-gray-900 tabular-nums">
                       {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months))
                         ? moneyWithCurrency(term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || 0)
                         : resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months))

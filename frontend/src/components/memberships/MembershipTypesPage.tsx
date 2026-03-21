@@ -67,7 +67,7 @@ export default function MembershipTypesPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || "Failed to delete");
+        alert(data.error || "Unable to delete membership type. Please try again.");
         return;
       }
       loadTypes();
@@ -141,7 +141,7 @@ export default function MembershipTypesPage() {
           <p className="text-[13px] text-gray-500">No membership types found</p>
           {types.length === 0 && (
             <button onClick={() => setShowForm(true)} className="mt-3 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
-              + Create your first membership type
+              Create your first membership type
             </button>
           )}
         </div>
@@ -354,7 +354,7 @@ function CreateMembershipForm({ onCreated }: { onCreated: () => void }) {
         <h3 className="text-sm font-semibold text-gray-900">New Membership Type</h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCreated} className="btn-secondary text-[12px]">Cancel</button>
-          <button type="button" onClick={() => { const f = document.getElementById("create-mt-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+          <button type="button" onClick={() => { const f = document.getElementById("create-mt-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary">
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

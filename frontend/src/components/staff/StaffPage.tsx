@@ -48,7 +48,7 @@ export default function StaffPage() {
             onClick={() => setShowForm(!showForm)}
             className="btn-primary"
           >
-            + Add Staff
+            New team member
           </button>
         )}
       </div>
@@ -145,7 +145,7 @@ function CreateStaffForm({ onCreated }: { onCreated: () => void }) {
       await api.createStaff(form);
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create staff");
+      setError(err instanceof Error ? err.message : "Unable to create staff member.");
     } finally {
       setSaving(false);
     }

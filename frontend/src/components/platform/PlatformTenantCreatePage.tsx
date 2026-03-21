@@ -24,7 +24,7 @@ export default function PlatformTenantCreatePage() {
       await api.createTenant(form);
       navigate("/platform/tenants");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to create tenant");
+      setError(err instanceof ApiError ? err.message : "Unable to create tenant.");
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export default function PlatformTenantCreatePage() {
   return (
     <div className="max-w-3xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Create Tenant</h1>
+        <h1 className="page-title">Create Tenant</h1>
         <p className="mt-1 text-sm text-gray-500">Create a tenant and initial tenant admin user.</p>
       </div>
 

@@ -22,7 +22,7 @@ export default function LoginPage() {
       if (isPlatform) { await platformLogin(email, password); navigate("/platform"); }
       else { await login(email, password); navigate("/dashboard"); }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "An unexpected error occurred");
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     } finally { setLoading(false); }
   };
 
@@ -120,7 +120,7 @@ export default function LoginPage() {
             </div>
 
             <button type="submit" disabled={loading}
-              className="w-full rounded-lg bg-indigo-600 px-4 py-3 text-[15px] font-semibold text-white hover:bg-indigo-700 focus:outline-none disabled:opacity-50 transition-colors"
+              className="btn-primary w-full h-auto py-3 text-[15px]"
             >
               {loading ? "Logging in..." : "Log in"}
             </button>
@@ -134,7 +134,7 @@ export default function LoginPage() {
 
           <div className="mt-6 text-center">
             <button onClick={() => setIsPlatform(!isPlatform)} className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">
-              {isPlatform ? "← Tenant login" : "Platform admin →"}
+              {isPlatform ? "← Tenant login" : "Platform admin login →"}
             </button>
           </div>
         </div>

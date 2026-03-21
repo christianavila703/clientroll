@@ -22,7 +22,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const markError = (e: unknown) => {
       console.error(e);
-      setLoadError((prev) => prev || "Some dashboard data failed to load.");
+      setLoadError((prev) => prev || "Some dashboard data could not be loaded.");
     };
     api.getDashboardReport().then((d) => setSummary(d as DashboardSummary)).catch(markError);
     api.getMonthlyRevenueReport().then((d: any) => setMonthly(d.months || [])).catch(markError);
@@ -180,7 +180,7 @@ export default function DashboardPage() {
             <p className="text-[13px] font-medium text-indigo-900">You haven't finished setting up your account</p>
             <p className="text-[12px] text-indigo-700/80 mt-0.5">Complete the setup wizard to get the most out of ClientRoll.</p>
           </div>
-          <button onClick={outletContext.openWizard} className="btn-primary text-[12px] whitespace-nowrap ml-4">
+          <button onClick={outletContext.openWizard} className="btn-primary whitespace-nowrap ml-4">
             Continue Setup
           </button>
         </div>
@@ -201,18 +201,14 @@ export default function DashboardPage() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-5">
         <KpiCard label="Active Members" value={summary?.active_members ?? "–"} colour="indigo" />
         <KpiCard
           label="Collected this month"
           value={`$${fmtMoney(curMonthRevenue)}`}
           colour="emerald"
           delta={revDelta}
-          sub={
-            summary?.month_to_organisation_amount != null && summary.month_to_organisation_amount > 0
-              ? `Payment: $${fmtMoney(Math.max(0, (summary.month_to_organisation_amount || 0) - (summary.month_tax_amount || 0)))} · Tax: $${fmtMoney(summary.month_tax_amount || 0)} · Payment processing fee: $${fmtMoney(summary.month_surcharge_amount || 0)} · Total: $${fmtMoney(curMonthRevenue)}`
-              : "Total debited from customers"
-          }
+          sub="Total debited from customers"
         />
         <KpiCard label="Failed Payments" value={summary?.failed_payments ?? "–"} colour="red" alert={(summary?.failed_payments || 0) > 0} />
         <KpiCard label="Active Direct Debits" value={summary?.active_subscriptions ?? "–"} colour="violet" />
@@ -229,7 +225,7 @@ export default function DashboardPage() {
               {monthly.length > 0 ? (
                 <ReactECharts option={revenueChart} style={{ height: 280 }} />
               ) : (
-                <div className="flex h-64 items-center justify-center text-[13px] text-gray-400">No revenue data yet</div>
+                <div className="flex h-64 items-center justify-center text-[13px] text-gray-500">No revenue data yet</div>
               )}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 text-[13px]">
                 <div><span className="text-gray-500">Total Revenue</span><p className="font-semibold text-gray-900 tabular-nums">${fmtMoney(totalRevenue)}</p></div>
@@ -253,7 +249,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex h-32 items-center justify-center text-[13px] text-gray-400">No payments yet</div>
+                <div className="flex h-32 items-center justify-center text-[13px] text-gray-500">No payments yet</div>
               )}
             </div>
           </div>
@@ -265,7 +261,7 @@ export default function DashboardPage() {
               {breakdown.length > 0 ? (
                 <ReactECharts option={revenueByType} style={{ height: Math.max(120, breakdown.length * 50) }} />
               ) : (
-                <div className="flex h-24 items-center justify-center text-[13px] text-gray-400">No data yet</div>
+                <div className="flex h-24 items-center justify-center text-[13px] text-gray-500">No data yet</div>
               )}
             </div>
           </div>
@@ -297,7 +293,7 @@ export default function DashboardPage() {
                   </div>
                 </>
               ) : (
-                <div className="flex h-40 items-center justify-center text-[13px] text-gray-400">No data yet</div>
+                <div className="flex h-40 items-center justify-center text-[13px] text-gray-500">No data yet</div>
               )}
             </div>
           </div>
@@ -307,7 +303,7 @@ export default function DashboardPage() {
             <div className="card-header"><h3>Action Required</h3></div>
             <div className="divide-y divide-gray-100">
               <ActionItem label="Failed payments" count={summary?.failed_payments || 0} url="/payments" alert />
-              <ActionItem label="Pending DD payments" count={summary?.pending_payments || 0} url="/payments" />
+              <ActionItem label="Pending direct debit payments" count={summary?.pending_payments || 0} url="/payments" />
               <ActionItem label="Open disputes" count={summary?.open_disputes || 0} url="/payments" />
             </div>
           </div>

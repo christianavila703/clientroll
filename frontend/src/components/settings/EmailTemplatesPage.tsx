@@ -32,7 +32,7 @@ export default function EmailTemplatesPage() {
         if (!cancelled) setTemplates(res.templates || []);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load email templates");
+        if (!cancelled) setError(e instanceof ApiError ? e.message : "Unable to load email templates.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -63,7 +63,7 @@ export default function EmailTemplatesPage() {
       const updated = await api.updateEmailTemplate(template.id, { enabled });
       setTemplate(updated);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to update template");
+      setError(e instanceof ApiError ? e.message : "Unable to update template.");
     } finally {
       setRowBusy(null);
     }
@@ -80,7 +80,7 @@ export default function EmailTemplatesPage() {
       );
       setMessage(enabled ? "All templates in this category enabled" : "All templates in this category disabled");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to update category");
+      setError(e instanceof ApiError ? e.message : "Unable to update category.");
     } finally {
       setBulkBusy(false);
     }
@@ -151,7 +151,7 @@ export default function EmailTemplatesPage() {
 
       <div className="card overflow-hidden">
         {loading ? (
-          <div className="px-4 py-8 text-center text-[13px] text-gray-500">Loading templates...</div>
+          <div className="px-4 py-12 text-center text-[13px] text-gray-500">Loading templates...</div>
         ) : (
           <table className="data-table">
             <thead>
@@ -190,7 +190,7 @@ export default function EmailTemplatesPage() {
               ))}
               {!filtered.length && (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-[13px] text-gray-500">No templates found</td>
+                  <td colSpan={4} className="py-12 text-center text-[13px] text-gray-500">No templates found</td>
                 </tr>
               )}
             </tbody>
@@ -227,7 +227,7 @@ function TemplateEditor({ template, onBack, onSaved }: { template: Template; onB
       setTimeout(() => setMessage(""), 2000);
     } catch (e) {
       setSaving(false);
-      setError(e instanceof ApiError ? e.message : "Failed to save template");
+      setError(e instanceof ApiError ? e.message : "Unable to save template.");
     }
   };
 

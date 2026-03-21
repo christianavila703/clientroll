@@ -77,6 +77,12 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     membership: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
     bonus: "M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7",
   };
+  const labelForType = (type: string) => {
+    if (type === "client") return "Client";
+    if (type === "membership") return "Membership";
+    if (type === "bonus") return "Bonus";
+    return type;
+  };
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-gray-200 bg-white px-4 lg:px-5">
@@ -93,7 +99,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           value={query}
           onChange={(e) => search(e.target.value)}
           onFocus={() => { if (results.length > 0) setOpen(true); }}
-          placeholder="Search clients, memberships..."
+          placeholder="Search clients and memberships"
           className="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[13px] text-gray-600 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none transition-colors"
         />
         {loading && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin rounded-full border border-gray-300 border-t-gray-600" />}
@@ -112,7 +118,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
                   <p className="text-[13px] font-medium text-gray-900 truncate">{r.title}</p>
                   {r.subtitle && <p className="text-[11px] text-gray-400 truncate">{r.subtitle}</p>}
                 </div>
-                <span className="text-[10px] text-gray-300 uppercase flex-shrink-0">{r.type}</span>
+                <span className="text-[10px] text-gray-300 uppercase flex-shrink-0">{labelForType(r.type)}</span>
               </button>
             ))}
           </div>
@@ -163,7 +169,7 @@ function NotificationBell() {
       <button
         onClick={() => setOpen(!open)}
         className="relative rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-        title={loadFailed ? "Notifications (failed to load)" : "Notifications"}
+        title={loadFailed ? "Notifications unavailable" : "Notifications"}
       >
         <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg>
         {alertCount > 0 && (

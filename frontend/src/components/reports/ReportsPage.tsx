@@ -69,12 +69,12 @@ export default function ReportsPage() {
   useEffect(() => {
     api.getComprehensiveReport()
       .then((payload) => setData(normalizeReport(payload)))
-      .catch((e) => { console.error(e); setError("Failed to load reports"); })
+      .catch((e) => { console.error(e); setError("Unable to load reports."); })
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="card px-5 py-16 text-center text-[13px] text-gray-400">Loading reports...</div>;
-  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">{error || "Failed to load report data"}</div>;
+  if (!data) return <div className="card px-5 py-16 text-center text-[13px] text-gray-500">{error || "Unable to load report data."}</div>;
   const safeData = normalizeReport(data);
 
   const tabs = [
@@ -101,7 +101,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-4">
+      <div className="flex border-b border-gray-200 mb-5">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
@@ -160,27 +160,15 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
           label="Collected (this month)"
           value={`$${fmtMoney(data.month_collected_amount || data.month_revenue)}`}
           delta={revDelta}
-          sub={
-            data.month_to_organisation_amount != null && data.month_to_organisation_amount > 0
-              ? `Payment: $${fmtMoney(Math.max(0, (data.month_to_organisation_amount || 0) - (data.month_tax_amount || 0)))} · Tax: $${fmtMoney(data.month_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.month_surcharge_amount || 0)} · Total: $${fmtMoney(data.month_collected_amount || data.month_revenue)}`
-              : "Total from customers"
-          }
+          sub="Total from customers"
         />
         <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} sub="Monthly Recurring Revenue" />
         <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} sub="Annual Recurring Revenue" />
         <Kpi
           label="Collected (all time)"
           value={`$${fmtMoney(data.total_collected_amount || data.total_revenue)}`}
-          sub={
-            data.total_to_organisation_amount != null && data.total_to_organisation_amount > 0
-              ? `Payment: $${fmtMoney(Math.max(0, (data.total_to_organisation_amount || 0) - (data.total_tax_amount || 0)))} · Tax: $${fmtMoney(data.total_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.total_surcharge_amount || 0)} · Total: $${fmtMoney(data.total_collected_amount || data.total_revenue)}`
-              : "Total from customers"
-          }
+          sub="Total from customers"
         />
-      </div>
-
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] text-gray-600">
-        <strong className="text-gray-800">Payment</strong> + <strong className="text-gray-800">Tax</strong> + <strong className="text-gray-800">Payment processing fee</strong> = <strong className="text-gray-800">Total</strong>.
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card px-4 py-3">
@@ -242,7 +230,7 @@ function OverviewTab({ data, revDelta, successRate, churnRate }: { data: Report;
                     <p className="text-[13px] font-medium text-gray-900">{ue.client_name}</p>
                     <p className="text-[11px] text-gray-400">{ue.membership_type}</p>
                   </div>
-                  <span className={`text-[12px] font-medium tabular-nums ${ue.days_left <= 14 ? "text-red-600" : ue.days_left <= 30 ? "text-amber-600" : "text-gray-500"}`}>{ue.days_left}d left</span>
+                  <span className={`text-[12px] font-medium tabular-nums ${ue.days_left <= 14 ? "text-red-600" : ue.days_left <= 30 ? "text-amber-600" : "text-gray-500"}`}>{ue.days_left} days left</span>
                 </div>
               ))}
             </div>
@@ -325,10 +313,6 @@ function RevenueTab({ data }: { data: Report }) {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] text-gray-600">
-        Charts below use <strong>total collected from customers</strong> per month (same as payment <code className="text-[10px] bg-white px-1 rounded">amount</code> including surcharges).{" "}
-        For <strong>to your organisation</strong> (excl. surcharges) see Overview KPIs or the Payments list.
-      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi label="MRR" value={`$${fmtMoney(data.mrr)}`} />
         <Kpi label="ARR" value={`$${fmtMoney(data.arr)}`} />
@@ -336,11 +320,7 @@ function RevenueTab({ data }: { data: Report }) {
         <Kpi
           label="Collected (all time)"
           value={`$${fmtMoney(data.total_collected_amount || data.total_revenue)}`}
-          sub={
-            data.total_to_organisation_amount != null && data.total_to_organisation_amount > 0
-              ? `Payment: $${fmtMoney(Math.max(0, (data.total_to_organisation_amount || 0) - (data.total_tax_amount || 0)))} · Tax: $${fmtMoney(data.total_tax_amount || 0)} · Payment processing fee: $${fmtMoney(data.total_surcharge_amount || 0)} · Total: $${fmtMoney(data.total_collected_amount || data.total_revenue)}`
-              : undefined
-          }
+          sub="Total from customers"
         />
       </div>
       <div className="card overflow-hidden"><div className="card-header"><h3>Monthly trend (collected)</h3></div><div className="px-5 py-4">{data.monthly_revenue.length > 0 ? <ReactECharts option={areaChart} style={{ height: 320 }} /> : <Empty />}</div></div>

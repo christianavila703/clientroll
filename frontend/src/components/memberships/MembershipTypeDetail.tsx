@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import ImageUpload from "../common/ImageUpload";
 import type { Bonus, MembershipType, TermOption } from "../../types/memberships";
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
 const AVAILABLE_PAYMENT_FREQUENCIES = [
@@ -190,7 +191,7 @@ export default function MembershipTypeDetail() {
         </div>
       </div>
 
-      <div className="card mb-4">
+      <div className="card mb-5">
         <div className="card-header">
           <h3>Membership Identity</h3>
         </div>
@@ -281,18 +282,32 @@ export default function MembershipTypeDetail() {
             )}
           </div>
           <div className="mt-3 flex justify-end">
-            <button type="button" onClick={saveIdentity} disabled={savingIdentity} className="btn-primary text-[12px]">
-              {savingIdentity ? "Saving..." : "Save name/level"}
+            <button type="button" onClick={saveIdentity} disabled={savingIdentity} className="btn-primary">
+              {savingIdentity ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="card mb-4">
+      <div className="card mb-5">
         <div className="card-header">
           <h3>Content & Copy</h3>
         </div>
         <div className="card-body space-y-4">
+          <ImageUpload
+            label="Hero image"
+            hint="Shown at the top of the signup page. Recommended: 1200×600px, landscape."
+            currentUrl={mt.top_image_url || null}
+            entityType="membership"
+            onUploaded={async (url) => {
+              await api.updateMembershipType(mt.id, { top_image_url: url });
+              await load();
+            }}
+            onRemoved={async () => {
+              await api.updateMembershipType(mt.id, { top_image_url: null });
+              await load();
+            }}
+          />
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Summary</label>
             <p className="text-[11px] text-gray-400 mb-1.5">Short 1-2 line tagline shown on membership cards and the signup form header</p>
@@ -338,15 +353,15 @@ export default function MembershipTypeDetail() {
             />
           </div>
           <div className="flex justify-end">
-            <button type="button" onClick={saveContent} disabled={savingContent} className="btn-primary text-[12px]">
-              {savingContent ? "Saving..." : "Save content"}
+            <button type="button" onClick={saveContent} disabled={savingContent} className="btn-primary">
+              {savingContent ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-4">
+      <div className="flex border-b border-gray-200 mb-5">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
@@ -401,6 +416,7 @@ function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: M
     fee_quarterly: "",
     allow_upfront: true,
     num_payments: "",
+    continue_after_term: false,
     custom_schedule_enabled: false,
     custom_schedule_label: "",
     custom_schedule_amount: "",
@@ -518,6 +534,7 @@ function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: M
         fee_monthly: form.fee_monthly ? Number(form.fee_monthly) : null,
         fee_quarterly: form.fee_quarterly ? Number(form.fee_quarterly) : null,
         num_payments: form.num_payments ? Number(form.num_payments) : null,
+        continue_after_term: form.continue_after_term,
         custom_schedule_label: form.custom_schedule_label || null,
         custom_schedule_amount: form.custom_schedule_amount ? Number(form.custom_schedule_amount) : null,
         custom_schedule_interval_unit: form.custom_schedule_enabled ? form.custom_schedule_interval_unit : null,
@@ -538,7 +555,7 @@ function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: M
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-[13px] text-gray-500">Define pricing options for different contract lengths. Prices are tax-inclusive ({salesTaxName} {salesTaxPercent.toFixed(2)}%).</p>
-        <button onClick={() => setShowAdd(!showAdd)} className="btn-primary text-[12px]">+ Add term option</button>
+        <button onClick={() => setShowAdd(!showAdd)} className="btn-primary">Add term option</button>
       </div>
 
       {showAdd && (
@@ -573,8 +590,9 @@ function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: M
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_monthly} onChange={(e) => setForm({ ...form, fee_monthly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">auto-calc</span></label><input type="number" value={form.fee_quarterly} onChange={(e) => setForm({ ...form, fee_quarterly: e.target.value })} className="input-field" step="0.01" placeholder="Auto" /></div>
             <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" step="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">Use whole numbers only (especially for weekly/fortnightly plans).</p></div>
-            <div className="flex items-end pb-1">
+            <div className="flex flex-col gap-2 pb-1 justify-end">
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>
+              <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.continue_after_term} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Continue billing after term</label>
             </div>
             <div className="sm:col-span-2">
               <div className="mb-2">
@@ -621,7 +639,7 @@ function TermOptionsTab({ mt, salesTaxName, salesTaxPercent, onReload }: { mt: M
           </div>
           <div className="flex gap-2 justify-end pt-1">
             <button type="button" onClick={() => setShowAdd(false)} className="btn-secondary text-[12px]">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary text-[12px]">{saving ? "Adding..." : "Add"}</button>
+            <button type="submit" disabled={saving} className="btn-primary">{saving ? "Adding..." : "Add"}</button>
           </div>
         </form>
       )}
@@ -658,6 +676,7 @@ function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onRe
     fee_quarterly: to.fee_quarterly ?? "",
     allow_upfront: to.allow_upfront,
     num_payments: to.num_payments ?? "",
+    continue_after_term: !!to.continue_after_term,
     custom_schedule_enabled: !!to.custom_schedule_enabled,
     custom_schedule_label: to.custom_schedule_label ?? "",
     custom_schedule_amount: to.custom_schedule_amount ?? "",
@@ -716,6 +735,7 @@ function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onRe
         fee_monthly: form.fee_monthly !== "" ? Number(form.fee_monthly) : null,
         fee_quarterly: form.fee_quarterly !== "" ? Number(form.fee_quarterly) : null,
         num_payments: form.num_payments !== "" ? Number(form.num_payments) : null,
+        continue_after_term: form.continue_after_term,
         custom_schedule_label: form.custom_schedule_label || null,
         custom_schedule_amount: form.custom_schedule_amount !== "" ? Number(form.custom_schedule_amount) : null,
         custom_schedule_interval_unit: form.custom_schedule_enabled ? form.custom_schedule_interval_unit : null,
@@ -753,6 +773,7 @@ function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onRe
             <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `${currencyCode} $${to.fee_quarterly}` : "—"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">In Advance</span><span>{to.allow_upfront ? "Yes" : "Post-payment"}</span></div>
             <div><span className="text-gray-400 block mb-0.5"># Payments</span><span className="tabular-nums text-gray-900">{to.num_payments ? `${to.num_payments} then stops` : "Continuous"}</span></div>
+            <div><span className="text-gray-400 block mb-0.5">After Term</span><span>{to.continue_after_term ? "Continue billing" : "Stops"}</span></div>
             <div className="sm:col-span-3 lg:col-span-2"><span className="text-gray-400 block mb-0.5">Custom Plan</span><span className="text-gray-900">{to.custom_schedule_enabled ? (to.custom_schedule_label || `${to.custom_schedule_num_payments || 0} payments every ${to.custom_schedule_interval_count || 1} ${to.custom_schedule_interval_unit || "month"}${(to.custom_schedule_interval_count || 1) === 1 ? "" : "s"} @ ${currencyCode} $${to.custom_schedule_amount || 0}`) : "—"}</span></div>
           </div>
         </div>
@@ -766,7 +787,7 @@ function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onRe
         <span className="text-[13px] font-semibold text-indigo-700">Editing — {to.duration_months} months</span>
         <div className="flex items-center gap-2">
           <button onClick={() => setEditing(false)} className="btn-secondary text-[12px]">Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="btn-primary text-[12px]">{saving ? "Saving..." : "Save"}</button>
+          <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Saving..." : "Save"}</button>
         </div>
       </div>
       <div className="px-5 py-4">
@@ -816,10 +837,14 @@ function TermOptionCard({ termOption: to, currencyCode, salesTaxName, mtId, onRe
             <input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" step="1" placeholder="Continuous" />
             <p className="text-[10px] text-gray-400 mt-0.5">Blank = pay until end of term</p>
           </div>
-          <div className="flex items-end pb-1">
+          <div className="flex flex-col gap-2 pb-1 justify-end">
             <label className="flex items-center gap-2 text-[12px] text-gray-700">
               <input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
               Payment in advance
+            </label>
+            <label className="flex items-center gap-2 text-[12px] text-gray-700">
+              <input type="checkbox" checked={form.continue_after_term} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
+              Continue billing after term
             </label>
           </div>
           <div className="sm:col-span-3">

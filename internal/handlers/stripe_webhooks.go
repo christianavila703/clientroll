@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/subscription"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 
@@ -193,10 +194,13 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		}
 		return nil
 	}
-	// For subscription checkouts, rely on invoice events for ledger entries.
-	// This avoids double-counting the initial payment from both
-	// checkout.session.completed and invoice.payment_succeeded.
+	// For subscription checkouts: set cancel_at when term has an end (continue_after_term false).
+	// Then rely on invoice events for ledger entries.
 	if sess.Mode == stripe.CheckoutSessionModeSubscription {
+		if err := h.setSubscriptionCancelAtFromCheckout(ctx, tenantID, event.Data.Raw, metadata); err != nil {
+			log.Printf("stripe setSubscriptionCancelAtFromCheckout tenant=%s err=%v", tenantID, err)
+			// non-fatal: subscription is still created, just won't auto-end
+		}
 		return nil
 	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
@@ -234,6 +238,56 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		}))
 	}
 	return nil
+}
+
+// setSubscriptionCancelAtFromCheckout sets cancel_at on the Stripe subscription when the
+// membership term has an end (continue_after_term is false). Raw is the checkout.session object JSON.
+func (h *StripeWebhookHandler) setSubscriptionCancelAtFromCheckout(ctx context.Context, tenantID uuid.UUID, raw []byte, metadata map[string]string) error {
+	if metadata["continue_after_term"] == "true" {
+		return nil
+	}
+	cancelAtStr := strings.TrimSpace(metadata["cancel_at_timestamp"])
+	if cancelAtStr == "" {
+		return nil
+	}
+	cancelAt, err := strconv.ParseInt(cancelAtStr, 10, 64)
+	if err != nil || cancelAt <= 0 {
+		return nil
+	}
+	var sessRaw struct {
+		Subscription interface{} `json:"subscription"`
+	}
+	if err := json.Unmarshal(raw, &sessRaw); err != nil {
+		return fmt.Errorf("parse session: %w", err)
+	}
+	if sessRaw.Subscription == nil {
+		return nil
+	}
+	var subID string
+	switch v := sessRaw.Subscription.(type) {
+	case string:
+		subID = v
+	case map[string]interface{}:
+		if id, _ := v["id"].(string); id != "" {
+			subID = id
+		}
+	}
+	if subID == "" {
+		return fmt.Errorf("missing subscription id in session")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return fmt.Errorf("stripe not configured: %w", err)
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || secretKey == "" {
+		return fmt.Errorf("stripe credentials: %w", err)
+	}
+	stripe.Key = secretKey
+	_, err = subscription.Update(subID, &stripe.SubscriptionParams{
+		CancelAt: stripe.Int64(cancelAt),
+	})
+	return err
 }
 
 func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {

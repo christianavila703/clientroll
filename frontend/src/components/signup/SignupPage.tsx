@@ -75,7 +75,7 @@ export default function SignupPage() {
         setError("Card payment was cancelled. You can try again.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : "Unable to load signup page.");
     } finally {
       setLoading(false);
     }
@@ -96,7 +96,7 @@ export default function SignupPage() {
     try {
       const res = await fetch(`/api/signup/${tenantSlug}/${mt.slug}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load membership details");
+      if (!res.ok) throw new Error(data.error || "Unable to load membership details.");
       setSelected((data.membership as MembershipType) || mt);
       setTerms(data.terms || []);
       if (data.tenant) {
@@ -107,7 +107,7 @@ export default function SignupPage() {
       }
       setStep("detail");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load membership details");
+      setError(err instanceof Error ? err.message : "Unable to load membership details.");
     } finally {
       setLoadingDetail(false);
     }

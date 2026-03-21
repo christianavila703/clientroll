@@ -422,7 +422,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// --- Stripe card checkout path ---
 	if input.PaymentMethod == "card" {
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
@@ -554,7 +554,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// Stripe BECS Direct Debit path: redirect to Stripe Checkout with au_becs_debit
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax)
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate)
 			if err != nil {
 				log.Printf("Error creating Stripe BECS checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, "Direct debit setup failed")
@@ -761,7 +761,7 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -804,6 +804,12 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			"currency_code":  currencyCode,
 			"payment_freq":   frequency,
 		},
+	}
+	if !continueAfterTerm {
+		params.Metadata["continue_after_term"] = "false"
+		params.Metadata["cancel_at_timestamp"] = strconv.FormatInt(termEndTime.Unix(), 10)
+	} else {
+		params.Metadata["continue_after_term"] = "true"
 	}
 	if client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
@@ -877,7 +883,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 // createStripeBECSCheckoutSession creates a Stripe Checkout session restricted to
 // au_becs_debit (Australian direct debit). Stripe's hosted page collects bank details
 // and the BECS mandate agreement from the customer.
-func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool) (string, error) {
+func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -927,6 +933,12 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			"payment_freq":   frequency,
 			"payment_method": "direct_debit",
 		},
+	}
+	if !continueAfterTerm {
+		params.Metadata["continue_after_term"] = "false"
+		params.Metadata["cancel_at_timestamp"] = strconv.FormatInt(termEndTime.Unix(), 10)
+	} else {
+		params.Metadata["continue_after_term"] = "true"
 	}
 	if client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)

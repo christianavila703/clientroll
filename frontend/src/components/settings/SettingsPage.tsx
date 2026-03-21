@@ -74,7 +74,7 @@ function AgreementSettings() {
     api
       .getAgreementSettings()
       .then((res) => setData(res as AgreementData))
-      .catch((e) => { console.error(e); setMessage("Failed to load agreement settings"); });
+      .catch((e) => { console.error(e); setMessage("Unable to load agreement settings."); });
   }, []);
 
   const handleSave = async () => {
@@ -84,7 +84,7 @@ function AgreementSettings() {
       await api.updateAgreementSettings(data);
       setMessage("Settings saved successfully");
     } catch {
-      setMessage("Failed to save settings");
+      setMessage("Unable to save settings.");
     } finally {
       setSaving(false);
     }
@@ -170,7 +170,7 @@ function AgreementSettings() {
 
       <div className="mt-6 flex justify-end">
         <button onClick={handleSave} disabled={saving} className="btn-primary">
-          {saving ? "Saving..." : "Save Settings"}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
     </div>
@@ -237,7 +237,7 @@ function TenantSettings() {
           ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
           : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
       });
-    }).catch((e) => { console.error(e); setMessage("Failed to load organisation settings"); });
+    }).catch((e) => { console.error(e); setMessage("Unable to load organisation settings."); });
   }, []);
 
   const handleSave = async () => {
@@ -245,7 +245,7 @@ function TenantSettings() {
     try {
       await api.updateTenantSettings(data);
       setMessage("Settings saved successfully");
-    } catch { setMessage("Failed to save"); }
+    } catch { setMessage("Unable to save changes."); }
     finally { setSaving(false); }
   };
 
@@ -490,7 +490,7 @@ function TenantSettings() {
           <p className="text-[11px] text-gray-400 -mt-1">Shown after a client completes a membership signup. Can be overridden per membership type.</p>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Heading</label>
-            <input value={data.default_thankyou_heading || ""} onChange={(e) => setData({ ...data, default_thankyou_heading: e.target.value })} className="input-field" placeholder="Thank You!" />
+            <input value={data.default_thankyou_heading || ""} onChange={(e) => setData({ ...data, default_thankyou_heading: e.target.value })} className="input-field" placeholder="Thank you" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-gray-700 mb-1">Body text</label>
@@ -518,7 +518,7 @@ function TenantSettings() {
       </div>
 
       <div className="flex justify-end">
-        <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Saving..." : "Save Settings"}</button>
+        <button onClick={handleSave} disabled={saving} className="btn-primary">{saving ? "Saving..." : "Save"}</button>
       </div>
     </div>
   );
@@ -533,7 +533,7 @@ function IntegrationsSettings() {
   const refreshIntegrations = () => {
     api.listIntegrations().then((data) => {
       setIntegrations((data as { integrations: typeof integrations }).integrations || []);
-    }).catch((e) => { console.error(e); setMessage("Failed to load integrations"); });
+    }).catch((e) => { console.error(e); setMessage("Unable to load integrations."); });
   };
 
   useEffect(() => {
@@ -541,7 +541,7 @@ function IntegrationsSettings() {
     api.getTenantSettings().then((res) => {
       const t = res as { slug?: string };
       setTenantSlug(t.slug || "");
-    }).catch((e) => { console.error(e); setMessage("Failed to load tenant settings"); });
+    }).catch((e) => { console.error(e); setMessage("Unable to load tenant settings."); });
   }, []);
 
   const providers = [
@@ -555,7 +555,7 @@ function IntegrationsSettings() {
       await api.saveIntegration(providerId, data);
       setMessage(`${providerId} saved`);
       refreshIntegrations();
-    } catch { setMessage("Failed to save"); }
+    } catch { setMessage("Unable to save changes."); }
     finally { setSaving(null); }
   };
 
@@ -696,7 +696,7 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
             </div>
             <div className="flex justify-end pt-1">
               <button onClick={() => onSave({ api_key: apiKey, api_secret: apiSecret, environment, is_active: isActive })}
-                disabled={saving} className="btn-primary text-[12px]">
+                disabled={saving} className="btn-primary">
                 {saving ? "Saving..." : "Save"}
               </button>
             </div>

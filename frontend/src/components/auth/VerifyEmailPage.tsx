@@ -11,7 +11,7 @@ export default function VerifyEmailPage() {
   useEffect(() => {
     if (!token) {
       setStatus("error");
-      setMessage("No verification token provided.");
+      setMessage("This verification link is invalid or incomplete.");
       return;
     }
     verify();

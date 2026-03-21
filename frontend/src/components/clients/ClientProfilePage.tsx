@@ -44,6 +44,7 @@ export default function ClientProfilePage() {
   const [showTakePayment, setShowTakePayment] = useState(false);
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
+  const [tenantTax, setTenantTax] = useState<{ percent: number; name: string }>({ percent: 0, name: "GST" });
   const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean }>({
     hasMandate: false,
     providers: [],
@@ -104,10 +105,10 @@ export default function ClientProfilePage() {
           loadAll();
         } else {
           const d = await res.json().catch(() => ({}));
-          setMandateCompleteMessage({ type: "error", text: d.error || "Failed to link mandate." });
+          setMandateCompleteMessage({ type: "error", text: d.error || "Unable to link mandate." });
         }
       })
-      .catch(() => setMandateCompleteMessage({ type: "error", text: "Failed to link mandate." }))
+      .catch(() => setMandateCompleteMessage({ type: "error", text: "Unable to link mandate." }))
       .finally(() => {
         setSearchParams({}, { replace: true });
       });
@@ -117,18 +118,24 @@ export default function ClientProfilePage() {
     const token = localStorage.getItem("access_token");
     const h = { Authorization: `Bearer ${token}` };
     try {
-      const [clientRes, memberRes, payRes, chargesRes, mandateRes] = await Promise.all([
+      const [clientRes, memberRes, payRes, chargesRes, mandateRes, tenantRes] = await Promise.all([
         fetch(`/api/tenant/clients/${clientId}`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/clients/${clientId}/memberships`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/payments/client/${clientId}`, { headers: h }).then(r => r.json()),
         api.listClientCharges(clientId!).catch(() => ({ charges: [] })) as Promise<any>,
         api.getClientMandateStatus(clientId!).catch(() => ({})) as Promise<any>,
+        api.getTenantSettings().catch(() => ({})) as Promise<any>,
       ]);
       setClient(clientRes);
       setPaymentInfo({
         hasMandate: mandateRes?.has_mandate || false,
         providers: mandateRes?.payment_providers || [],
         supportsDirectDebit: !!mandateRes?.supports_direct_debit,
+      });
+      const txPct = Number(tenantRes?.sales_tax_percent);
+      setTenantTax({
+        percent: Number.isFinite(txPct) ? txPct : 0,
+        name: String(tenantRes?.sales_tax_name || "GST"),
       });
       setMemberships(memberRes.memberships || []);
 
@@ -158,9 +165,7 @@ export default function ClientProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
-      </div>
+      <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Loading...</div>
     );
   }
   if (!client) return <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Client not found</div>;
@@ -247,7 +252,7 @@ export default function ClientProfilePage() {
             <MembershipsTab memberships={memberships} fmtShort={fmtShort} onRefresh={loadAll} />
           )}
           {tab === "billing" && (
-            <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} />
+            <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} tenantTaxPercent={tenantTax.percent} />
           )}
           {tab === "payments" && (
             <PaymentsTab payments={payments} fmtShort={fmtShort} />
@@ -612,9 +617,9 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to cancel"); return; }
+      if (!res.ok) { const d = await res.json(); alert(d.error || "Unable to cancel membership. Please try again."); return; }
       onRefresh();
-    } catch { alert("Failed to cancel membership"); }
+    } catch { alert("Unable to cancel membership. Please try again."); }
   };
 
   if (memberships.length === 0) {
@@ -690,7 +695,7 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: MembershipRecord; fmtSho
                       const res = await fetch(`/api/tenant/memberships/${m.membership_id}/agreement.pdf`, {
                         headers: { Authorization: `Bearer ${token}` },
                       });
-                      if (!res.ok) { alert("No agreement found for this membership"); return; }
+                      if (!res.ok) { alert("No signed agreement was found for this membership."); return; }
                       const blob = await res.blob();
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");
@@ -701,7 +706,7 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: MembershipRecord; fmtSho
                       document.body.removeChild(a);
                       URL.revokeObjectURL(url);
                     } catch {
-                      alert("Unable to download agreement PDF right now.");
+                      alert("Unable to download the agreement PDF right now.");
                     }
                   }}
                   className="text-[11px] text-indigo-500 hover:text-indigo-700"
@@ -777,10 +782,12 @@ function BillingScheduleTab({
   memberships,
   subscriptionDetails,
   fmtDate,
+  tenantTaxPercent,
 }: {
   memberships: MembershipRecord[];
   subscriptionDetails: Record<string, { next_charge_date: string; amount: number; status: string }>;
   fmtDate: (d: string) => string;
+  tenantTaxPercent: number;
 }) {
   const upcoming: { date: Date; membership: MembershipRecord; fromGoCardless?: boolean }[] = [];
 
@@ -788,25 +795,39 @@ function BillingScheduleTab({
   const paymentLikeForUpcoming = (membership: MembershipRecord, goCardlessAmount?: number) => {
     const lastAmount = membership.last_payment_amount;
     const fallbackAmount = membership.payment_amount;
-    const amount = typeof goCardlessAmount === "number" && Number.isFinite(goCardlessAmount)
-      ? goCardlessAmount
-      : (typeof lastAmount === "number" && Number.isFinite(lastAmount) ? lastAmount : toNumber(fallbackAmount));
+    const hasLastSplit = typeof membership.last_base_amount === "number"
+      && typeof membership.last_processing_fee_amount === "number"
+      && membership.last_processing_fee_amount > 0.004;
 
-    let base = membership.last_base_amount;
-    let tax = membership.last_tax_amount;
-    let fee = membership.last_processing_fee_amount;
-
-    if (typeof amount === "number" && typeof lastAmount === "number" && lastAmount > 0 && Math.abs(amount - lastAmount) > 0.009) {
-      const scale = amount / lastAmount;
-      if (typeof base === "number") base = base * scale;
-      if (typeof tax === "number") tax = tax * scale;
-      if (typeof fee === "number") fee = fee * scale;
+    if (hasLastSplit) {
+      let amount = typeof goCardlessAmount === "number" && Number.isFinite(goCardlessAmount)
+        ? goCardlessAmount
+        : (typeof lastAmount === "number" && Number.isFinite(lastAmount) ? lastAmount : toNumber(fallbackAmount));
+      let base = membership.last_base_amount!;
+      let tax = membership.last_tax_amount ?? 0;
+      let fee = membership.last_processing_fee_amount!;
+      if (typeof lastAmount === "number" && lastAmount > 0 && Math.abs(amount - lastAmount) > 0.009) {
+        const scale = amount / lastAmount;
+        base = base * scale;
+        tax = tax * scale;
+        fee = fee * scale;
+      }
+      return { amount, base_amount: base, tax_amount: tax, processing_fee_amount: fee, currency_code: membership.payment_currency_code || "AUD" };
     }
 
+    const basePayment = toNumber(fallbackAmount);
+    const method: "card" | "direct_debit" = (membership.payment_method || "").toLowerCase() === "direct_debit" ? "direct_debit" : "card";
+    const taxRate = tenantTaxPercent > 0 ? tenantTaxPercent : 0;
+    const taxAmount = taxRate > 0 ? Math.round(basePayment * 100 * taxRate / (100 + taxRate)) / 100 : 0;
+    const baseExTax = Math.round((basePayment - taxAmount) * 100) / 100;
+    const feeCents = estimateStripeProcessingFeeCents(Math.round(basePayment * 100), method);
+    const fee = feeCents / 100;
+    const totalCharged = Math.round((basePayment + fee) * 100) / 100;
+
     return {
-      amount,
-      base_amount: base,
-      tax_amount: tax,
+      amount: totalCharged,
+      base_amount: baseExTax,
+      tax_amount: taxAmount,
       processing_fee_amount: fee,
       currency_code: membership.payment_currency_code || "AUD",
     };
@@ -1115,7 +1136,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                 type="button"
                 onClick={() => formRef.current?.requestSubmit()}
                 disabled={saving}
-                className="btn-primary text-[12px]"
+                className="btn-primary"
               >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                 {saving ? "Saving..." : "Save"}
@@ -1533,7 +1554,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
 
                 <div className="mt-6 flex justify-between">
                   <button onClick={() => setStep("term")} className="btn-secondary text-[12px]">Back</button>
-                  <button onClick={handleSubmit} disabled={saving} className="btn-primary text-[12px]">
+                  <button onClick={handleSubmit} disabled={saving} className="btn-primary">
                     {saving ? "Creating..." : "Create Membership"}
                   </button>
                 </div>
@@ -1692,7 +1713,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
       setSuccess(data.email_sent
         ? `Mandate setup link sent to ${clientEmail}. You can also copy the link below.`
         : "Mandate link created. Copy it below and share with the client.");
-    } catch (err: any) { setError(err.message || "Failed to create mandate link"); }
+    } catch (err: any) { setError(err.message || "Unable to create mandate link."); }
     finally { setSendingLink(false); }
   };
 
@@ -1751,15 +1772,13 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
           {success && <div className="mx-6 mt-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[13px] text-green-700">{success}</div>}
 
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
-            </div>
+            <div className="px-6 py-12 text-center text-[13px] text-gray-500">Loading...</div>
           ) : noProviders ? (
             <div className="px-6 py-8 text-center">
               <svg className="h-10 w-10 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               <p className="text-[14px] font-semibold text-gray-700 mb-1">No payment provider configured</p>
               <p className="text-[13px] text-gray-500 mb-4">Set up GoCardless or Stripe in Settings &rarr; Integrations to start collecting payments.</p>
-              <a href="/settings" className="btn-primary text-[12px] inline-flex">Go to Settings</a>
+              <a href="/settings" className="btn-primary inline-flex">Go to Settings</a>
             </div>
           ) : (
             <div className="px-6 py-5 space-y-5">
@@ -1945,7 +1964,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
               {/* Submit */}
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={onClose} className="btn-secondary text-[12px]">Cancel</button>
-                <button onClick={handleSubmit} disabled={saving || !canSubmit} className={`btn-primary text-[12px] ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}>
+                <button onClick={handleSubmit} disabled={saving || !canSubmit} className={`btn-primary ${!canSubmit ? "opacity-50 cursor-not-allowed" : ""}`}>
                   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
                   {submitLabel}
                 </button>

@@ -56,7 +56,7 @@ export default function TermsPage() {
       await loadTerms();
     } catch (e) {
       console.error(e);
-      alert(e instanceof Error ? e.message : "Failed to delete terms");
+      alert(e instanceof Error ? e.message : "Unable to delete terms. Please try again.");
     }
   };
 
@@ -104,7 +104,7 @@ export default function TermsPage() {
           <p className="text-[13px] text-gray-500">No terms & conditions found</p>
           {terms.length === 0 && (
             <button onClick={() => setShowForm(true)} className="mt-3 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
-              + Create your first T&C document
+              Create your first T&C document
             </button>
           )}
         </div>
@@ -187,7 +187,7 @@ function TermsForm({ initial, onSaved, onCancel }: {
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      setError(err instanceof Error ? err.message : "Unable to save terms.");
     } finally { setSaving(false); }
   };
 
@@ -199,7 +199,7 @@ function TermsForm({ initial, onSaved, onCancel }: {
         </h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCancel} className="btn-secondary text-[12px]">Cancel</button>
-          <button type="button" onClick={() => { const f = document.getElementById("terms-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+          <button type="button" onClick={() => { const f = document.getElementById("terms-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary">
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

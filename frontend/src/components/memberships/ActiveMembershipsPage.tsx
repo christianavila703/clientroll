@@ -77,9 +77,9 @@ export default function ActiveMembershipsPage() {
 
   const daysUntilEnd = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, colour: "text-red-600" };
-    if (diff <= 30) return { text: `${diff}d left`, colour: "text-amber-600" };
-    return { text: `${diff}d left`, colour: "text-gray-500" };
+    if (diff < 0) return { text: `Ended ${Math.abs(diff)}d ago`, colour: "text-gray-400" };
+    if (diff <= 30) return { text: `${diff} days left`, colour: "text-amber-600" };
+    return { text: `${diff} days left`, colour: "text-gray-500" };
   };
 
   const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
@@ -88,7 +88,7 @@ export default function ActiveMembershipsPage() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Memberships</h1>
+        <h1 className="page-title">Active Members</h1>
       </div>
 
       {/* Tabs */}

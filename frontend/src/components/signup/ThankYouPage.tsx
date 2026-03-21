@@ -5,7 +5,7 @@ interface Props {
 }
 
 export default function ThankYouPage({ data }: Props) {
-  const heading = (data.heading as string) || "Thank You!";
+  const heading = (data.heading as string) || "Thank you";
   const body = (data.body as string) || "Your membership has been successfully created.";
   const imageUrl = data.image_url as string | undefined;
   const redirectUrl = data.redirect_url as string | undefined;
@@ -33,7 +33,7 @@ export default function ThankYouPage({ data }: Props) {
         </svg>
       </div>
 
-      <h1 className="text-3xl font-bold text-gray-900 sm:text-4xl">{heading}</h1>
+      <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl">{heading}</h1>
       <p className="mt-4 text-lg text-gray-600 max-w-lg mx-auto whitespace-pre-line">
         {body}
       </p>
@@ -47,7 +47,7 @@ export default function ThankYouPage({ data }: Props) {
 
       {redirectUrl && (
         <p className="mt-6 text-sm text-gray-400">
-          You will be redirected in a few seconds...
+          Redirecting shortly...
         </p>
       )}
     </div>

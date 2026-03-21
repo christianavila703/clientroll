@@ -89,7 +89,7 @@ export default function BonusesPage() {
           <p className="text-[13px] text-gray-500">No bonuses found</p>
           {bonuses.length === 0 && (
             <button onClick={() => setShowForm(true)} className="mt-3 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">
-              + Create your first bonus
+              Create your first bonus
             </button>
           )}
         </div>
@@ -198,7 +198,7 @@ function BonusForm({ initial, onSaved, onCancel }: {
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      setError(err instanceof Error ? err.message : "Unable to save bonus.");
     } finally { setSaving(false); }
   };
 
@@ -210,7 +210,7 @@ function BonusForm({ initial, onSaved, onCancel }: {
         </h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCancel} className="btn-secondary text-[12px]">Cancel</button>
-          <button type="button" onClick={() => { const f = document.getElementById("bonus-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+          <button type="button" onClick={() => { const f = document.getElementById("bonus-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary">
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

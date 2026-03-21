@@ -135,7 +135,7 @@ export default function ClientsPage() {
       await loadClients(search, statusTab);
     } catch (e) {
       console.error(e);
-      alert(e instanceof Error ? e.message : "Failed to delete clients");
+      alert(e instanceof Error ? e.message : "Unable to delete clients. Please try again.");
     }
   };
 
@@ -159,7 +159,7 @@ export default function ClientsPage() {
           </button>
           <button
             onClick={() => { setEditingClient(null); setShowForm(true); }}
-            className="btn-primary text-[12px]"
+            className="btn-primary"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
             New client
@@ -213,7 +213,7 @@ export default function ClientsPage() {
         <div className="card px-5 py-12 text-center">
           <svg className="mx-auto h-10 w-10 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
           <p className="mt-3 text-[13px] text-gray-500">No clients found</p>
-          <button onClick={() => setShowForm(true)} className="mt-2 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">+ Add your first client</button>
+          <button onClick={() => setShowForm(true)} className="mt-2 text-[13px] font-medium text-indigo-600 hover:text-indigo-700">Add your first client</button>
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -421,7 +421,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         <h3 className="text-sm font-semibold text-gray-900">{editing ? `Edit: ${editing.name}` : "New client"}</h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCreated} className="btn-secondary text-[12px]">Cancel</button>
-          <button type="button" onClick={() => { const f = document.getElementById("client-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary text-[12px]">
+          <button type="button" onClick={() => { const f = document.getElementById("client-form") as HTMLFormElement; f?.requestSubmit(); }} disabled={saving} className="btn-primary">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
             {saving ? "Saving..." : "Save"}
           </button>
@@ -749,7 +749,7 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
                   <button
                     onClick={() => setStep("preview")}
                     disabled={!Object.values(mapping).includes("name")}
-                    className="btn-primary text-[12px]"
+                    className="btn-primary"
                   >
                     Preview ({csvRows.length} rows)
                   </button>
@@ -784,7 +784,7 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
 
                 <div className="mt-6 flex justify-between">
                   <button onClick={() => setStep("map")} className="btn-secondary text-[12px]">Back to mapping</button>
-                  <button onClick={handleImport} disabled={importing} className="btn-primary text-[12px]">
+                  <button onClick={handleImport} disabled={importing} className="btn-primary">
                     {importing ? "Importing..." : `Import ${csvRows.length} clients`}
                   </button>
                 </div>
@@ -806,7 +806,7 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
                     ))}
                   </div>
                 )}
-                <button onClick={onClose} className="btn-primary text-[12px] mt-6">Done</button>
+                <button onClick={onClose} className="btn-primary mt-6">Done</button>
               </div>
             )}
           </div>

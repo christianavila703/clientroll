@@ -121,6 +121,23 @@ function getCookie(name: string): string | null {
   return match ? match[2] : null;
 }
 
+async function uploadFile(file: File, entityType = "general"): Promise<{ id: string; url: string; public_url: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("entity_type", entityType);
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem("access_token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const csrf = getCookie("csrf_token");
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  const res = await fetch(`${API_BASE}/tenant/upload`, { method: "POST", headers, body: form, credentials: "include" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new ApiError(err.error || "Upload failed", res.status);
+  }
+  return res.json();
+}
+
 // API methods
 export const api = {
   // Auth
@@ -300,6 +317,9 @@ export const api = {
     request(`/platform/billing/tenants/${tenantId}`),
   createPlatformBillingPortalSession: (tenantId: string, data?: unknown) =>
     request(`/platform/billing/tenants/${tenantId}/portal`, { method: "POST", body: data || {} }),
+
+  // File uploads
+  uploadImage: (file: File, entityType?: string) => uploadFile(file, entityType),
 };
 
 export { ApiError };

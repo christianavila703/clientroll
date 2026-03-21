@@ -37,9 +37,9 @@ export default function PaymentsPage() {
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
   const daysUntilEnd = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, colour: "text-red-600" };
-    if (diff <= 30) return { text: `${diff}d left`, colour: "text-amber-600" };
-    return { text: `${diff}d left`, colour: "text-gray-500" };
+    if (diff < 0) return { text: `Ended ${Math.abs(diff)}d ago`, colour: "text-gray-400" };
+    if (diff <= 30) return { text: `${diff} days left`, colour: "text-amber-600" };
+    return { text: `${diff} days left`, colour: "text-gray-500" };
   };
 
   const tabs = [
@@ -83,7 +83,7 @@ export default function PaymentsPage() {
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Total Charged (Succeeded)</p>
           <p className="text-xl font-bold text-emerald-600 mt-1 tabular-nums">AUD ${fmtMoney(totalCollected)}</p>
-          <p className="text-[10px] text-gray-500 mt-1">Payment + tax + processing fee</p>
+          <p className="text-[10px] text-gray-500 mt-1">Includes tax and processing fees</p>
         </div>
         <div className="card px-4 py-3">
           <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Breakdown (Succeeded)</p>
@@ -146,7 +146,7 @@ export default function PaymentsPage() {
                   <tr>
                     <th>Client</th>
                     <th>Membership</th>
-                    <th className="min-w-[9rem]">Customer / organisation</th>
+                    <th className="min-w-[9rem]">Amount</th>
                     <th>Status</th>
                     <th>Due Date</th>
                     <th>Paid Date</th>
