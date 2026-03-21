@@ -194,9 +194,28 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		if err != nil {
 			return nil
 		}
-		now := time.Now().UTC()
-		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
-			return fmt.Errorf("update service charge succeeded: %w", err)
+		// Store provider linkage + Stripe snapshot for service charges too.
+		providerRef := sess.ID
+		paymentMethod := strings.TrimSpace(metadata["payment_method"])
+		if paymentMethod == "" {
+			paymentMethod = "card"
+		}
+		if err := h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &paymentMethod); err != nil {
+			log.Printf("stripe service_charge provider context tenant=%s charge=%s err=%v", tenantID, chargeID, err)
+		}
+		if err := h.mergeStripeDetailsForServiceCheckout(ctx, tenantID, chargeID, &sess, event.Created); err != nil {
+			log.Printf("stripe service_charge checkout details tenant=%s charge=%s err=%v", tenantID, chargeID, err)
+		}
+		// Direct-debit checkout.session.completed can still be unpaid/processing.
+		if strings.EqualFold(string(sess.PaymentStatus), "paid") {
+			now := time.Now().UTC()
+			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
+				return fmt.Errorf("update service charge succeeded: %w", err)
+			}
+		} else {
+			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil); err != nil {
+				return fmt.Errorf("update service charge pending: %w", err)
+			}
 		}
 		return nil
 	}
@@ -409,6 +428,17 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 		}
 		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil); err != nil {
 			return fmt.Errorf("update service charge failed status: %w", err)
+		}
+		providerRef := sess.ID
+		paymentMethod := strings.TrimSpace(metadata["payment_method"])
+		if paymentMethod == "" {
+			paymentMethod = "card"
+		}
+		if err := h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &paymentMethod); err != nil {
+			log.Printf("stripe service_charge failed provider context tenant=%s charge=%s err=%v", tenantID, chargeID, err)
+		}
+		if err := h.mergeStripeDetailsForServiceCheckout(ctx, tenantID, chargeID, &sess, event.Created); err != nil {
+			log.Printf("stripe service_charge checkout failed details tenant=%s charge=%s err=%v", tenantID, chargeID, err)
 		}
 		return nil
 	}

@@ -43,6 +43,38 @@ func (h *StripeWebhookHandler) mergeStripeDetailsFromCharge(ctx context.Context,
 	return h.paymentRepo.MergeStripeDetails(ctx, tenantID, invoiceID, patch)
 }
 
+func (h *StripeWebhookHandler) mergeStripeDetailsForServiceCheckout(ctx context.Context, tenantID, chargeID uuid.UUID, sess *stripe.CheckoutSession, eventCreated int64) error {
+	if h.serviceRepo == nil || sess == nil {
+		return nil
+	}
+	patch := map[string]interface{}{
+		"source":                  "stripe",
+		"checkout_session_id":     sess.ID,
+		"checkout_status":         string(sess.Status),
+		"checkout_mode":           string(sess.Mode),
+		"checkout_payment_status": strings.ToLower(string(sess.PaymentStatus)),
+	}
+	if sess.Currency != "" {
+		patch["currency"] = strings.ToLower(string(sess.Currency))
+	}
+	if sess.Customer != nil && sess.Customer.ID != "" {
+		patch["stripe_customer_id"] = sess.Customer.ID
+	}
+	if sess.CustomerEmail != "" {
+		patch["stripe_customer_email"] = sess.CustomerEmail
+	}
+	if sess.CustomerDetails != nil && strings.TrimSpace(sess.CustomerDetails.Name) != "" {
+		patch["stripe_customer_name"] = strings.TrimSpace(sess.CustomerDetails.Name)
+	}
+	if sess.PaymentIntent != nil && sess.PaymentIntent.ID != "" {
+		patch["payment_intent_id"] = sess.PaymentIntent.ID
+	}
+	if eventCreated > 0 {
+		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
+	}
+	return h.serviceRepo.MergeStripeDetailsByChargeID(ctx, tenantID, chargeID, patch)
+}
+
 func buildStripeDetailsPatchFromInvoice(inv *stripe.Invoice, eventCreated int64) map[string]interface{} {
 	patch := map[string]interface{}{
 		"source": "stripe",
@@ -205,12 +237,166 @@ func stripeExpandableStringID(raw json.RawMessage) string {
 
 // handlePaymentIntentStripe records PI / mandate / bank hints onto the invoice-linked payment row.
 func (h *StripeWebhookHandler) handlePaymentIntentStripe(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
-	return h.mergeStripeDetailsFromPaymentIntent(ctx, tenantID, event.Data.Raw, event.Created)
+	if err := h.mergeStripeDetailsFromPaymentIntent(ctx, tenantID, event.Data.Raw, event.Created); err != nil {
+		return err
+	}
+	return h.mergeStripeDetailsForServicePaymentIntent(ctx, tenantID, event.Data.Raw, event.Created)
 }
 
 // handleChargeStripe merges charge-level BECS / mandate IDs (Stripe often omits invoice on Charge in older structs; raw JSON still has it).
 func (h *StripeWebhookHandler) handleChargeStripe(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
-	return h.mergeStripeDetailsFromCharge(ctx, tenantID, event.Data.Raw, event.Created)
+	if err := h.mergeStripeDetailsFromCharge(ctx, tenantID, event.Data.Raw, event.Created); err != nil {
+		return err
+	}
+	return h.mergeStripeDetailsForServiceCharge(ctx, tenantID, event.Data.Raw, event.Created)
+}
+
+func (h *StripeWebhookHandler) mergeStripeDetailsForServicePaymentIntent(ctx context.Context, tenantID uuid.UUID, raw []byte, eventCreated int64) error {
+	if h.serviceRepo == nil {
+		return nil
+	}
+	var pi struct {
+		ID            string            `json:"id"`
+		Status        string            `json:"status"`
+		Created       int64             `json:"created"`
+		Description   string            `json:"description"`
+		Metadata      map[string]string `json:"metadata"`
+		LatestCharge  json.RawMessage   `json:"latest_charge"`
+		PaymentMethod json.RawMessage   `json:"payment_method"`
+		Customer      json.RawMessage   `json:"customer"`
+		Charges       struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		} `json:"charges"`
+	}
+	if err := json.Unmarshal(raw, &pi); err != nil {
+		return nil
+	}
+	if pi.Metadata["type"] != "service_charge" {
+		return nil
+	}
+	chargeID, err := uuid.Parse(strings.TrimSpace(pi.Metadata["charge_id"]))
+	if err != nil {
+		return nil
+	}
+	providerRef := strings.TrimSpace(pi.ID)
+	method := strings.TrimSpace(pi.Metadata["payment_method"])
+	_ = h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &method)
+	patch := map[string]interface{}{
+		"source":                "stripe",
+		"payment_intent_id":     pi.ID,
+		"payment_intent_status": pi.Status,
+	}
+	if lc := stripeExpandableStringID(pi.LatestCharge); lc != "" {
+		patch["stripe_charge_id"] = lc
+	}
+	if pm := stripeExpandableStringID(pi.PaymentMethod); pm != "" {
+		patch["stripe_payment_method_id"] = pm
+	}
+	mergePaymentMethodObject(pi.PaymentMethod, patch)
+	if cust := stripeExpandableStringID(pi.Customer); cust != "" {
+		patch["stripe_customer_id"] = cust
+	}
+	if pi.Description != "" {
+		patch["stripe_description"] = pi.Description
+	}
+	if pi.Created > 0 {
+		patch["payment_intent_created_at"] = time.Unix(pi.Created, 0).UTC().Format(time.RFC3339)
+	}
+	if eventCreated > 0 {
+		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
+	}
+	if err := h.serviceRepo.MergeStripeDetailsByChargeID(ctx, tenantID, chargeID, patch); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(pi.Status)) {
+	case "succeeded":
+		now := time.Now().UTC()
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now)
+	case "processing", "requires_capture", "requires_action":
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil)
+	case "canceled", "requires_payment_method":
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil)
+	}
+	return nil
+}
+
+func (h *StripeWebhookHandler) mergeStripeDetailsForServiceCharge(ctx context.Context, tenantID uuid.UUID, raw []byte, eventCreated int64) error {
+	if h.serviceRepo == nil {
+		return nil
+	}
+	var ch struct {
+		ID                   string            `json:"id"`
+		Status               string            `json:"status"`
+		Created              int64             `json:"created"`
+		Metadata             map[string]string `json:"metadata"`
+		PaymentIntent        json.RawMessage   `json:"payment_intent"`
+		PaymentMethodDetails *struct {
+			Type        string `json:"type"`
+			AUBECSDebit *struct {
+				BSBNumber string `json:"bsb_number"`
+				Last4     string `json:"last4"`
+				Mandate   string `json:"mandate"`
+			} `json:"au_becs_debit"`
+		} `json:"payment_method_details"`
+	}
+	if err := json.Unmarshal(raw, &ch); err != nil {
+		return nil
+	}
+	if ch.Metadata["type"] != "service_charge" {
+		return nil
+	}
+	chargeID, err := uuid.Parse(strings.TrimSpace(ch.Metadata["charge_id"]))
+	if err != nil {
+		return nil
+	}
+	method := strings.TrimSpace(ch.Metadata["payment_method"])
+	providerRef := strings.TrimSpace(ch.ID)
+	_ = h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &method)
+	patch := map[string]interface{}{
+		"source":               "stripe",
+		"stripe_charge_id":     ch.ID,
+		"stripe_charge_status": ch.Status,
+	}
+	if pi := stripeExpandableStringID(ch.PaymentIntent); pi != "" {
+		patch["payment_intent_id"] = pi
+	}
+	if ch.PaymentMethodDetails != nil {
+		if ch.PaymentMethodDetails.Type != "" {
+			patch["payment_method_type"] = ch.PaymentMethodDetails.Type
+		}
+		if b := ch.PaymentMethodDetails.AUBECSDebit; b != nil {
+			patch["payment_method_type"] = "au_becs_debit"
+			patch["bank_bsb"] = b.BSBNumber
+			patch["bank_last4"] = b.Last4
+			if b.Mandate != "" {
+				patch["stripe_mandate_id"] = b.Mandate
+			}
+			if b.BSBNumber != "" && b.Last4 != "" {
+				patch["payment_method_label"] = fmt.Sprintf("Australia BECS Direct Debit · BSB %s · Last 4 %s", b.BSBNumber, b.Last4)
+			}
+		}
+	}
+	if ch.Created > 0 {
+		patch["charge_created_at"] = time.Unix(ch.Created, 0).UTC().Format(time.RFC3339)
+	}
+	if eventCreated > 0 {
+		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
+	}
+	if err := h.serviceRepo.MergeStripeDetailsByChargeID(ctx, tenantID, chargeID, patch); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(ch.Status)) {
+	case "succeeded":
+		now := time.Now().UTC()
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now)
+	case "pending":
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil)
+	case "failed":
+		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil)
+	}
+	return nil
 }
 
 func mergePaymentMethodObject(raw json.RawMessage, patch map[string]interface{}) {
@@ -222,15 +408,15 @@ func mergePaymentMethodObject(raw json.RawMessage, patch map[string]interface{})
 		return
 	}
 	var pm struct {
-		Type       string `json:"type"`
-		AUBECS     *struct {
+		Type   string `json:"type"`
+		AUBECS *struct {
 			BSBNumber string `json:"bsb_number"`
 			Last4     string `json:"last4"`
 		} `json:"au_becs_debit"`
-		SEPA      *struct {
+		SEPA *struct {
 			Last4 string `json:"last4"`
 		} `json:"sepa_debit"`
-		USBank    *struct {
+		USBank *struct {
 			Last4 string `json:"last4"`
 		} `json:"us_bank_account"`
 	}

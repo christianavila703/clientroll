@@ -191,7 +191,8 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 		mandateID, membershipID := h.findMandateForClient(r.Context(), tenantID, clientID, input.MembershipID)
 		if mandateID != "" {
 			chargedMembershipID = membershipID
-			amountMinor := int64(input.Amount * 100)
+			totalAmount := input.Amount + input.TaxAmount
+			amountMinor := int64(totalAmount * 100)
 			chargeDate := time.Now().AddDate(0, 0, 3) // 3 days from now (minimum for DD)
 			ref := fmt.Sprintf("charge-%s", charge.ID)
 
@@ -216,11 +217,15 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 						tenantID,
 						*chargedMembershipID,
 						clientID,
-						input.Amount,
+						totalAmount,
 						"AUD",
 						chargeDate,
 						gcID,
-						nil,
+						&repository.PaymentComponents{
+							BaseAmount:          input.Amount,
+							TaxAmount:           input.TaxAmount,
+							ProcessingFeeAmount: 0,
+						},
 					); perr != nil {
 						log.Printf("service.take_payment ledger_insert_failed tenant=%s charge=%s payment_ref=%s err=%v", tenantID, charge.ID, gcID, perr)
 					}
@@ -401,7 +406,8 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 	}
 
 	// 4. Create GoCardless payment
-	amountMinor := int64(input.Amount * 100)
+	totalAmount := input.Amount + input.TaxAmount
+	amountMinor := int64(totalAmount * 100)
 	chargeDate := time.Now().AddDate(0, 0, 3)
 
 	var serviceID *uuid.UUID
@@ -446,11 +452,15 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 			tenantID,
 			membershipID,
 			clientID,
-			input.Amount,
+			totalAmount,
 			"AUD",
 			chargeDate,
 			gcPaymentID,
-			nil,
+			&repository.PaymentComponents{
+				BaseAmount:          input.Amount,
+				TaxAmount:           input.TaxAmount,
+				ProcessingFeeAmount: 0,
+			},
 		); perr != nil {
 			log.Printf("service.charge_with_bank_details ledger_insert_failed tenant=%s client=%s payment_ref=%s err=%v", tenantID, clientID, gcPaymentID, perr)
 		}
@@ -517,6 +527,9 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	if input.PaymentMethod == "direct_debit" {
 		feeMethod = "direct_debit"
 	}
+	if input.PaymentMethod == "" {
+		input.PaymentMethod = feeMethod
+	}
 	feeCents := stripeProcessingFee(totalCents, feeMethod)
 	feeAmount := float64(feeCents) / 100.0
 
@@ -537,6 +550,15 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 			"charge_id":      charge.ID.String(),
 			"type":           "service_charge",
 			"payment_method": input.PaymentMethod,
+		},
+		PaymentIntentData: &stripe.CheckoutSessionPaymentIntentDataParams{
+			Metadata: map[string]string{
+				"tenant_id":      tenantID.String(),
+				"client_id":      clientID.String(),
+				"charge_id":      charge.ID.String(),
+				"type":           "service_charge",
+				"payment_method": input.PaymentMethod,
+			},
 		},
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
@@ -575,6 +597,19 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create Stripe checkout session")
 		return
 	}
+	providerRef := sess.ID
+	paymentMethod := input.PaymentMethod
+	_ = h.serviceRepo.UpdateChargeProviderContext(r.Context(), tenantID, charge.ID, &providerRef, &paymentMethod)
+	_ = h.serviceRepo.MergeStripeDetailsByChargeID(r.Context(), tenantID, charge.ID, map[string]interface{}{
+		"source":                  "stripe",
+		"checkout_session_id":     sess.ID,
+		"checkout_status":         string(sess.Status),
+		"checkout_mode":           string(sess.Mode),
+		"checkout_payment_status": strings.ToLower(string(sess.PaymentStatus)),
+		"currency":                strings.ToLower(string(sess.Currency)),
+		"payment_method_type":     map[string]string{"direct_debit": "au_becs_debit", "card": "card"}[input.PaymentMethod],
+		"payment_method_label":    map[string]string{"direct_debit": "Australia BECS Direct Debit", "card": "Card"}[input.PaymentMethod],
+	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"charge":       charge,

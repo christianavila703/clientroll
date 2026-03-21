@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,19 +27,22 @@ type Service struct {
 }
 
 type ServiceCharge struct {
-	ID          uuid.UUID  `json:"id"`
-	TenantID    uuid.UUID  `json:"tenant_id"`
-	ClientID    uuid.UUID  `json:"client_id"`
-	ServiceID   *uuid.UUID `json:"service_id"`
-	Description string     `json:"description"`
-	Amount      float64    `json:"amount"`
-	TaxAmount   float64    `json:"tax_amount"`
-	ProcessingFeeAmount float64 `json:"processing_fee_amount"`
-	Status      string     `json:"status"`
-	PaidDate    *time.Time `json:"paid_date"`
-	Notes       *string    `json:"notes"`
-	CreatedBy   *uuid.UUID `json:"created_by"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID                  uuid.UUID       `json:"id"`
+	TenantID            uuid.UUID       `json:"tenant_id"`
+	ClientID            uuid.UUID       `json:"client_id"`
+	ServiceID           *uuid.UUID      `json:"service_id"`
+	Description         string          `json:"description"`
+	Amount              float64         `json:"amount"`
+	TaxAmount           float64         `json:"tax_amount"`
+	ProcessingFeeAmount float64         `json:"processing_fee_amount"`
+	Status              string          `json:"status"`
+	PaidDate            *time.Time      `json:"paid_date"`
+	Notes               *string         `json:"notes"`
+	CreatedBy           *uuid.UUID      `json:"created_by"`
+	ProviderReference   *string         `json:"provider_reference,omitempty"`
+	PaymentMethod       *string         `json:"payment_method,omitempty"`
+	StripeDetails       json.RawMessage `json:"stripe_details,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 type ServiceRepo struct {
@@ -121,10 +125,10 @@ func (r *ServiceRepo) createChargeWithState(ctx context.Context, tenantID, clien
 	err := r.db.Pool.QueryRow(ctx,
 		`INSERT INTO service_charges (tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, created_at`,
+		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at`,
 		tenantID, clientID, serviceID, description, amount, taxAmount, processingFeeAmount, status, paidDate, notes, createdBy).Scan(
 		&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-		&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt)
+		&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating service charge: %w", err)
 	}
@@ -147,7 +151,7 @@ func (r *ServiceRepo) UpdateChargeStatus(ctx context.Context, tenantID, chargeID
 // ListChargesByClient returns service charges for a client.
 func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantID uuid.UUID) ([]ServiceCharge, error) {
 	rows, err := r.db.Pool.Query(ctx,
-		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, created_at
+		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at
 		 FROM service_charges WHERE client_id=$1 AND tenant_id=$2 ORDER BY created_at DESC`, clientID, tenantID)
 	if err != nil {
 		return nil, err
@@ -157,12 +161,51 @@ func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantI
 	for rows.Next() {
 		var sc ServiceCharge
 		if err := rows.Scan(&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-			&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.CreatedAt); err != nil {
+			&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, sc)
 	}
 	return items, rows.Err()
+}
+
+// UpdateChargeProviderContext stores provider reference/method hints for a service charge.
+func (r *ServiceRepo) UpdateChargeProviderContext(ctx context.Context, tenantID, chargeID uuid.UUID, providerRef, paymentMethod *string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE service_charges
+		 SET provider_reference = COALESCE(provider_reference, $3),
+		     payment_method = COALESCE(payment_method, $4),
+		     updated_at = NOW()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, chargeID, providerRef, paymentMethod)
+	if err != nil {
+		return fmt.Errorf("updating service charge provider context: %w", err)
+	}
+	return nil
+}
+
+// MergeStripeDetailsByChargeID deep-merges details into service_charges.stripe_details.
+func (r *ServiceRepo) MergeStripeDetailsByChargeID(ctx context.Context, tenantID, chargeID uuid.UUID, patch map[string]interface{}) error {
+	if len(patch) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal service stripe_details patch: %w", err)
+	}
+	ct, err := r.db.Pool.Exec(ctx,
+		`UPDATE service_charges
+		 SET stripe_details = COALESCE(stripe_details, '{}'::jsonb) || $3::jsonb,
+		     updated_at = NOW()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, chargeID, payload)
+	if err != nil {
+		return fmt.Errorf("merge service stripe_details by charge id: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return nil
+	}
+	return nil
 }
 
 // Needed to satisfy pgx unused import

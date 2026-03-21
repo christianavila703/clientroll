@@ -33,33 +33,33 @@ func (h *PaymentHandler) RegisterRoutes(r chi.Router) {
 
 // EnrichedPayment is a payment row with joined client/membership data.
 type EnrichedPayment struct {
-	PaymentID         string  `json:"payment_id"`
-	ClientID          string  `json:"client_id"`
-	ClientName        string  `json:"client_name"`
-	ClientEmail       *string `json:"client_email"`
-	MembershipType    string  `json:"membership_type"`
-	MembershipID      string  `json:"membership_id"`
-	PaymentSource     string  `json:"payment_source"`
-	Description       *string `json:"description"`
-	TermMonths        int     `json:"term_months"`
-	Amount            float64 `json:"amount"`
-	BaseAmount        float64 `json:"base_amount"`
-	TaxAmount         float64 `json:"tax_amount"`
-	ProcessingFeeAmount float64 `json:"processing_fee_amount"`
-	CurrencyCode      string  `json:"currency_code"`
-	Status            string  `json:"status"`
-	DueDate           string  `json:"due_date"`
-	PaidDate          *string `json:"paid_date"`
-	FailureReason     *string `json:"failure_reason"`
-	RetryCount        int     `json:"retry_count"`
-	ProviderReference *string `json:"provider_reference"`
-	PaymentMethod     *string `json:"payment_method"`
-	TotalPaid         float64 `json:"total_paid"`
-	TotalExpected     float64 `json:"total_expected"`
-	MembershipEnd     string  `json:"membership_end"`
-	MembershipStatus  string  `json:"membership_status"`
-	PaymentFrequency  *string `json:"payment_frequency"`
-	StripeDetails     json.RawMessage `json:"stripe_details,omitempty"`
+	PaymentID           string          `json:"payment_id"`
+	ClientID            string          `json:"client_id"`
+	ClientName          string          `json:"client_name"`
+	ClientEmail         *string         `json:"client_email"`
+	MembershipType      string          `json:"membership_type"`
+	MembershipID        string          `json:"membership_id"`
+	PaymentSource       string          `json:"payment_source"`
+	Description         *string         `json:"description"`
+	TermMonths          int             `json:"term_months"`
+	Amount              float64         `json:"amount"`
+	BaseAmount          float64         `json:"base_amount"`
+	TaxAmount           float64         `json:"tax_amount"`
+	ProcessingFeeAmount float64         `json:"processing_fee_amount"`
+	CurrencyCode        string          `json:"currency_code"`
+	Status              string          `json:"status"`
+	DueDate             string          `json:"due_date"`
+	PaidDate            *string         `json:"paid_date"`
+	FailureReason       *string         `json:"failure_reason"`
+	RetryCount          int             `json:"retry_count"`
+	ProviderReference   *string         `json:"provider_reference"`
+	PaymentMethod       *string         `json:"payment_method"`
+	TotalPaid           float64         `json:"total_paid"`
+	TotalExpected       float64         `json:"total_expected"`
+	MembershipEnd       string          `json:"membership_end"`
+	MembershipStatus    string          `json:"membership_status"`
+	PaymentFrequency    *string         `json:"payment_frequency"`
+	StripeDetails       json.RawMessage `json:"stripe_details,omitempty"`
 }
 
 // List returns all payments for the tenant with enriched data.
@@ -136,14 +136,14 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 				CASE WHEN sc.paid_date IS NOT NULL THEN TO_CHAR(sc.paid_date, 'YYYY-MM-DD') ELSE NULL END AS paid_date,
 				NULL::text AS failure_reason,
 				0 AS retry_count,
-				NULL::text AS provider_reference,
-				NULL::text AS payment_method,
+				sc.provider_reference AS provider_reference,
+				sc.payment_method AS payment_method,
 				CASE WHEN sc.status = 'succeeded' THEN (sc.amount + sc.tax_amount + sc.processing_fee_amount) ELSE 0 END AS total_paid,
 				(sc.amount + sc.tax_amount + sc.processing_fee_amount) AS total_expected,
 				TO_CHAR(sc.created_at, 'YYYY-MM-DD') AS membership_end,
 				sc.status AS membership_status,
 				NULL::text AS payment_frequency,
-				'{}'::jsonb AS stripe_details,
+				COALESCE(sc.stripe_details, '{}'::jsonb) AS stripe_details,
 				sc.created_at AS created_at
 			FROM service_charges sc
 			JOIN clients c ON c.id = sc.client_id

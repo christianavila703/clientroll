@@ -153,6 +153,9 @@ export default function ClientProfilePage() {
         status: c.status || "succeeded",
         due_date: c.paid_date || c.created_at,
         paid_date: c.paid_date || c.created_at,
+        provider_reference: c.provider_reference,
+        payment_method: c.payment_method,
+        stripe_details: c.stripe_details || undefined,
         _type: "service" as const,
         _description: c.description,
       }));
@@ -1008,7 +1011,7 @@ function PaymentsTab({
             {items.map((p, i) => {
               const rowKey = paymentKeyFor(p, i);
               const paymentMethodBadge = methodBadge(p);
-              const canExpandStripe = p._type === "membership" && hasStripeDetails(p.stripe_details);
+              const canExpandStripe = hasStripeDetails(p.stripe_details);
               const isExpanded = expandedPaymentKey === rowKey;
               return (
               <div key={rowKey} className="px-5 py-3">
@@ -1722,13 +1725,17 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     }
   };
 
-  const computedTaxAmount = round2((toNumberOrZero(amount) * Math.max(0, salesTaxPercent)) / 100);
+  const enteredTotalAmount = toNumberOrZero(amount);
+  const computedTaxAmount = salesTaxPercent > 0
+    ? round2((enteredTotalAmount * Math.max(0, salesTaxPercent)) / (100 + Math.max(0, salesTaxPercent)))
+    : 0;
+  const computedBaseAmount = round2(Math.max(0, enteredTotalAmount - computedTaxAmount));
 
   const chargePayload = () => ({
     client_id: clientId,
     service_id: selectedServiceId === "__custom" ? null : selectedServiceId || null,
     description,
-    amount: toNumberOrZero(amount),
+    amount: computedBaseAmount,
     tax_amount: computedTaxAmount,
     notes: notes || null,
   });
@@ -1804,7 +1811,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (paymentMethod === "stripe") return handleChargeStripe("card");
   };
 
-  const total = toNumberOrZero(amount) + computedTaxAmount;
+  const total = enteredTotalAmount;
   const orgTotalCents = Math.round(Math.max(0, total) * 100);
   const stripeSurchargeCents =
     orgTotalCents > 0 && paymentMethod === "stripe"
@@ -1996,9 +2003,9 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   <input value={description} onChange={e => setDescription(e.target.value)} className="input-field" placeholder="What is this charge for?" />
                 </div>
                 <div>
-                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Service amount ($)</label>
+                  <label className="block text-[13px] font-medium text-gray-700 mb-1">Customer charge amount ($)</label>
                   <input type="number" value={amount} onChange={e => setAmount(e.target.value === "" ? "" : Number(e.target.value))} className="input-field" min="0" step="0.01" />
-                  <p className="text-[10px] text-gray-400 mt-0.5">Before {salesTaxName} — what you earn ex tax</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Tax inclusive — {salesTaxName} is split for records</p>
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-gray-700 mb-1">{salesTaxName} ({salesTaxPercent.toFixed(2)}%)</label>
