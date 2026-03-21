@@ -35,9 +35,15 @@ func NewSessionManager(redis *database.Redis, refreshDays int) *SessionManager {
 
 // CreateSession stores a session in Redis. Key format: session:{tenant_id}:{user_id}:{token_id}
 func (s *SessionManager) CreateSession(ctx context.Context, tenantID, userID uuid.UUID, role, tokenID string) error {
+	tenantKey := tenantID.String()
+	// Platform-admin JWTs intentionally omit tenant_id; use a stable sentinel key
+	// that matches middleware validation (`tenant_id == ""` => "platform").
+	if tenantID == uuid.Nil {
+		tenantKey = "platform"
+	}
 	data := SessionData{
 		UserID:   userID.String(),
-		TenantID: tenantID.String(),
+		TenantID: tenantKey,
 		Role:     role,
 		TokenID:  tokenID,
 	}
@@ -47,7 +53,7 @@ func (s *SessionManager) CreateSession(ctx context.Context, tenantID, userID uui
 		return fmt.Errorf("marshalling session data: %w", err)
 	}
 
-	key := s.sessionKey(tenantID.String(), userID.String(), tokenID)
+	key := s.sessionKey(tenantKey, userID.String(), tokenID)
 	return s.redis.Set(ctx, key, string(bytes), s.refreshDuration)
 }
 
