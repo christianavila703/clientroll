@@ -201,11 +201,16 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		return nil
 	}
 	// For subscription checkouts: set cancel_at when term has an end (continue_after_term false).
-	// Then rely on invoice events for ledger entries.
+	// For BECS/async methods we also create a pending ledger row now (invoice-linked),
+	// then later invoice/payment_intent events enrich and settle it.
 	if sess.Mode == stripe.CheckoutSessionModeSubscription {
 		if err := h.setSubscriptionCancelAtFromCheckout(ctx, tenantID, event.Data.Raw, metadata); err != nil {
 			log.Printf("stripe setSubscriptionCancelAtFromCheckout tenant=%s err=%v", tenantID, err)
 			// non-fatal: subscription is still created, just won't auto-end
+		}
+		if err := h.recordPendingFromSubscriptionCheckout(ctx, tenantID, event.Data.Raw, &sess, metadata, event.Created); err != nil {
+			log.Printf("stripe recordPendingFromSubscriptionCheckout tenant=%s err=%v", tenantID, err)
+			// non-fatal: invoice/payment events can still create/update this ledger row later.
 		}
 		return nil
 	}
@@ -244,6 +249,98 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		}))
 	}
 	return nil
+}
+
+func (h *StripeWebhookHandler) recordPendingFromSubscriptionCheckout(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	raw []byte,
+	sess *stripe.CheckoutSession,
+	metadata map[string]string,
+	eventCreated int64,
+) error {
+	if h.paymentRepo == nil || sess == nil {
+		return nil
+	}
+	// If already paid instantly (e.g. some card flows), invoice.payment_succeeded will handle status.
+	if strings.EqualFold(string(sess.PaymentStatus), "paid") {
+		return nil
+	}
+	invoiceID := stripeCheckoutInvoiceID(raw)
+	if invoiceID == "" {
+		return nil
+	}
+	membershipID, err1 := uuid.Parse(metadata["membership_id"])
+	clientID, err2 := uuid.Parse(metadata["client_id"])
+	amount, err3 := strconv.ParseFloat(metadata["payment_amount"], 64)
+	if err1 != nil || err2 != nil || err3 != nil || amount <= 0 {
+		return nil
+	}
+	currencyCode := strings.ToUpper(strings.TrimSpace(metadata["currency_code"]))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	components := parseMetadataPaymentComponents(metadata, amount)
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amount, currencyCode, time.Now().UTC(), invoiceID, components)
+	if err != nil {
+		return fmt.Errorf("create pending payment from checkout: %w", err)
+	}
+	if p.Status != "succeeded" && p.Status != "failed" && p.Status != "refunded" && p.Status != "pending" {
+		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "pending", nil, nil, nil); err != nil {
+			return fmt.Errorf("set pending from checkout: %w", err)
+		}
+	}
+	patch := map[string]interface{}{
+		"source":                "stripe",
+		"invoice_id":            invoiceID,
+		"checkout_session_id":   sess.ID,
+		"stripe_invoice_status": "open",
+	}
+	if sess.Subscription != nil && sess.Subscription.ID != "" {
+		patch["stripe_subscription_id"] = sess.Subscription.ID
+	}
+	if sess.Customer != nil && sess.Customer.ID != "" {
+		patch["stripe_customer_id"] = sess.Customer.ID
+	}
+	if sess.CustomerEmail != "" {
+		patch["stripe_customer_email"] = sess.CustomerEmail
+	}
+	if sess.CustomerDetails != nil && strings.TrimSpace(sess.CustomerDetails.Name) != "" {
+		patch["stripe_customer_name"] = strings.TrimSpace(sess.CustomerDetails.Name)
+	}
+	if sess.Currency != "" {
+		patch["currency"] = strings.ToLower(string(sess.Currency))
+	}
+	if sess.PaymentStatus != "" {
+		patch["checkout_payment_status"] = strings.ToLower(string(sess.PaymentStatus))
+	}
+	if eventCreated > 0 {
+		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
+	}
+	if err := h.paymentRepo.MergeStripeDetails(ctx, tenantID, invoiceID, patch); err != nil {
+		return fmt.Errorf("merge checkout stripe details: %w", err)
+	}
+	return nil
+}
+
+func stripeCheckoutInvoiceID(raw []byte) string {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	v, ok := payload["invoice"]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	if o, ok := v.(map[string]interface{}); ok {
+		if id, _ := o["id"].(string); id != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
 }
 
 // setSubscriptionCancelAtFromCheckout sets cancel_at on the Stripe subscription when the
