@@ -949,6 +949,8 @@ function PaymentsTab({
   clientName: string;
   clientEmail: string;
 }) {
+  const [expandedPaymentKey, setExpandedPaymentKey] = useState<string | null>(null);
+
   if (payments.length === 0) {
     return (
       <div className="card px-5 py-12 text-center">
@@ -992,6 +994,9 @@ function PaymentsTab({
     return null;
   };
 
+  const paymentKeyFor = (p: PaymentRecord, idx: number) =>
+    String(p.payment_id || p.id || `${p.due_date}-${p.amount}-${idx}`);
+
   return (
     <div className="space-y-4">
       {Object.entries(grouped).map(([month, items]) => (
@@ -1001,9 +1006,12 @@ function PaymentsTab({
           </div>
           <div className="divide-y divide-gray-100">
             {items.map((p, i) => {
+              const rowKey = paymentKeyFor(p, i);
               const paymentMethodBadge = methodBadge(p);
+              const canExpandStripe = p._type === "membership" && hasStripeDetails(p.stripe_details);
+              const isExpanded = expandedPaymentKey === rowKey;
               return (
-              <div key={i} className="px-5 py-3">
+              <div key={rowKey} className="px-5 py-3">
                 <div className="flex items-start justify-between gap-4 mb-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[13px] font-medium text-gray-900">{fmtShort(p.due_date)}</span>
@@ -1028,6 +1036,15 @@ function PaymentsTab({
                   </div>
                   <div className="text-right shrink-0 min-w-[10rem]">
                     <AdminPaymentAmounts p={p} layout="stacked" />
+                    {canExpandStripe && (
+                      <button
+                        type="button"
+                        className="mt-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+                        onClick={() => setExpandedPaymentKey(isExpanded ? null : rowKey)}
+                      >
+                        {isExpanded ? "Hide details" : "Show details"}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {p._type === "service" && p._description && (
@@ -1065,7 +1082,7 @@ function PaymentsTab({
                     Payment cancelled
                   </p>
                 )}
-                {p._type === "membership" && hasStripeDetails(p.stripe_details) && (
+                {canExpandStripe && isExpanded && (
                   <div className="mt-3">
                     <StripeTransactionPanel
                       stripeDetails={p.stripe_details}
