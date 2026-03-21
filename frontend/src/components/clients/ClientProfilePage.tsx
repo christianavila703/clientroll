@@ -967,6 +967,31 @@ function PaymentsTab({
     grouped[key].push(p);
   });
 
+  const methodBadge = (p: PaymentRecord): { label: string; className: string } | null => {
+    const explicitMethod = String(p.payment_method || "").toLowerCase();
+    if (explicitMethod === "direct_debit") {
+      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+    }
+    if (explicitMethod === "card") {
+      return { label: "Card", className: "text-sky-700 bg-sky-50" };
+    }
+    if (hasStripeDetails(p.stripe_details)) {
+      const stripe = p.stripe_details as Record<string, unknown>;
+      const pmType = String(stripe.payment_method_type || "").toLowerCase();
+      const pmLabel = String(stripe.payment_method_label || "").toLowerCase();
+      if (pmType === "card" || pmLabel.includes("card")) {
+        return { label: "Card", className: "text-sky-700 bg-sky-50" };
+      }
+      if (pmType.includes("debit") || pmType.includes("becs") || pmLabel.includes("direct debit")) {
+        return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      }
+    }
+    if (p.provider_reference) {
+      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-4">
       {Object.entries(grouped).map(([month, items]) => (
@@ -975,7 +1000,9 @@ function PaymentsTab({
             <p className="text-[13px] font-medium text-gray-700">{month}</p>
           </div>
           <div className="divide-y divide-gray-100">
-            {items.map((p, i) => (
+            {items.map((p, i) => {
+              const paymentMethodBadge = methodBadge(p);
+              return (
               <div key={i} className="px-5 py-3">
                 <div className="flex items-start justify-between gap-4 mb-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -993,8 +1020,10 @@ function PaymentsTab({
                     </span>
                     {p._type === "service" ? (
                       <span className="text-[10px] font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">Service</span>
-                    ) : p.provider_reference ? (
-                      <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">Provider</span>
+                    ) : paymentMethodBadge ? (
+                      <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${paymentMethodBadge.className}`}>
+                        {paymentMethodBadge.label}
+                      </span>
                     ) : null}
                   </div>
                   <div className="text-right shrink-0 min-w-[10rem]">
@@ -1049,7 +1078,7 @@ function PaymentsTab({
                   </div>
                 )}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       ))}

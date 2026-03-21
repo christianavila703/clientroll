@@ -37,6 +37,30 @@ export default function PaymentsPage() {
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
+  const methodBadge = (p: AdminPaymentRecord): { label: string; className: string } | null => {
+    const explicitMethod = String(p.payment_method || "").toLowerCase();
+    if (explicitMethod === "direct_debit") {
+      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+    }
+    if (explicitMethod === "card") {
+      return { label: "Card", className: "text-sky-700 bg-sky-50" };
+    }
+    if (hasStripeDetails(p.stripe_details)) {
+      const stripe = p.stripe_details as Record<string, unknown>;
+      const pmType = String(stripe.payment_method_type || "").toLowerCase();
+      const pmLabel = String(stripe.payment_method_label || "").toLowerCase();
+      if (pmType === "card" || pmLabel.includes("card")) {
+        return { label: "Card", className: "text-sky-700 bg-sky-50" };
+      }
+      if (pmType.includes("debit") || pmType.includes("becs") || pmLabel.includes("direct debit")) {
+        return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      }
+    }
+    if (p.provider_reference) {
+      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+    }
+    return null;
+  };
   const daysUntilEnd = (endDate: string) => {
     const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (diff < 0) return { text: `Ended ${Math.abs(diff)}d ago`, colour: "text-gray-400" };
@@ -207,6 +231,7 @@ export default function PaymentsPage() {
                     const paidPct = p.total_expected > 0 ? Math.round((p.total_paid / p.total_expected) * 100) : 0;
                     const remaining = Math.max(0, p.total_expected - p.total_paid);
                     const end = daysUntilEnd(p.membership_end);
+                    const paymentMethodBadge = methodBadge(p);
                     return (
                       <tr
                         key={p.payment_id}
@@ -228,8 +253,10 @@ export default function PaymentsPage() {
                           <span className={`badge ${p.status === "succeeded" || p.status === "confirmed" ? "badge-green" : p.status === "failed" ? "badge-red" : p.status === "pending" || p.status === "submitted" ? "badge-yellow" : "badge-gray"}`}>
                             {p.status === "succeeded" ? "paid" : p.status}
                           </span>
-                          {p.provider_reference && (
-                            <span className="ml-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1 py-0.5">DD</span>
+                          {paymentMethodBadge && (
+                            <span className={`ml-1 text-[10px] font-medium rounded px-1 py-0.5 ${paymentMethodBadge.className}`}>
+                              {paymentMethodBadge.label}
+                            </span>
                           )}
                           {p.retry_count > 0 && (
                             <span className="ml-1 text-[10px] text-red-500">{p.retry_count} retries</span>
