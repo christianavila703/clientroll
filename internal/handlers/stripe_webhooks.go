@@ -152,6 +152,12 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, true)
 	case "invoice.payment_failed":
 		handleErr = h.handleInvoicePayment(r.Context(), tenant.ID, event, false)
+	case "invoice.finalized":
+		handleErr = h.handleInvoiceFinalized(r.Context(), tenant.ID, event)
+	case "payment_intent.processing", "payment_intent.succeeded", "payment_intent.payment_failed":
+		handleErr = h.handlePaymentIntentStripe(r.Context(), tenant.ID, event)
+	case "charge.succeeded", "charge.updated":
+		handleErr = h.handleChargeStripe(r.Context(), tenant.ID, event)
 	case "customer.subscription.deleted":
 		handleErr = h.handleSubscriptionDeleted(r.Context(), tenant.ID, event)
 	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed":
@@ -375,6 +381,9 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	if err != nil {
 		return fmt.Errorf("create invoice payment: %w", err)
 	}
+	if err := h.mergeStripeDetailsForInvoice(ctx, tenantID, inv.ID, &inv, event.Created); err != nil {
+		log.Printf("stripe merge invoice details tenant=%s invoice=%s err=%v", tenantID, inv.ID, err)
+	}
 	if succeeded {
 		now := time.Now().UTC()
 		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
@@ -407,6 +416,66 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 			"provider_ref":  providerRef,
 			"source":        "stripe_webhook",
 		}))
+	}
+	return nil
+}
+
+// handleInvoiceFinalized records membership subscription invoices while payment is still in flight
+// (e.g. BECS direct debit). Without this, payments only appear after invoice.payment_succeeded.
+func (h *StripeWebhookHandler) handleInvoiceFinalized(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
+	if h.paymentRepo == nil {
+		return nil
+	}
+	var inv stripe.Invoice
+	if err := json.Unmarshal(event.Data.Raw, &inv); err != nil {
+		return fmt.Errorf("decode invoice.finalized: %w", err)
+	}
+	// Only unpaid open invoices; paid/void/draft are not "pending collection".
+	if inv.Status != stripe.InvoiceStatusOpen {
+		return nil
+	}
+	metadata := inv.Metadata
+	if metadata["type"] == "service_charge" {
+		return nil
+	}
+	membershipID, err1 := uuid.Parse(metadata["membership_id"])
+	clientID, err2 := uuid.Parse(metadata["client_id"])
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	amountDue := float64(inv.AmountDue) / 100.0
+	if amountDue <= 0 {
+		return nil
+	}
+	providerRef := inv.ID
+	currencyCode := strings.ToUpper(string(inv.Currency))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	components := parseMetadataPaymentComponents(metadata, amountDue)
+	if components == nil {
+		components = paymentComponentsFromInvoiceRaw(event.Data.Raw, amountDue)
+	}
+	if components == nil || components.ProcessingFeeAmount <= 0.004 {
+		if fallback := h.invoicePaymentFallbackComponents(ctx, tenantID, membershipID, amountDue, components); fallback != nil {
+			components = fallback
+		}
+	}
+	p, _, err := h.paymentRepo.CreateIfNotExists(ctx, tenantID, membershipID, clientID, amountDue, currencyCode, time.Now().UTC(), providerRef, components)
+	if err != nil {
+		return fmt.Errorf("create pending invoice payment: %w", err)
+	}
+	if err := h.mergeStripeDetailsForInvoice(ctx, tenantID, inv.ID, &inv, event.Created); err != nil {
+		log.Printf("stripe merge invoice details (finalized) tenant=%s invoice=%s err=%v", tenantID, inv.ID, err)
+	}
+	// Do not downgrade a payment that already settled (webhook ordering).
+	if p.Status == "succeeded" || p.Status == "failed" || p.Status == "refunded" {
+		return nil
+	}
+	if p.Status != "pending" {
+		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "pending", nil, nil, nil); err != nil {
+			return fmt.Errorf("set invoice payment pending: %w", err)
+		}
 	}
 	return nil
 }

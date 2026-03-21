@@ -21,6 +21,8 @@ web/index.html
 # Server build artifacts (deploy scripts)
 server
 server_new
+server_linux_amd64
+migrate_linux_amd64
 # (Playwright E2E suite removed; keep in case reintroduced)
 tests/test-results/
 

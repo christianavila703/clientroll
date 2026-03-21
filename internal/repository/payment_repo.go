@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -29,8 +31,9 @@ type Payment struct {
 	PaidDate              *time.Time `json:"paid_date"`
 	FailureReason         *string    `json:"failure_reason"`
 	FailureCode           *string    `json:"failure_code"`
-	RetryCount            int        `json:"retry_count"`
-	CreatedAt             time.Time  `json:"created_at"`
+	RetryCount            int             `json:"retry_count"`
+	CreatedAt             time.Time       `json:"created_at"`
+	StripeDetails         json.RawMessage `json:"stripe_details,omitempty"`
 }
 
 // PaymentComponents is an optional base / tax / processing-fee split for the charged amount.
@@ -81,7 +84,7 @@ func NewPaymentRepo(db *database.Postgres) *PaymentRepo {
 
 const paymentFields = `id, tenant_id, membership_id, client_id, amount, base_amount, tax_amount, processing_fee_amount, currency_code, status,
 	provider_reference, due_date, paid_date, failure_reason, failure_code,
-	retry_count, created_at`
+	retry_count, COALESCE(stripe_details, '{}'::jsonb), created_at`
 
 // ListByTenant returns payments for a tenant with optional status filter.
 func (r *PaymentRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, status string, limit int) ([]Payment, error) {
@@ -125,12 +128,11 @@ func (r *PaymentRepo) Create(ctx context.Context, tenantID, membershipID, client
 	query := `INSERT INTO payments (tenant_id, membership_id, client_id, amount, base_amount, tax_amount, processing_fee_amount, currency_code, due_date, provider_reference)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ` + paymentFields
 
-	var p Payment
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, base, tax, fee, currencyCode, dueDate, providerRef).Scan(r.scanFields(&p)...)
+	p, err := r.scanPaymentRow(r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, base, tax, fee, currencyCode, dueDate, providerRef))
 	if err != nil {
 		return nil, fmt.Errorf("creating payment: %w", err)
 	}
-	return &p, nil
+	return p, nil
 }
 
 // CreateIfNotExists inserts a payment, or returns the existing payment for provider reference.
@@ -142,11 +144,21 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, tenantID, membershi
 		DO UPDATE SET updated_at = NOW()
 		RETURNING ` + paymentFields + `, (xmax = 0) AS inserted`
 
-	var p Payment
 	var inserted bool
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, base, tax, fee, currencyCode, dueDate, providerRef).Scan(append(r.scanFields(&p), &inserted)...)
+	row := r.db.Pool.QueryRow(ctx, query, tenantID, membershipID, clientID, amount, base, tax, fee, currencyCode, dueDate, providerRef)
+	var p Payment
+	var sd []byte
+	err := row.Scan(
+		&p.ID, &p.TenantID, &p.MembershipID, &p.ClientID, &p.Amount, &p.BaseAmount, &p.TaxAmount, &p.ProcessingFeeAmount, &p.CurrencyCode, &p.Status,
+		&p.ProviderReference, &p.DueDate, &p.PaidDate, &p.FailureReason,
+		&p.FailureCode, &p.RetryCount, &sd, &p.CreatedAt,
+		&inserted,
+	)
 	if err != nil {
 		return nil, false, fmt.Errorf("create or get payment: %w", err)
+	}
+	if len(sd) > 0 {
+		p.StripeDetails = json.RawMessage(append(json.RawMessage(nil), sd...))
 	}
 	return &p, inserted, nil
 }
@@ -154,29 +166,27 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, tenantID, membershi
 // GetByID returns a payment by ID and tenant.
 func (r *PaymentRepo) GetByID(ctx context.Context, id, tenantID uuid.UUID) (*Payment, error) {
 	query := `SELECT ` + paymentFields + ` FROM payments WHERE id = $1 AND tenant_id = $2`
-	var p Payment
-	err := r.db.Pool.QueryRow(ctx, query, id, tenantID).Scan(r.scanFields(&p)...)
+	p, err := r.scanPaymentRow(r.db.Pool.QueryRow(ctx, query, id, tenantID))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("finding payment by id: %w", err)
 	}
-	return &p, nil
+	return p, nil
 }
 
 // GetByProviderReference returns a payment by tenant and GoCardless payment ID (provider_reference).
 func (r *PaymentRepo) GetByProviderReference(ctx context.Context, tenantID uuid.UUID, providerRef string) (*Payment, error) {
 	query := `SELECT ` + paymentFields + ` FROM payments WHERE tenant_id = $1 AND provider_reference = $2`
-	var p Payment
-	err := r.db.Pool.QueryRow(ctx, query, tenantID, providerRef).Scan(r.scanFields(&p)...)
+	p, err := r.scanPaymentRow(r.db.Pool.QueryRow(ctx, query, tenantID, providerRef))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("finding payment by provider reference: %w", err)
 	}
-	return &p, nil
+	return p, nil
 }
 
 // GetByProviderReferences returns the first payment matched by any provider reference.
@@ -202,6 +212,30 @@ func (r *PaymentRepo) GetByProviderReferences(ctx context.Context, tenantID uuid
 		}
 	}
 	return nil, nil
+}
+
+// MergeStripeDetails deep-merges a JSON patch into payments.stripe_details for the row
+// matched by tenant + provider_reference (Stripe invoice id for subscription flows).
+func (r *PaymentRepo) MergeStripeDetails(ctx context.Context, tenantID uuid.UUID, providerRef string, patch map[string]interface{}) error {
+	if providerRef == "" || patch == nil || len(patch) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal stripe_details patch: %w", err)
+	}
+	ct, err := r.db.Pool.Exec(ctx,
+		`UPDATE payments SET stripe_details = COALESCE(stripe_details, '{}'::jsonb) || $1::jsonb, updated_at = NOW()
+		 WHERE tenant_id = $2 AND provider_reference = $3`,
+		b, tenantID, providerRef,
+	)
+	if err != nil {
+		return fmt.Errorf("merge stripe_details: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		log.Printf("MergeStripeDetails: no payment for tenant=%s provider_reference=%s", tenantID, providerRef)
+	}
+	return nil
 }
 
 // UpdateStatus updates a payment's status.
@@ -234,22 +268,31 @@ func (r *PaymentRepo) CountByStatus(ctx context.Context, tenantID uuid.UUID) (ma
 	return counts, rows.Err()
 }
 
-func (r *PaymentRepo) scanFields(p *Payment) []interface{} {
-	return []interface{}{
+func (r *PaymentRepo) scanPaymentRow(row pgx.Row) (*Payment, error) {
+	var p Payment
+	var sd []byte
+	err := row.Scan(
 		&p.ID, &p.TenantID, &p.MembershipID, &p.ClientID, &p.Amount, &p.BaseAmount, &p.TaxAmount, &p.ProcessingFeeAmount, &p.CurrencyCode, &p.Status,
 		&p.ProviderReference, &p.DueDate, &p.PaidDate, &p.FailureReason,
-		&p.FailureCode, &p.RetryCount, &p.CreatedAt,
+		&p.FailureCode, &p.RetryCount, &sd, &p.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
 	}
+	if len(sd) > 0 {
+		p.StripeDetails = json.RawMessage(append(json.RawMessage(nil), sd...))
+	}
+	return &p, nil
 }
 
 func (r *PaymentRepo) scanMany(rows pgx.Rows) ([]Payment, error) {
 	var items []Payment
 	for rows.Next() {
-		var p Payment
-		if err := rows.Scan(r.scanFields(&p)...); err != nil {
+		p, err := r.scanPaymentRow(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, p)
+		items = append(items, *p)
 	}
 	return items, rows.Err()
 }

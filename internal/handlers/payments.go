@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -58,6 +59,7 @@ type EnrichedPayment struct {
 	MembershipEnd     string  `json:"membership_end"`
 	MembershipStatus  string  `json:"membership_status"`
 	PaymentFrequency  *string `json:"payment_frequency"`
+	StripeDetails     json.RawMessage `json:"stripe_details,omitempty"`
 }
 
 // List returns all payments for the tenant with enriched data.
@@ -103,6 +105,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 				TO_CHAR(m.min_term_end_date, 'YYYY-MM-DD') AS membership_end,
 				m.status AS membership_status,
 				m.payment_frequency AS payment_frequency,
+				COALESCE(p.stripe_details, '{}'::jsonb) AS stripe_details,
 				p.created_at AS created_at
 			FROM payments p
 			JOIN clients c ON c.id = p.client_id
@@ -140,6 +143,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 				TO_CHAR(sc.created_at, 'YYYY-MM-DD') AS membership_end,
 				sc.status AS membership_status,
 				NULL::text AS payment_frequency,
+				'{}'::jsonb AS stripe_details,
 				sc.created_at AS created_at
 			FROM service_charges sc
 			JOIN clients c ON c.id = sc.client_id
@@ -151,7 +155,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 			membership_type, membership_id, payment_source, description, term_months,
 			amount, base_amount, tax_amount, processing_fee_amount, currency_code, status, due_date, paid_date,
 			failure_reason, retry_count, provider_reference, payment_method,
-			total_paid, total_expected, membership_end, membership_status, payment_frequency
+			total_paid, total_expected, membership_end, membership_status, payment_frequency, stripe_details
 		FROM all_rows
 		WHERE 1=1`
 
@@ -181,6 +185,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&row.ProviderReference, &row.PaymentMethod,
 			&row.TotalPaid, &row.TotalExpected,
 			&row.MembershipEnd, &row.MembershipStatus, &row.PaymentFrequency,
+			&row.StripeDetails,
 		); err != nil {
 			log.Printf("Error scanning enriched payment: %v", err)
 			continue

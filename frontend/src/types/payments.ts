@@ -1,3 +1,6 @@
+/** Merged from Stripe webhooks; see StripeTransactionPanel */
+export type StripePaymentDetails = Record<string, string | number | boolean | undefined>;
+
 export interface PaymentRecord {
   payment_id?: string;
   id?: string;
@@ -26,6 +29,8 @@ export interface PaymentRecord {
   membership_end?: string;
   membership_status?: string;
   payment_frequency?: string;
+  /** Present for membership rows when Stripe webhooks have merged invoice/PI/charge data */
+  stripe_details?: StripePaymentDetails | null;
   _type?: "membership" | "service";
   _description?: string;
 }

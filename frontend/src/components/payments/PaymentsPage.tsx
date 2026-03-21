@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
+import StripeTransactionPanel, { hasStripeDetails } from "./StripeTransactionPanel";
 import { customerCharged, fmtMoney } from "../../utils/paymentLabels";
 import type { AdminPaymentRecord } from "../../types/payments";
 
@@ -10,6 +11,7 @@ export default function PaymentsPage() {
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [stripeDetail, setStripeDetail] = useState<AdminPaymentRecord | null>(null);
 
   useEffect(() => { loadPayments(); }, [filter]);
 
@@ -67,6 +69,51 @@ export default function PaymentsPage() {
 
   return (
     <div>
+      {stripeDetail && hasStripeDetails(stripeDetail.stripe_details) && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <button
+            type="button"
+            className="fixed inset-0 bg-black/40 border-0 cursor-default w-full h-full"
+            aria-label="Close"
+            onClick={() => setStripeDetail(null)}
+          />
+          <div className="relative min-h-screen flex items-start justify-center pt-8 pb-12 px-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="stripe-tx-title"
+              className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl border border-gray-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+                <div>
+                  <h2 id="stripe-tx-title" className="text-[15px] font-bold text-gray-900">
+                    Transaction details
+                  </h2>
+                  <p className="text-[12px] text-gray-500 mt-0.5">
+                    {stripeDetail.client_name}
+                    {stripeDetail.client_email ? ` · ${stripeDetail.client_email}` : ""}
+                  </p>
+                </div>
+                <button type="button" className="btn-secondary text-[12px]" onClick={() => setStripeDetail(null)}>
+                  Close
+                </button>
+              </div>
+              <div className="p-5 max-h-[min(80vh,720px)] overflow-y-auto">
+                <StripeTransactionPanel
+                  stripeDetails={stripeDetail.stripe_details}
+                  currencyCode={stripeDetail.currency_code || "AUD"}
+                  amount={customerCharged(stripeDetail)}
+                  status={stripeDetail.status}
+                  clientName={stripeDetail.client_name}
+                  clientEmail={stripeDetail.client_email}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <div>
           <h1 className="page-title">Payments</h1>
@@ -152,6 +199,7 @@ export default function PaymentsPage() {
                     <th>Paid Date</th>
                     <th>Contract Paid</th>
                     <th>Contract Ends</th>
+                    <th className="w-[1%] whitespace-nowrap">Stripe</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -160,7 +208,11 @@ export default function PaymentsPage() {
                     const remaining = Math.max(0, p.total_expected - p.total_paid);
                     const end = daysUntilEnd(p.membership_end);
                     return (
-                      <tr key={p.payment_id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/clients/${p.client_id}`)}>
+                      <tr
+                        key={p.payment_id}
+                        className="cursor-pointer hover:bg-gray-50"
+                        onClick={() => navigate(`/clients/${p.client_id}`)}
+                      >
                         <td>
                           <p className="font-medium text-gray-900">{p.client_name}</p>
                           {p.client_email && <p className="text-[11px] text-gray-400">{p.client_email}</p>}
@@ -207,6 +259,19 @@ export default function PaymentsPage() {
                           <p className="text-[12px] text-gray-700">{fmtDate(p.membership_end)}</p>
                           <p className={`text-[11px] ${end.colour}`}>{end.text}</p>
                         </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {hasStripeDetails(p.stripe_details) ? (
+                            <button
+                              type="button"
+                              className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800"
+                              onClick={() => setStripeDetail(p)}
+                            >
+                              Details
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-300">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -221,7 +286,11 @@ export default function PaymentsPage() {
               const remaining = Math.max(0, p.total_expected - p.total_paid);
               const end = daysUntilEnd(p.membership_end);
               return (
-                <div key={p.payment_id} className="card px-4 py-3 cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/clients/${p.client_id}`)}>
+                <div
+                  key={p.payment_id}
+                  className="card px-4 py-3 cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => navigate(`/clients/${p.client_id}`)}
+                >
                   <div className="flex items-start justify-between mb-2">
                     <div>
                       <p className="text-[13px] font-medium text-gray-900">{p.client_name}</p>
@@ -232,6 +301,18 @@ export default function PaymentsPage() {
                       <span className={`badge mt-1 inline-block ${p.status === "succeeded" ? "badge-green" : p.status === "failed" ? "badge-red" : "badge-yellow"}`}>
                         {p.status}
                       </span>
+                      {hasStripeDetails(p.stripe_details) && (
+                        <button
+                          type="button"
+                          className="mt-2 text-[12px] font-medium text-indigo-600 block w-full"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setStripeDetail(p);
+                          }}
+                        >
+                          Stripe details
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-[12px]">

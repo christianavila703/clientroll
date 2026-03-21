@@ -176,8 +176,11 @@ Base path: **`/api`**. The frontend uses `API_BASE = "/api"` in `frontend/src/ap
 |----------|------------------------|--------------------------|----------------|
 | Stripe | `checkout.session.completed` | `succeeded` | `payment.succeeded` |
 | Stripe | `checkout.session.expired` | `failed` | `payment.failed` |
+| Stripe | `invoice.finalized` | `pending` (open invoice, e.g. BECS still clearing) | — |
 | Stripe | `invoice.payment_succeeded` | `succeeded` | `payment.succeeded` |
 | Stripe | `invoice.payment_failed` | `failed` | `payment.failed` |
+| Stripe | `payment_intent.processing`, `payment_intent.succeeded`, `payment_intent.payment_failed` | (no status change by itself) merges `payments.stripe_details` | — |
+| Stripe | `charge.succeeded`, `charge.updated` | merges BECS / mandate / charge id into `payments.stripe_details` | — |
 | Stripe | `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed` | `disputed` (or `succeeded` when dispute is won) | `payment.disputed` |
 | Stripe | `charge.refunded`, `refund.updated` (succeeded only) | `refunded` | `payment.refunded` |
 | Stripe | `customer.subscription.deleted` | membership `cancelled` | `membership.cancelled` |
@@ -188,6 +191,8 @@ Base path: **`/api`**. The frontend uses `API_BASE = "/api"` in `frontend/src/ap
 | GoCardless | `refunds.created`, `refunds.submitted`, `refunds.paid`, `refunds.refunded` | `refunded` | `payment.refunded` |
 | GoCardless | `mandates.cancelled`, `mandates.failed`, `mandates.expired` | mandate link cleared on memberships | none |
 | GoCardless | `subscriptions.cancelled`, `subscriptions.finished` | membership `cancelled`/`expired` | `membership.cancelled`/`membership.expired` |
+
+**Stripe setup:** In **Developers → Webhooks** for your tenant endpoint (`/api/webhooks/stripe/{slug}`), ensure **`invoice.finalized`** is selected. Without it, subscription invoices that are still collecting (e.g. BECS) only appear in ClientRoll after **`invoice.payment_succeeded`**. For the **Payments → Stripe details** panel (invoice #, PaymentIntent, BSB/last4 when Stripe sends them), also send **`payment_intent.processing`**, **`payment_intent.succeeded`**, **`payment_intent.payment_failed`**, **`charge.succeeded`**, and **`charge.updated`**.
 
 ### Authenticated
 

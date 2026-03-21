@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
 import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
+import StripeTransactionPanel, { hasStripeDetails } from "../payments/StripeTransactionPanel";
 import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 import type { MembershipRecord } from "../../types/memberships";
 import type { PaymentRecord } from "../../types/payments";
@@ -255,7 +256,12 @@ export default function ClientProfilePage() {
             <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} tenantTaxPercent={tenantTax.percent} />
           )}
           {tab === "payments" && (
-            <PaymentsTab payments={payments} fmtShort={fmtShort} />
+            <PaymentsTab
+              payments={payments}
+              fmtShort={fmtShort}
+              clientName={client.name}
+              clientEmail={client.email || ""}
+            />
           )}
         </div>
 
@@ -932,7 +938,17 @@ function BillingScheduleTab({
 }
 
 /* ─── Payments Tab (full invoice-style history) ─── */
-function PaymentsTab({ payments, fmtShort }: { payments: PaymentRecord[]; fmtShort: (d: string) => string }) {
+function PaymentsTab({
+  payments,
+  fmtShort,
+  clientName,
+  clientEmail,
+}: {
+  payments: PaymentRecord[];
+  fmtShort: (d: string) => string;
+  clientName: string;
+  clientEmail: string;
+}) {
   if (payments.length === 0) {
     return (
       <div className="card px-5 py-12 text-center">
@@ -1001,7 +1017,12 @@ function PaymentsTab({ payments, fmtShort }: { payments: PaymentRecord[]; fmtSho
                 )}
                 {p.status === "pending" && (
                   <p className="text-[11px] text-amber-600">
-                    Payment pending submission
+                    {hasStripeDetails(p.stripe_details) &&
+                    String((p.stripe_details as Record<string, unknown>)?.payment_intent_status || "") === "processing"
+                      ? "Payment pending with the bank (direct debit) — usually clears in a few business days."
+                      : hasStripeDetails(p.stripe_details)
+                        ? "Payment pending in Stripe (invoice may still be collecting)."
+                        : "Payment pending submission"}
                   </p>
                 )}
                 {p.status === "failed" && (
@@ -1014,6 +1035,18 @@ function PaymentsTab({ payments, fmtShort }: { payments: PaymentRecord[]; fmtSho
                   <p className="text-[11px] text-gray-500">
                     Payment cancelled
                   </p>
+                )}
+                {p._type === "membership" && hasStripeDetails(p.stripe_details) && (
+                  <div className="mt-3">
+                    <StripeTransactionPanel
+                      stripeDetails={p.stripe_details}
+                      currencyCode={p.currency_code || "AUD"}
+                      amount={customerCharged(p)}
+                      status={p.status}
+                      clientName={clientName}
+                      clientEmail={clientEmail}
+                    />
+                  </div>
                 )}
               </div>
             ))}
