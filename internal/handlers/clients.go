@@ -18,6 +18,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v82"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/customer"
 )
 
 // ClientHandler handles client CRUD endpoints.
@@ -54,6 +57,7 @@ func (h *ClientHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/clients/{clientID}/mandate-status", h.GetMandateStatus)
 	r.Post("/clients/{clientID}/send-mandate-link", h.SendMandateLink)
 	r.Post("/clients/{clientID}/complete-mandate-link", h.CompleteMandateLink)
+	r.Post("/clients/{clientID}/stripe-setup-session", h.CreateStripeSetupSession)
 }
 
 // List returns all clients with optional search and status filter.
@@ -453,6 +457,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		"mandate_id":             nil,
 		"membership_id":          nil,
 		"gocardless_customer_id": nil,
+		"stripe_customer_id":     nil,
 		"client_email":           nil,
 		"payment_providers":      []string{},
 		"supports_direct_debit":  false,
@@ -460,6 +465,9 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 
 	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
 		result["gocardless_customer_id"] = *client.GoCardlessCustomerID
+	}
+	if client.StripeCustomerID != nil && *client.StripeCustomerID != "" {
+		result["stripe_customer_id"] = *client.StripeCustomerID
 	}
 	if client.Email != nil && *client.Email != "" {
 		result["client_email"] = *client.Email
@@ -505,6 +513,96 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateStripeSetupSession opens a Stripe setup checkout so a client can add payment methods without a charge.
+func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+	clientModel, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || clientModel == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+	if h.credRepo == nil || h.encryptor == nil {
+		writeError(w, http.StatusBadRequest, "Stripe not configured for this tenant")
+		return
+	}
+	creds, err := h.credRepo.GetByProvider(r.Context(), tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" || !creds.IsActive {
+		writeError(w, http.StatusBadRequest, "Stripe not configured for this tenant")
+		return
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(secretKey) == "" {
+		writeError(w, http.StatusBadRequest, "Stripe credentials invalid")
+		return
+	}
+	stripe.Key = secretKey
+
+	stripeCustomerID := ""
+	if clientModel.StripeCustomerID != nil {
+		stripeCustomerID = strings.TrimSpace(*clientModel.StripeCustomerID)
+	}
+	if stripeCustomerID == "" {
+		if fromHistory, _ := h.clientRepo.FindLatestStripeCustomerIDFromHistory(r.Context(), clientID, tenantID); strings.TrimSpace(fromHistory) != "" {
+			stripeCustomerID = strings.TrimSpace(fromHistory)
+			_ = h.clientRepo.SetStripeCustomerID(r.Context(), clientID, tenantID, stripeCustomerID)
+		}
+	}
+	if stripeCustomerID == "" {
+		params := &stripe.CustomerParams{
+			Name: stripe.String(clientModel.Name),
+			Metadata: map[string]string{
+				"tenant_id": tenantID.String(),
+				"client_id": clientID.String(),
+			},
+		}
+		if clientModel.Email != nil && strings.TrimSpace(*clientModel.Email) != "" {
+			params.Email = stripe.String(strings.TrimSpace(*clientModel.Email))
+		}
+		c, cErr := customer.New(params)
+		if cErr != nil || c == nil || strings.TrimSpace(c.ID) == "" {
+			writeError(w, http.StatusBadGateway, "Failed to create Stripe customer")
+			return
+		}
+		stripeCustomerID = strings.TrimSpace(c.ID)
+		_ = h.clientRepo.SetStripeCustomerID(r.Context(), clientID, tenantID, stripeCustomerID)
+	}
+
+	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
+	if origin == "" {
+		origin = "https://app.clientroll.com"
+	}
+	successURL := origin + "/clients/" + clientID.String() + "?stripe_setup=success"
+	cancelURL := origin + "/clients/" + clientID.String() + "?stripe_setup=cancelled"
+	params := &stripe.CheckoutSessionParams{
+		Mode:                    stripe.String(string(stripe.CheckoutSessionModeSetup)),
+		Customer:                stripe.String(stripeCustomerID),
+		SuccessURL:              stripe.String(successURL),
+		CancelURL:               stripe.String(cancelURL),
+		PaymentMethodTypes:      stripe.StringSlice([]string{"card", "au_becs_debit"}),
+		PaymentMethodCollection: stripe.String("if_required"),
+		Metadata: map[string]string{
+			"type":      "client_payment_method_setup",
+			"tenant_id": tenantID.String(),
+			"client_id": clientID.String(),
+		},
+	}
+	sess, err := checkoutsession.New(params)
+	if err != nil || sess == nil || strings.TrimSpace(sess.URL) == "" {
+		writeError(w, http.StatusBadGateway, "Failed to create Stripe setup session")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"checkout_url":       sess.URL,
+		"session_id":         sess.ID,
+		"stripe_customer_id": stripeCustomerID,
+	})
 }
 
 // SendMandateLink creates a GoCardless redirect flow and emails the link to the client.

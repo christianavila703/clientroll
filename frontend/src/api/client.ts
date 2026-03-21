@@ -211,6 +211,8 @@ export const api = {
     request(`/tenant/clients/${id}/mandate-status`),
   sendClientMandateLink: (id: string) =>
     request(`/tenant/clients/${id}/send-mandate-link`, { method: "POST", body: {} }),
+  createClientStripeSetupSession: (id: string) =>
+    request(`/tenant/clients/${id}/stripe-setup-session`, { method: "POST", body: {} }),
 
   // Memberships
   createMembership: (data: unknown) =>

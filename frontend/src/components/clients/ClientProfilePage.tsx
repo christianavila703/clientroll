@@ -43,6 +43,7 @@ export default function ClientProfilePage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showSetupMembership, setShowSetupMembership] = useState(false);
   const [showTakePayment, setShowTakePayment] = useState(false);
+  const [showAddPaymentMethod, setShowAddPaymentMethod] = useState(false);
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
   const [tenantTax, setTenantTax] = useState<{ percent: number; name: string }>({ percent: 0, name: "GST" });
@@ -216,7 +217,13 @@ export default function ClientProfilePage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <MoreActionsMenu clientId={client.id} clientName={client.name} onSetupMembership={() => setShowSetupMembership(true)} onTakePayment={() => setShowTakePayment(true)} />
+          <MoreActionsMenu
+            clientId={client.id}
+            clientName={client.name}
+            onSetupMembership={() => setShowSetupMembership(true)}
+            onTakePayment={() => setShowTakePayment(true)}
+            onAddPaymentMethod={() => setShowAddPaymentMethod(true)}
+          />
           <button onClick={() => setShowEdit(true)} className="btn-secondary text-[12px]">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
             Edit client
@@ -468,6 +475,15 @@ export default function ClientProfilePage() {
           clientName={client.name}
           onClose={() => setShowSetupMembership(false)}
           onCreated={() => { setShowSetupMembership(false); loadAll(); }}
+        />
+      )}
+
+      {/* Add payment method modal */}
+      {showAddPaymentMethod && (
+        <AddPaymentMethodModal
+          clientId={client.id}
+          clientName={client.name}
+          onClose={() => setShowAddPaymentMethod(false)}
         />
       )}
     </div>
@@ -1106,8 +1122,169 @@ function PaymentsTab({
   );
 }
 
+function AddPaymentMethodModal({
+  clientId,
+  clientName,
+  onClose,
+}: {
+  clientId: string;
+  clientName: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState<string[]>([]);
+  const [mode, setMode] = useState<"direct_debit" | "stripe">("direct_debit");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [mandateLink, setMandateLink] = useState("");
+
+  useEffect(() => {
+    api.getClientMandateStatus(clientId)
+      .then((res) => {
+        const r = res as any;
+        const prov = (r.payment_providers || []) as string[];
+        setProviders(prov);
+        if (prov.includes("stripe") && !prov.includes("gocardless")) setMode("stripe");
+        else setMode("direct_debit");
+      })
+      .catch(() => setProviders([]))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  const hasGC = providers.includes("gocardless");
+  const hasStripe = providers.includes("stripe");
+
+  const handleAddDirectDebit = async () => {
+    setSending(true); setError(""); setSuccess("");
+    try {
+      const data = await api.sendClientMandateLink(clientId) as any;
+      setMandateLink(data.redirect_url || "");
+      setSuccess(data.email_sent
+        ? "Mandate setup link sent to the client."
+        : "Mandate setup link created. Share it with the client.");
+    } catch (e: any) {
+      setError(e?.message || "Failed to create mandate link.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleAddStripe = async () => {
+    setSending(true); setError(""); setSuccess("");
+    try {
+      const data = await api.createClientStripeSetupSession(clientId) as any;
+      if (data.checkout_url) {
+        window.open(data.checkout_url, "_blank");
+        setSuccess("Stripe setup opened in a new tab. Client can add a card or bank account without charging.");
+      } else {
+        setError("Unable to open Stripe setup.");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to create Stripe setup session.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (mode === "direct_debit") return handleAddDirectDebit();
+    return handleAddStripe();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
+        <div className="relative w-full max-w-md bg-white rounded-xl shadow-2xl">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-[15px] font-bold text-gray-900">Add payment method</h2>
+              <p className="text-[12px] text-gray-500">for {clientName}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+          {success && <div className="mx-6 mt-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[13px] text-green-700">{success}</div>}
+          {loading ? (
+            <div className="px-6 py-10 text-center text-[13px] text-gray-500">Loading...</div>
+          ) : (
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-[12px] text-gray-500">Store a payment method now, without charging the client.</p>
+              <div className="space-y-2">
+                {hasGC && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("direct_debit")}
+                    className={`w-full rounded-lg border-2 px-3 py-3 text-left text-[13px] font-medium ${mode === "direct_debit" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
+                  >
+                    Direct debit mandate (GoCardless)
+                  </button>
+                )}
+                {hasStripe && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("stripe")}
+                    className={`w-full rounded-lg border-2 px-3 py-3 text-left text-[13px] font-medium ${mode === "stripe" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
+                  >
+                    Card / bank setup (Stripe)
+                  </button>
+                )}
+                {!hasGC && !hasStripe && (
+                  <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-[12px] text-gray-600">
+                    No payment provider configured. Connect GoCardless or Stripe in Settings.
+                  </div>
+                )}
+              </div>
+              {mode === "direct_debit" && hasGC && (
+                <p className="text-[12px] text-gray-500">Creates a secure mandate link you can send to the client.</p>
+              )}
+              {mode === "stripe" && hasStripe && (
+                <p className="text-[12px] text-gray-500">Opens Stripe setup checkout so the client can save a card or bank account.</p>
+              )}
+              {mandateLink && (
+                <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
+                  <p className="text-[11px] text-gray-500 mb-1">Share this link:</p>
+                  <div className="flex gap-2 items-center">
+                    <input readOnly value={mandateLink} className="flex-1 text-[12px] bg-white border border-gray-200 rounded px-2 py-1.5 text-gray-700 select-all" onClick={e => (e.target as HTMLInputElement).select()} />
+                    <button onClick={() => navigator.clipboard.writeText(mandateLink)} className="text-[11px] text-indigo-600 font-semibold hover:text-indigo-700 whitespace-nowrap">Copy</button>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={onClose} className="btn-secondary text-[12px]">Close</button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={sending || (!hasGC && !hasStripe)}
+                  className="btn-primary"
+                >
+                  {sending ? "Processing..." : mode === "stripe" ? "Open Stripe setup" : "Create mandate link"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── More Actions Dropdown ─── */
-function MoreActionsMenu({ clientId, clientName, onSetupMembership, onTakePayment }: { clientId: string; clientName: string; onSetupMembership: () => void; onTakePayment: () => void }) {
+function MoreActionsMenu({
+  clientId,
+  clientName,
+  onSetupMembership,
+  onTakePayment,
+  onAddPaymentMethod,
+}: {
+  clientId: string;
+  clientName: string;
+  onSetupMembership: () => void;
+  onTakePayment: () => void;
+  onAddPaymentMethod: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -1132,6 +1309,10 @@ function MoreActionsMenu({ clientId, clientName, onSetupMembership, onTakePaymen
           <button onClick={() => { setOpen(false); onTakePayment(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-emerald-700 hover:bg-emerald-50 font-medium">
             <svg className="h-3.5 w-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
             Take payment
+          </button>
+          <button onClick={() => { setOpen(false); onAddPaymentMethod(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-blue-700 hover:bg-blue-50 font-medium">
+            <svg className="h-3.5 w-3.5 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            Add payment method
           </button>
           <div className="my-1 border-t border-gray-100" />
           <button onClick={() => setOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50">

@@ -28,7 +28,7 @@ func (r *ClientRepo) DB() *database.Postgres {
 
 const clientFields = `id, tenant_id, name, unit_number, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
-	emergency_contact_phone, gocardless_customer_id, deleted_at, created_at, updated_at`
+	emergency_contact_phone, gocardless_customer_id, stripe_customer_id, deleted_at, created_at, updated_at`
 
 // List returns all clients for a tenant with optional search and status filter.
 // status: "active" = has active membership, "inactive" = no active membership, "" = all
@@ -134,6 +134,43 @@ func (r *ClientRepo) SetGoCardlessCustomerID(ctx context.Context, clientID, tena
 	return err
 }
 
+// SetStripeCustomerID stores the Stripe customer ID for a client.
+func (r *ClientRepo) SetStripeCustomerID(ctx context.Context, clientID, tenantID uuid.UUID, customerID string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		"UPDATE clients SET stripe_customer_id = $3, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
+		clientID, tenantID, customerID)
+	return err
+}
+
+// FindLatestStripeCustomerIDFromHistory inspects payment snapshots for the newest Stripe customer id for a client.
+func (r *ClientRepo) FindLatestStripeCustomerIDFromHistory(ctx context.Context, clientID, tenantID uuid.UUID) (string, error) {
+	var customerID string
+	err := r.db.Pool.QueryRow(ctx, `
+		WITH candidates AS (
+			SELECT p.stripe_details->>'stripe_customer_id' AS customer_id, p.created_at
+			FROM payments p
+			WHERE p.client_id = $1 AND p.tenant_id = $2
+			  AND COALESCE(p.stripe_details->>'stripe_customer_id', '') <> ''
+			UNION ALL
+			SELECT sc.stripe_details->>'stripe_customer_id' AS customer_id, sc.created_at
+			FROM service_charges sc
+			WHERE sc.client_id = $1 AND sc.tenant_id = $2
+			  AND COALESCE(sc.stripe_details->>'stripe_customer_id', '') <> ''
+		)
+		SELECT customer_id
+		FROM candidates
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, clientID, tenantID).Scan(&customerID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("find latest stripe customer id from history: %w", err)
+	}
+	return customerID, nil
+}
+
 // GetMemberships returns all memberships for a client.
 func (r *ClientRepo) GetMemberships(ctx context.Context, clientID, tenantID uuid.UUID) ([]models.Membership, error) {
 	query := `
@@ -195,7 +232,7 @@ func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
 		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
-		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
+		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.StripeCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 	}
 }
 

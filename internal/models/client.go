@@ -23,6 +23,7 @@ type Client struct {
 	EmergencyContactName  *string    `json:"emergency_contact_name"`
 	EmergencyContactPhone *string    `json:"emergency_contact_phone"`
 	GoCardlessCustomerID  *string    `json:"gocardless_customer_id,omitempty"`
+	StripeCustomerID      *string    `json:"stripe_customer_id,omitempty"`
 	DeletedAt             *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
