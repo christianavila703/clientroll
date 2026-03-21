@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/balancetransaction"
 )
 
 // mergeStripeDetailsForInvoice merges Stripe invoice / PI context onto the payment row
@@ -248,7 +250,107 @@ func (h *StripeWebhookHandler) handleChargeStripe(ctx context.Context, tenantID 
 	if err := h.mergeStripeDetailsFromCharge(ctx, tenantID, event.Data.Raw, event.Created); err != nil {
 		return err
 	}
-	return h.mergeStripeDetailsForServiceCharge(ctx, tenantID, event.Data.Raw, event.Created)
+	if err := h.mergeStripeDetailsForServiceCharge(ctx, tenantID, event.Data.Raw, event.Created); err != nil {
+		return err
+	}
+	// Non-fatal reconciliation: keep webhook processing resilient even if fee lookup fails.
+	if err := h.reconcileStripeProcessingFeeFromCharge(ctx, tenantID, event.Data.Raw, event.Created); err != nil {
+		log.Printf("stripe fee reconciliation tenant=%s err=%v", tenantID, err)
+	}
+	return nil
+}
+
+func (h *StripeWebhookHandler) reconcileStripeProcessingFeeFromCharge(ctx context.Context, tenantID uuid.UUID, raw []byte, eventCreated int64) error {
+	var ch stripe.Charge
+	if err := json.Unmarshal(raw, &ch); err != nil {
+		return nil
+	}
+	var top map[string]interface{}
+	_ = json.Unmarshal(raw, &top)
+
+	feeAmount, ok, err := h.stripeFeeAmountFromCharge(ctx, tenantID, top)
+	if err != nil || !ok {
+		return err
+	}
+
+	patch := map[string]interface{}{
+		"stripe_fee_amount":     feeAmount,
+		"processing_fee_source": "stripe_actual",
+	}
+	if eventCreated > 0 {
+		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
+	}
+
+	// Membership rows are keyed by invoice id in provider_reference.
+	if invoiceID := stripeInvoiceIDFromMap(top); invoiceID != "" && h.paymentRepo != nil {
+		_ = h.paymentRepo.UpdateProcessingFeeByProviderReference(ctx, tenantID, invoiceID, feeAmount)
+		_ = h.paymentRepo.MergeStripeDetails(ctx, tenantID, invoiceID, patch)
+	}
+
+	// Service charges are keyed by charge_id metadata.
+	if h.serviceRepo != nil {
+		if md, ok := top["metadata"].(map[string]interface{}); ok {
+			if typ, _ := md["type"].(string); strings.TrimSpace(typ) == "service_charge" {
+				if chargeIDStr, _ := md["charge_id"].(string); strings.TrimSpace(chargeIDStr) != "" {
+					if chargeID, parseErr := uuid.Parse(strings.TrimSpace(chargeIDStr)); parseErr == nil {
+						_ = h.serviceRepo.UpdateChargeProcessingFee(ctx, tenantID, chargeID, feeAmount)
+						_ = h.serviceRepo.MergeStripeDetailsByChargeID(ctx, tenantID, chargeID, patch)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (h *StripeWebhookHandler) stripeFeeAmountFromCharge(ctx context.Context, tenantID uuid.UUID, top map[string]interface{}) (float64, bool, error) {
+	// 1) Expanded balance_transaction in webhook payload.
+	if top != nil {
+		if bt, ok := top["balance_transaction"].(map[string]interface{}); ok {
+			if fee := feeFromBalanceTransactionMap(bt); fee >= 0 {
+				return fee, true, nil
+			}
+		}
+	}
+	// 2) If webhook only has balance_transaction id, fetch it from Stripe API.
+	btID := ""
+	if top != nil {
+		if s, ok := top["balance_transaction"].(string); ok {
+			btID = strings.TrimSpace(s)
+		}
+	}
+	if btID == "" || h.credRepo == nil || h.encryptor == nil {
+		return 0, false, nil
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return 0, false, nil
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(secretKey) == "" {
+		return 0, false, nil
+	}
+	stripe.Key = secretKey
+	bt, err := balancetransaction.Get(btID, nil)
+	if err != nil || bt == nil {
+		return 0, false, nil
+	}
+	return float64(bt.Fee) / 100.0, true, nil
+}
+
+func feeFromBalanceTransactionMap(bt map[string]interface{}) float64 {
+	if bt == nil {
+		return -1
+	}
+	switch v := bt["fee"].(type) {
+	case float64:
+		return v / 100.0
+	case int64:
+		return float64(v) / 100.0
+	case int:
+		return float64(v) / 100.0
+	}
+	return -1
 }
 
 func (h *StripeWebhookHandler) mergeStripeDetailsForServicePaymentIntent(ctx context.Context, tenantID uuid.UUID, raw []byte, eventCreated int64) error {

@@ -148,6 +148,20 @@ func (r *ServiceRepo) UpdateChargeStatus(ctx context.Context, tenantID, chargeID
 	return nil
 }
 
+// UpdateChargeProcessingFee updates the reconciled processing fee amount for a service charge.
+func (r *ServiceRepo) UpdateChargeProcessingFee(ctx context.Context, tenantID, chargeID uuid.UUID, feeAmount float64) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE service_charges
+		 SET processing_fee_amount = $3,
+		     updated_at = NOW()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, chargeID, feeAmount)
+	if err != nil {
+		return fmt.Errorf("updating service charge processing fee: %w", err)
+	}
+	return nil
+}
+
 // ListChargesByClient returns service charges for a client.
 func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantID uuid.UUID) ([]ServiceCharge, error) {
 	rows, err := r.db.Pool.Query(ctx,

@@ -16,24 +16,24 @@ import (
 
 // Payment represents a payment record.
 type Payment struct {
-	ID                    uuid.UUID  `json:"id"`
-	TenantID              uuid.UUID  `json:"tenant_id"`
-	MembershipID          uuid.UUID  `json:"membership_id"`
-	ClientID              uuid.UUID  `json:"client_id"`
-	Amount                float64    `json:"amount"`
-	BaseAmount            float64    `json:"base_amount"`
-	TaxAmount             float64    `json:"tax_amount"`
-	ProcessingFeeAmount   float64    `json:"processing_fee_amount"`
-	CurrencyCode          string     `json:"currency_code"`
-	Status                string     `json:"status"`
-	ProviderReference     *string    `json:"provider_reference"`
-	DueDate               time.Time  `json:"due_date"`
-	PaidDate              *time.Time `json:"paid_date"`
-	FailureReason         *string    `json:"failure_reason"`
-	FailureCode           *string    `json:"failure_code"`
-	RetryCount            int             `json:"retry_count"`
-	CreatedAt             time.Time       `json:"created_at"`
-	StripeDetails         json.RawMessage `json:"stripe_details,omitempty"`
+	ID                  uuid.UUID       `json:"id"`
+	TenantID            uuid.UUID       `json:"tenant_id"`
+	MembershipID        uuid.UUID       `json:"membership_id"`
+	ClientID            uuid.UUID       `json:"client_id"`
+	Amount              float64         `json:"amount"`
+	BaseAmount          float64         `json:"base_amount"`
+	TaxAmount           float64         `json:"tax_amount"`
+	ProcessingFeeAmount float64         `json:"processing_fee_amount"`
+	CurrencyCode        string          `json:"currency_code"`
+	Status              string          `json:"status"`
+	ProviderReference   *string         `json:"provider_reference"`
+	DueDate             time.Time       `json:"due_date"`
+	PaidDate            *time.Time      `json:"paid_date"`
+	FailureReason       *string         `json:"failure_reason"`
+	FailureCode         *string         `json:"failure_code"`
+	RetryCount          int             `json:"retry_count"`
+	CreatedAt           time.Time       `json:"created_at"`
+	StripeDetails       json.RawMessage `json:"stripe_details,omitempty"`
 }
 
 // PaymentComponents is an optional base / tax / processing-fee split for the charged amount.
@@ -245,6 +245,23 @@ func (r *PaymentRepo) UpdateStatus(ctx context.Context, id, tenantID uuid.UUID, 
 		updated_at=NOW() WHERE id=$1 AND tenant_id=$2`
 	_, err := r.db.Pool.Exec(ctx, query, id, tenantID, status, paidDate, failureReason, failureCode)
 	return err
+}
+
+// UpdateProcessingFeeByProviderReference sets the processing fee for a payment matched by provider reference.
+func (r *PaymentRepo) UpdateProcessingFeeByProviderReference(ctx context.Context, tenantID uuid.UUID, providerRef string, feeAmount float64) error {
+	if strings.TrimSpace(providerRef) == "" {
+		return nil
+	}
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE payments
+		 SET processing_fee_amount = $3,
+		     updated_at = NOW()
+		 WHERE tenant_id = $1 AND provider_reference = $2`,
+		tenantID, providerRef, feeAmount)
+	if err != nil {
+		return fmt.Errorf("update payment processing fee: %w", err)
+	}
+	return nil
 }
 
 // CountByStatus returns payment counts grouped by status for a tenant.
