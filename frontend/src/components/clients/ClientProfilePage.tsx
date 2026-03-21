@@ -1421,28 +1421,39 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [bsb, setBsb] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolderName, setAccountHolderName] = useState("");
+  const [hasStoredMandate, setHasStoredMandate] = useState(false);
+  const [directDebitMode, setDirectDebitMode] = useState<"existing" | "new">("new");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.listMembershipTypes()
-      .then(d => {
-        const membershipData = d as any;
-        const active = (membershipData.membership_types || []).filter((mt: any) => mt.is_active);
-        setTypes(active);
-        // Load full details for each type
-        active.forEach((mt: any) => {
-          api.getMembershipType(mt.id)
-            .then(full => {
-              const fullType = full as any;
-              setTypes(prev => prev.map(t => t.id === fullType.id ? fullType : t));
-            });
-        });
+    Promise.all([
+      api.listMembershipTypes(),
+      api.getClientMandateStatus(clientId).catch(() => ({})),
+    ]).then(([d, mandate]) => {
+      const membershipData = d as any;
+      const active = (membershipData.membership_types || []).filter((mt: any) => mt.is_active);
+      setTypes(active);
+      // Load full details for each type
+      active.forEach((mt: any) => {
+        api.getMembershipType(mt.id)
+          .then(full => {
+            const fullType = full as any;
+            setTypes(prev => prev.map(t => t.id === fullType.id ? fullType : t));
+          });
       });
+      const hasMandate = !!(mandate as any)?.has_mandate;
+      setHasStoredMandate(hasMandate);
+      setDirectDebitMode(hasMandate ? "existing" : "new");
+    });
   }, []);
 
   const handleSubmit = async () => {
     if (!selectedType || !selectedTerm) return;
+    if (frequency !== "upfront" && directDebitMode === "new" && (!bsb.trim() || !accountNumber.trim())) {
+      setError("BSB and account number are required when adding a new payment method.");
+      return;
+    }
     setSaving(true); setError("");
     try {
       const isCustomSchedule = frequency === "custom_schedule";
@@ -1461,7 +1472,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
         payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
         num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
       };
-      if (frequency !== "upfront" && bsb.trim() && accountNumber.trim()) {
+      if (frequency !== "upfront" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
         body.bsb = bsb.trim();
         body.account_number = accountNumber.trim();
         if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
@@ -1615,21 +1626,45 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                   {frequency !== "upfront" && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
-                      <p className="text-[12px] text-gray-500 mb-3">If this client already has a stored mandate, it will be reused automatically. Enter bank details only to create a new mandate.</p>
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-[12px] font-medium text-gray-600 mb-1">Account holder name</label>
-                          <input type="text" value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} placeholder={clientName} className="input-field max-w-md text-[13px]" />
+                      {hasStoredMandate && (
+                        <div className="mb-3 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDirectDebitMode("existing")}
+                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "existing" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                          >
+                            Use existing
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDirectDebitMode("new")}
+                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "new" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                          >
+                            Add new payment method
+                          </button>
                         </div>
-                        <div>
-                          <label className="block text-[12px] font-medium text-gray-600 mb-1">BSB</label>
-                          <input type="text" value={bsb} onChange={e => setBsb(e.target.value)} placeholder="000-000" className="input-field max-w-[8rem] font-mono text-[13px]" maxLength={9} />
-                        </div>
-                        <div>
-                          <label className="block text-[12px] font-medium text-gray-600 mb-1">Account number</label>
-                          <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="12345678" className="input-field max-w-[12rem] font-mono text-[13px]" />
-                        </div>
-                      </div>
+                      )}
+                      {hasStoredMandate && directDebitMode === "existing" ? (
+                        <p className="text-[12px] text-emerald-700">Existing direct debit mandate will be reused for this membership.</p>
+                      ) : (
+                        <>
+                          <p className="text-[12px] text-gray-500 mb-3">Enter bank details to create a new mandate for this client.</p>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-[12px] font-medium text-gray-600 mb-1">Account holder name</label>
+                              <input type="text" value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} placeholder={clientName} className="input-field max-w-md text-[13px]" />
+                            </div>
+                            <div>
+                              <label className="block text-[12px] font-medium text-gray-600 mb-1">BSB</label>
+                              <input type="text" value={bsb} onChange={e => setBsb(e.target.value)} placeholder="000-000" className="input-field max-w-[8rem] font-mono text-[13px]" maxLength={9} />
+                            </div>
+                            <div>
+                              <label className="block text-[12px] font-medium text-gray-600 mb-1">Account number</label>
+                              <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="12345678" className="input-field max-w-[12rem] font-mono text-[13px]" />
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1885,7 +1920,7 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                       <span className="block text-[10px] font-normal text-green-600 mt-0.5">Mandate active</span>
                     </button>
                   )}
-                  {hasGC && !hasMandate && (
+                  {hasGC && (
                     <button
                       onClick={() => setPaymentMethod("gocardless_bank")}
                       className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
@@ -1893,8 +1928,8 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                       }`}
                     >
                       <svg className="h-5 w-5 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
-                      Direct Debit
-                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">Enter bank details</span>
+                      {hasMandate ? "Add New Bank" : "Direct Debit"}
+                      <span className="block text-[10px] font-normal text-gray-500 mt-0.5">{hasMandate ? "Create new mandate" : "Enter bank details"}</span>
                     </button>
                   )}
                   {!hasGC && hasStripe && (
