@@ -2,6 +2,13 @@
 
 Deployments should follow: **Git → push to GitHub → on server pull from GitHub → deploy on server**.
 
+For high-safety releases, always include:
+
+- Automatic DB migration execution (no manual psql step)
+- Production smoke checks immediately after deploy
+- A runbook drill path for replay/reconcile endpoints
+- Annotated release tag for rollback target
+
 ## 1. Push to GitHub
 
 From your machine:
@@ -59,6 +66,66 @@ DEPLOY_HOST=root@203.29.242.238 DEPLOY_PATH=/var/www/clientroll ./deploy.sh
 ```
 
 This builds locally, SCPs the binary and `frontend/dist` to the server, runs migrations on the server (if the repo is present there), swaps files, and restarts the service. The server does **not** need to pull from GitHub for this flow.
+
+`deploy.sh` now resolves `DATABASE_URL` from server env and runs `go run ./cmd/migrate up` locally against the production DB **before** the service swap, so migration execution is not dependent on source code existing at `DEPLOY_PATH`.
+
+If you must skip migrations for an emergency binary-only rollback:
+
+```bash
+SKIP_MIGRATIONS=1 DEPLOY_HOST=root@203.29.242.238 DEPLOY_PATH=/var/www/clientroll ./deploy.sh
+```
+
+## Production smoke checks
+
+Use the smoke script after every deploy:
+
+```bash
+APP_URL=https://app.clientroll.com ./scripts/smoke-prod.sh
+```
+
+To also verify signed signup URL enforcement:
+
+```bash
+APP_URL=https://app.clientroll.com DEPLOY_HOST=root@203.29.242.238 TENANT_SLUG=your-tenant ./scripts/smoke-prod.sh
+```
+
+This checks:
+
+- `GET /api/health` returns `200` and `status=ok`
+- Public signup blocks unsigned requests and accepts signed requests
+
+## Runbook drill (replay/reconcile)
+
+Exercise internal recovery endpoints with:
+
+```bash
+APP_URL=https://app.clientroll.com PLATFORM_TOKEN=<platform-jwt> ./scripts/runbook-drill.sh
+```
+
+Optional tenant scope:
+
+```bash
+APP_URL=https://app.clientroll.com PLATFORM_TOKEN=<platform-jwt> TENANT_ID=<uuid> ./scripts/runbook-drill.sh
+```
+
+This validates operational control-plane access and output for:
+
+- `GET /api/platform/ops/health-snapshot`
+- `POST /api/platform/webhooks/stripe/replay-failures` (dry run)
+- `POST /api/platform/ops/reconcile-runbook`
+
+## Release hygiene
+
+Before production deployment:
+
+1. Ensure branch is reviewed and up to date with remote.
+2. Use a clean working tree for the release commit.
+3. Create an annotated tag after successful smoke + runbook drill:
+
+```bash
+git tag -a vYYYY.MM.DD-1 -m "ClientRoll production release"
+git push origin vYYYY.MM.DD-1
+```
 
 ## Summary
 

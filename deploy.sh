@@ -30,24 +30,35 @@ ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "mkdir -p $DEPLOY_PATH/web_new"
 echo "Uploading frontend (web/)..."
 scp "${SSH_OPTS[@]}" -r web/* "$DEPLOY_HOST:$DEPLOY_PATH/web_new/"
 
-echo "Running migration (if repo present) and switching binary + frontend on server..."
+echo "Resolving DATABASE_URL from server env..."
+REMOTE_DATABASE_URL="$(
+  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH'" << 'REMOTE_DB'
+set -euo pipefail
+DEPLOY_PATH="$1"
+cd "$DEPLOY_PATH" || exit 1
+[[ -f .env ]] && set -a && source .env && set +a
+[[ -z "${DATABASE_URL:-}" && -f .env.production ]] && set -a && source .env.production && set +a
+printf '%s' "${DATABASE_URL:-}"
+REMOTE_DB
+)"
+
+if [[ "${SKIP_MIGRATIONS:-0}" == "1" ]]; then
+  echo "Skipping migrations because SKIP_MIGRATIONS=1."
+else
+  if [[ -z "${REMOTE_DATABASE_URL:-}" ]]; then
+    echo "DATABASE_URL is required to run migrations."
+    exit 1
+  fi
+  echo "Running migrations locally against production DB..."
+  DATABASE_URL="$REMOTE_DATABASE_URL" go run ./cmd/migrate up
+fi
+
+echo "Switching binary + frontend on server..."
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH' '$SERVICE'" << 'REMOTE'
   set -euo pipefail
   DEPLOY_PATH="$1"
   SERVICE="$2"
   cd "$DEPLOY_PATH" || exit 1
-  [[ -f .env ]] && set -a && source .env && set +a
-  [[ -z "$DATABASE_URL" && -f .env.production ]] && set -a && source .env.production && set +a
-  if [[ -f cmd/migrate/main.go ]]; then
-    if [[ -z "${DATABASE_URL:-}" ]]; then
-      echo "DATABASE_URL is required to run migrations at $DEPLOY_PATH."
-      exit 1
-    fi
-    echo "Running migrations..."
-    go run ./cmd/migrate up
-  else
-    echo "Skipping migration: no repo migration source at $DEPLOY_PATH/cmd/migrate/main.go."
-  fi
   # Stop service before replacing binary (avoid "Text file busy")
   if sudo systemctl is-active --quiet "$SERVICE"; then
     sudo systemctl stop "$SERVICE"

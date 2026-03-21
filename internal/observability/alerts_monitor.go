@@ -1,8 +1,12 @@
 package observability
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log"
+	"net/http"
+	"os"
 	"time"
 
 	"clientroll/internal/database"
@@ -13,6 +17,7 @@ const (
 	alertFailedDeliveries15mThresh   = 10
 	alertStuckRetriesThreshold       = 1
 	alertServiceLedgerMismatchThresh = 5
+	alertMembershipStatusDriftThresh = 5
 )
 
 // StartAlertsMonitor runs periodic operational alert checks and logs alert events.
@@ -37,10 +42,14 @@ func StartAlertsMonitor(ctx context.Context, db *database.Postgres, interval tim
 }
 
 func runAlertChecks(ctx context.Context, db *database.Postgres) {
+	activateScheduledMemberships(ctx, db)
+	reconcileMembershipStatusDrift(ctx, db)
+
 	var retryQueueDepth int
 	var failedDeliveries15m int
 	var stuckRetries int
 	var serviceMismatch24h int
+	var membershipStatusDrift int
 
 	_ = db.Pool.QueryRow(ctx, `
 		SELECT COUNT(*)
@@ -74,16 +83,161 @@ func runAlertChecks(ctx context.Context, db *database.Postgres) {
 		  )
 	`).Scan(&serviceMismatch24h)
 
+	_ = db.Pool.QueryRow(ctx, `
+		WITH latest_payment AS (
+			SELECT DISTINCT ON (p.tenant_id, p.membership_id)
+				p.tenant_id, p.membership_id, p.status
+			FROM payments p
+			ORDER BY p.tenant_id, p.membership_id, COALESCE(p.paid_date, p.due_date, p.created_at) DESC, p.created_at DESC
+		),
+		targets AS (
+			SELECT
+				m.status AS current_status,
+				CASE
+					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
+					WHEN lp.status = 'succeeded' THEN 'active'
+					ELSE m.status
+				END AS target_status
+			FROM memberships m
+			LEFT JOIN latest_payment lp
+				ON lp.tenant_id = m.tenant_id
+				AND lp.membership_id = m.id
+			WHERE m.status NOT IN ('cancelled', 'expired')
+		)
+		SELECT COUNT(*)
+		FROM targets
+		WHERE current_status <> target_status
+	`).Scan(&membershipStatusDrift)
+
 	if retryQueueDepth >= alertRetryQueueDepthThreshold {
-		log.Printf("ALERT retry_queue_depth_high depth=%d threshold=%d", retryQueueDepth, alertRetryQueueDepthThreshold)
+		emitAlert("retry_queue_depth_high", map[string]interface{}{
+			"depth":     retryQueueDepth,
+			"threshold": alertRetryQueueDepthThreshold,
+		})
 	}
 	if failedDeliveries15m >= alertFailedDeliveries15mThresh {
-		log.Printf("ALERT failed_webhook_deliveries_spike count=%d threshold=%d window=15m", failedDeliveries15m, alertFailedDeliveries15mThresh)
+		emitAlert("failed_webhook_deliveries_spike", map[string]interface{}{
+			"count":     failedDeliveries15m,
+			"threshold": alertFailedDeliveries15mThresh,
+			"window":    "15m",
+		})
 	}
 	if stuckRetries >= alertStuckRetriesThreshold {
-		log.Printf("ALERT stuck_webhook_retries count=%d", stuckRetries)
+		emitAlert("stuck_webhook_retries", map[string]interface{}{
+			"count": stuckRetries,
+		})
 	}
 	if serviceMismatch24h >= alertServiceLedgerMismatchThresh {
-		log.Printf("ALERT service_payment_ledger_mismatch count=%d threshold=%d window=24h", serviceMismatch24h, alertServiceLedgerMismatchThresh)
+		emitAlert("service_payment_ledger_mismatch", map[string]interface{}{
+			"count":     serviceMismatch24h,
+			"threshold": alertServiceLedgerMismatchThresh,
+			"window":    "24h",
+		})
+	}
+	if membershipStatusDrift >= alertMembershipStatusDriftThresh {
+		emitAlert("membership_status_drift", map[string]interface{}{
+			"count":     membershipStatusDrift,
+			"threshold": alertMembershipStatusDriftThresh,
+		})
+	}
+}
+
+func activateScheduledMemberships(ctx context.Context, db *database.Postgres) {
+	tag, err := db.Pool.Exec(ctx, `
+		UPDATE memberships
+		SET status = 'active',
+		    updated_at = NOW()
+		WHERE status = 'scheduled'
+		  AND start_date <= (NOW() AT TIME ZONE 'UTC')::date
+	`)
+	if err != nil {
+		log.Printf("alerts.monitor activate_scheduled_memberships_failed err=%v", err)
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		log.Printf("alerts.monitor activated_scheduled_memberships count=%d", tag.RowsAffected())
+	}
+}
+
+func reconcileMembershipStatusDrift(ctx context.Context, db *database.Postgres) {
+	tag, err := db.Pool.Exec(ctx, `
+		WITH latest_payment AS (
+			SELECT DISTINCT ON (p.tenant_id, p.membership_id)
+				p.tenant_id, p.membership_id, p.status
+			FROM payments p
+			ORDER BY p.tenant_id, p.membership_id, COALESCE(p.paid_date, p.due_date, p.created_at) DESC, p.created_at DESC
+		),
+		targets AS (
+			SELECT
+				m.id,
+				m.tenant_id,
+				CASE
+					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
+					WHEN lp.status = 'succeeded' THEN 'active'
+					ELSE m.status
+				END AS target_status
+			FROM memberships m
+			LEFT JOIN latest_payment lp
+				ON lp.tenant_id = m.tenant_id
+				AND lp.membership_id = m.id
+			WHERE m.status NOT IN ('cancelled', 'expired')
+		)
+		UPDATE memberships m
+		SET status = t.target_status,
+		    updated_at = NOW()
+		FROM targets t
+		WHERE m.id = t.id
+		  AND m.tenant_id = t.tenant_id
+		  AND m.status <> t.target_status
+	`)
+	if err != nil {
+		log.Printf("alerts.monitor reconcile_membership_status_drift_failed err=%v", err)
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		log.Printf("alerts.monitor reconciled_membership_status_drift count=%d", tag.RowsAffected())
+	}
+}
+
+func emitAlert(alertType string, payload map[string]interface{}) {
+	body := map[string]interface{}{
+		"alert_type": alertType,
+		"source":     "alerts.monitor",
+		"at":         time.Now().UTC().Format(time.RFC3339),
+	}
+	for k, v := range payload {
+		body[k] = v
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("ALERT %s payload_marshal_failed err=%v", alertType, err)
+		return
+	}
+	log.Printf("ALERT %s", string(b))
+	postAlertWebhook(b)
+}
+
+func postAlertWebhook(payload []byte) {
+	webhookURL := os.Getenv("ALERTS_WEBHOOK_URL")
+	if webhookURL == "" {
+		return
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("alerts.monitor webhook request build failed err=%v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("alerts.monitor webhook delivery failed err=%v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("alerts.monitor webhook non-2xx status=%d", resp.StatusCode)
 	}
 }
