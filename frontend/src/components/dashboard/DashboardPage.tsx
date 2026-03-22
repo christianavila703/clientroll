@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const revDelta = prevMonthRevenue > 0 ? Math.round(((curMonthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100) : 0;
 
   const totalPayments = Object.values(statuses).reduce((a, b) => a + b, 0);
+  const settledPayments = (statuses.succeeded || 0) + (statuses.failed || 0) + (statuses.disputed || 0);
 
   const topMixCount = 5;
   const sortedBreakdown = [...breakdown].sort((a, b) => b.count - a.count);
@@ -115,7 +116,7 @@ export default function DashboardPage() {
   };
 
   /* ─── Payment Health Gauge ─── */
-  const successRate = totalPayments > 0 ? Math.round(((statuses.succeeded || 0) / totalPayments) * 100) : 0;
+  const successRate = settledPayments > 0 ? Math.round(((statuses.succeeded || 0) / settledPayments) * 100) : 0;
   const paymentGauge = {
     series: [{
       type: "gauge" as const,
@@ -238,7 +239,7 @@ export default function DashboardPage() {
           <div className="card overflow-hidden">
             <div className="card-header"><h3>Payment Health</h3><span className="text-[12px] text-gray-400">{totalPayments} total payments</span></div>
             <div className="px-5 py-4">
-              {totalPayments > 0 ? (
+              {settledPayments > 0 ? (
                 <div className="flex items-center gap-6">
                   <ReactECharts option={paymentGauge} style={{ height: 180, width: 200 }} />
                   <div className="space-y-2 flex-1">
@@ -249,7 +250,9 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex h-32 items-center justify-center text-[13px] text-gray-500">No payments yet</div>
+                <div className="flex h-32 items-center justify-center text-[13px] text-gray-500">
+                  {totalPayments > 0 ? "No settled payments yet" : "No payments yet"}
+                </div>
               )}
             </div>
           </div>

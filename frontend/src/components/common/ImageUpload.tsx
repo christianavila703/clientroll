@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import api from "../../api/client";
+import api, { ApiError } from "../../api/client";
 
 interface Props {
   label: string;
@@ -36,8 +36,14 @@ export default function ImageUpload({ label, hint, entityType = "general", curre
       const res = await api.uploadImage(file, entityType);
       if (onUploaded) onUploaded(res.public_url);
       if (onChange) onChange(res.public_url);
-    } catch {
-      setError("Upload failed. Please try again.");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 413) {
+        setError("Image is too large. Please use an image under 5 MB.");
+      } else if (err instanceof Error && err.message) {
+        setError(err.message);
+      } else {
+        setError("Upload failed. Please try again.");
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
