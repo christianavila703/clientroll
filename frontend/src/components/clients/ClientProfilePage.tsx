@@ -785,7 +785,15 @@ function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, togg
             <p className="text-[13px] text-gray-700 mt-1">
               {m.last_payment_date ? fmtShort(m.last_payment_date) : "—"}
               {m.last_payment_status && (
-                <span className={`badge ml-1 ${m.last_payment_status === "succeeded" ? "badge-green" : "badge-red"}`}>
+                <span className={`badge ml-1 ${
+                  m.last_payment_status === "succeeded"
+                    ? "badge-green"
+                    : m.last_payment_status === "pending" || m.last_payment_status === "submitted" || m.last_payment_status === "disputed"
+                      ? "badge-yellow"
+                      : m.last_payment_status === "cancelled"
+                        ? "badge-gray"
+                        : "badge-red"
+                }`}>
                   {m.last_payment_status}
                 </span>
               )}
