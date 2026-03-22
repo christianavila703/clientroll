@@ -396,10 +396,17 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
   companyAddressSameAsClient: boolean;
   onCompanyAddressSameAsClientChange: (next: boolean) => void;
 }) {
+  const personalStreetWithUnit = (unit: string, street: string) => {
+    const u = (unit || "").trim();
+    const s = (street || "").trim();
+    if (!u) return s;
+    if (!s) return `Unit ${u}`;
+    return `Unit ${u}, ${s}`;
+  };
   const set = (k: string, v: string) => {
     const next = { ...data, [k]: v };
     if (companyAddressSameAsClient) {
-      if (k === "address") next.company_address = v;
+      if (k === "address" || k === "unit_number") next.company_address = personalStreetWithUnit(k === "unit_number" ? v : next.unit_number, k === "address" ? v : next.address);
       if (k === "suburb") next.company_city = v;
       if (k === "state") next.company_state_region = v;
       if (k === "postcode") next.company_postcode = v;
@@ -432,7 +439,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
                 postcode: postcode || data.postcode,
               };
               if (companyAddressSameAsClient) {
-                next.company_address = address || data.address;
+                next.company_address = personalStreetWithUnit(unit_number || data.unit_number, address || data.address);
                 next.company_city = suburb || data.suburb;
                 next.company_state_region = state || data.state;
                 next.company_postcode = postcode || data.postcode;
@@ -501,7 +508,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
                   if (checked) {
                     onChange({
                       ...data,
-                      company_address: data.address,
+                      company_address: personalStreetWithUnit(data.unit_number, data.address),
                       company_city: data.suburb,
                       company_state_region: data.state,
                       company_postcode: data.postcode,
