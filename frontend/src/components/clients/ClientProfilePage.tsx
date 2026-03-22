@@ -139,10 +139,16 @@ export default function ClientProfilePage() {
         percent: Number.isFinite(txPct) ? txPct : 0,
         name: String(tenantRes?.sales_tax_name || "GST"),
       });
-      setMemberships(memberRes.memberships || []);
+      const membershipsList = memberRes.memberships || [];
+      setMemberships(membershipsList);
+      const membershipByID = new Map(
+        membershipsList.map((m: MembershipRecord) => [m.membership_id, m])
+      );
 
       const membershipPayments: PaymentRecord[] = (payRes.payments || []).map((p: any) => ({
         ...p, _type: "membership" as const,
+        membership_type: p.membership_type || membershipByID.get(p.membership_id)?.membership_type,
+        term_months: p.term_months || membershipByID.get(p.membership_id)?.term_months,
       }));
       const serviceCharges: PaymentRecord[] = ((chargesRes as any).charges || []).map((c: any) => ({
         id: c.id,
@@ -1099,9 +1105,8 @@ function PaymentsTab({
                 )}
                 {p._type !== "service" && (p.membership_type || p.membership_id) && (
                   <p className="text-[11px] text-gray-500">
-                    {p.membership_type || "Membership"}
+                    {p.membership_type || "Membership payment"}
                     {typeof p.term_months === "number" && p.term_months > 0 ? ` · ${p.term_months}-month term` : ""}
-                    {p.membership_id ? ` · MEM-${p.membership_id.slice(0, 4).toUpperCase()}` : ""}
                   </p>
                 )}
                 {p.paid_date && (p.status === "succeeded" || p.status === "confirmed") && (
