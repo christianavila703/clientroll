@@ -65,6 +65,7 @@ export interface MembershipRecord {
   status: string;
   mandate_id?: string;
   subscription_id?: string;
+  stripe_subscription_id?: string;
   has_agreement?: boolean;
   total_paid: number;
   total_expected: number;

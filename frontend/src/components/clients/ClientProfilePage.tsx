@@ -797,20 +797,22 @@ function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, togg
           </div>
         </div>
 
-        {m.status === "active" && m.payment_method === "card" && onToggleContinueAfterTerm && (
+        {m.status === "active" && (m.payment_method === "card" || !!m.stripe_subscription_id) && onToggleContinueAfterTerm && (
           <div className="mt-2 border-t border-gray-100 pt-3">
             <label className="inline-flex items-center gap-2 text-[12px] text-gray-700">
               <input
                 type="checkbox"
                 checked={!!m.continue_after_term}
-                disabled={!!toggleBusy}
+                disabled={!!toggleBusy || !m.stripe_subscription_id}
                 onChange={(e) => onToggleContinueAfterTerm(m.membership_id, e.target.checked)}
                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 disabled:opacity-50"
               />
               Continue billing after term
             </label>
             <p className="mt-1 text-[11px] text-gray-400">
-              Updates this member's Stripe subscription only.
+              {!m.stripe_subscription_id
+                ? "Stripe subscription is still syncing for this membership."
+                : "Updates this member's Stripe subscription only."}
             </p>
           </div>
         )}

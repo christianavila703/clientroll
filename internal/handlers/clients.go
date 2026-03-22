@@ -342,6 +342,7 @@ type ClientMembershipRow struct {
 	Status                  string   `json:"status"`
 	MandateID               *string  `json:"mandate_id"`
 	SubscriptionID          *string  `json:"subscription_id"`
+	StripeSubscriptionID    *string  `json:"stripe_subscription_id"`
 	HasAgreement            bool     `json:"has_agreement"`
 	TotalPaid               float64  `json:"total_paid"`
 	TotalExpected           float64  `json:"total_expected"`
@@ -378,6 +379,12 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			m.status,
 			m.gocardless_mandate_id,
 			m.gocardless_subscription_id,
+			(SELECT p.stripe_details->>'stripe_subscription_id'
+			 FROM payments p
+			 WHERE p.membership_id = m.id
+			   AND COALESCE(p.stripe_details->>'stripe_subscription_id', '') <> ''
+			 ORDER BY p.created_at DESC
+			 LIMIT 1),
 			EXISTS(
 				SELECT 1 FROM membership_agreement_snapshots mas
 				WHERE mas.membership_id = m.id AND mas.tenant_id = m.tenant_id
@@ -422,7 +429,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			&row.MembershipID, &row.MembershipType, &row.MembershipTypeID,
 			&row.TermMonths, &row.StartDate, &row.EndDate,
 			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentIntervalUnit, &row.PaymentIntervalCount, &row.PaymentAmount, &row.NumPayments,
-			&row.ContinueAfterTerm, &row.Status, &row.MandateID, &row.SubscriptionID,
+			&row.ContinueAfterTerm, &row.Status, &row.MandateID, &row.SubscriptionID, &row.StripeSubscriptionID,
 			&row.HasAgreement,
 			&row.TotalPaid, &row.TotalExpected,
 			&row.FailedCount, &row.LastPaymentDate, &row.LastPaymentStatus,
