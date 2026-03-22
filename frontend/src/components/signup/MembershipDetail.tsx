@@ -47,20 +47,11 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
     .filter((v): v is number => typeof v === "number" && v > 0)
     .sort((a, b) => a - b)[0];
   const monthlyValue = monthlyFromTerm ?? monthlyFallback ?? null;
-  const effectiveEnabledFrequencies =
-    membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
-      ? membership.enabled_payment_frequencies
-      : enabledPaymentFrequencies;
-  const frequencySet = new Set((effectiveEnabledFrequencies || []).map((f) => String(f).toLowerCase()));
   const resolvedDisplayMode: "total" | "weekly" | "monthly" =
-    priceDisplayMode === "weekly" && frequencySet.has("weekly") && weeklyValue !== null
+    priceDisplayMode === "weekly" && weeklyValue !== null
       ? "weekly"
-      : priceDisplayMode === "monthly" && frequencySet.has("monthly") && monthlyValue !== null
+      : priceDisplayMode === "monthly" && monthlyValue !== null
       ? "monthly"
-      : frequencySet.has("monthly") && monthlyValue !== null
-      ? "monthly"
-      : frequencySet.has("weekly") && weeklyValue !== null
-      ? "weekly"
       : "total";
   const showWeekly = resolvedDisplayMode === "weekly";
   const showMonthly = resolvedDisplayMode === "monthly";

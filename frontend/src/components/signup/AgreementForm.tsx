@@ -334,9 +334,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
               const resolvedMode =
                 mode === "weekly"
-                  ? (effectiveFrequencySet.has("weekly") && weeklyValue ? "weekly" : "total")
+                  ? (weeklyValue ? "weekly" : "total")
                   : mode === "monthly"
-                  ? (effectiveFrequencySet.has("monthly") && monthlyValue ? "monthly" : "total")
+                  ? (monthlyValue ? "monthly" : "total")
                   : "total";
               if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
