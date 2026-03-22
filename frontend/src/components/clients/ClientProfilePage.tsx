@@ -1122,12 +1122,7 @@ function PaymentsTab({
                 )}
                 {p.status === "pending" && (
                   <p className="text-[11px] text-amber-600">
-                    {hasStripeDetails(p.stripe_details) &&
-                    String((p.stripe_details as Record<string, unknown>)?.payment_intent_status || "") === "processing"
-                      ? "Payment pending with the bank (direct debit) — usually clears in a few business days."
-                      : hasStripeDetails(p.stripe_details)
-                        ? "Payment pending in Stripe (invoice may still be collecting)."
-                        : "Payment pending submission"}
+                    Payment pending
                   </p>
                 )}
                 {p.status === "failed" && (
