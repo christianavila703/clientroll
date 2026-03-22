@@ -209,13 +209,16 @@ export default function ClientProfilePage() {
 
   const initials = client.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   const activeMemberships = memberships.filter(m => m.status === "active");
+  const scheduledMemberships = memberships.filter(m => m.status === "scheduled");
+  /** Billing schedule + counts: include scheduled (future start) so Stripe/GC upcoming charges show. */
+  const billingMemberships = memberships.filter(m => m.status === "active" || m.status === "scheduled");
   const hasCardMembership = memberships.some((m) => (m.payment_method || "").toLowerCase() === "card");
   const hasDirectDebitMembership = memberships.some((m) => (m.payment_method || "").toLowerCase() === "direct_debit");
   const hasStripe = paymentInfo.providers.includes("stripe");
   const hasGoCardless = paymentInfo.providers.includes("gocardless");
   const showDirectDebit = paymentInfo.hasMandate || hasDirectDebitMembership || hasGoCardless || paymentInfo.supportsDirectDebit;
   const showCardPayments = hasCardMembership || hasStripe;
-  const hasActive = activeMemberships.length > 0;
+  const hasActive = activeMemberships.length > 0 || scheduledMemberships.length > 0;
   const succeededPayments = payments.filter(p => p.status === "succeeded");
   const failedPayments = payments.filter(p => p.status === "failed");
   const totalCustomerCharged = succeededPayments.reduce((sum, p) => sum + customerCharged(p), 0);
@@ -306,7 +309,7 @@ export default function ClientProfilePage() {
             <MembershipsTab memberships={memberships} fmtShort={fmtShort} tenantTimezone={tenantTimezone} onRefresh={loadAll} />
           )}
           {tab === "billing" && (
-            <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} tenantTaxPercent={tenantTax.percent} />
+            <BillingScheduleTab memberships={billingMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} tenantTaxPercent={tenantTax.percent} />
           )}
           {tab === "payments" && (
             <PaymentsTab
@@ -478,6 +481,12 @@ export default function ClientProfilePage() {
                 <span className="text-gray-500">Active memberships</span>
                 <span className="text-gray-900 font-medium">{activeMemberships.length}</span>
               </div>
+              {scheduledMemberships.length > 0 && (
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-gray-500">Starting soon</span>
+                  <span className="text-amber-700 font-medium">{scheduledMemberships.length}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -589,7 +598,8 @@ function SummaryTab({ memberships, payments, fmtShort, tenantTimezone, onViewAll
   memberships: MembershipRecord[]; payments: PaymentRecord[]; fmtShort: (d: string) => string; tenantTimezone: string; onViewAll: () => void;
 }) {
   const active = memberships.filter(m => m.status === "active");
-  const past = memberships.filter(m => m.status !== "active");
+  const scheduled = memberships.filter(m => m.status === "scheduled");
+  const past = memberships.filter(m => m.status !== "active" && m.status !== "scheduled");
 
   return (
     <div className="space-y-5">
@@ -612,6 +622,21 @@ function SummaryTab({ memberships, payments, fmtShort, tenantTimezone, onViewAll
           </div>
         )}
       </div>
+
+      {/* Scheduled = future start_date; not "past" */}
+      {scheduled.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="card-header">
+            <h3>Starting soon</h3>
+            <span className="text-[12px] text-amber-600">{scheduled.length} scheduled</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {scheduled.map(m => (
+              <MembershipSummaryRow key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Past memberships */}
       {past.length > 0 && (
@@ -663,6 +688,7 @@ function SummaryTab({ memberships, payments, fmtShort, tenantTimezone, onViewAll
 /* ─── Membership Summary Row ─── */
 function MembershipSummaryRow({ m, fmtShort, tenantTimezone }: { m: MembershipRecord; fmtShort: (d: string) => string; tenantTimezone: string }) {
   const daysLeft = daysUntilDateOnly(m.end_date, tenantTimezone);
+  const daysToStart = daysUntilDateOnly(m.start_date, tenantTimezone);
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
   return (
@@ -674,7 +700,9 @@ function MembershipSummaryRow({ m, fmtShort, tenantTimezone }: { m: MembershipRe
             {m.term_months} months · {fmtShort(m.start_date)} — {fmtShort(m.end_date)}
           </p>
         </div>
-        <span className={`badge ${m.status === "active" ? "badge-green" : m.status === "expired" ? "badge-gray" : "badge-red"}`}>
+        <span className={`badge ${
+          m.status === "active" ? "badge-green" : m.status === "scheduled" ? "badge-yellow" : m.status === "expired" ? "badge-gray" : "badge-red"
+        }`}>
           {m.status}
         </span>
       </div>
@@ -694,6 +722,12 @@ function MembershipSummaryRow({ m, fmtShort, tenantTimezone }: { m: MembershipRe
             ${m.total_paid.toLocaleString()} / ${m.total_expected.toLocaleString()}
           </p>
         </div>
+        {m.status === "scheduled" && daysToStart > 0 && (
+          <div>
+            <span className="text-gray-400">Starts in</span>
+            <p className="font-medium mt-0.5 text-amber-700">{daysToStart} days</p>
+          </div>
+        )}
         {m.status === "active" && daysLeft > 0 && (
           <div>
             <span className="text-gray-400">Remaining</span>
@@ -726,7 +760,8 @@ function MembershipSummaryRow({ m, fmtShort, tenantTimezone }: { m: MembershipRe
 /* ─── Memberships Tab (detailed cards) ─── */
 function MembershipsTab({ memberships, fmtShort, tenantTimezone, onRefresh }: { memberships: MembershipRecord[]; fmtShort: (d: string) => string; tenantTimezone: string; onRefresh: () => void }) {
   const active = memberships.filter(m => m.status === "active");
-  const inactive = memberships.filter(m => m.status !== "active");
+  const scheduled = memberships.filter(m => m.status === "scheduled");
+  const inactive = memberships.filter(m => m.status !== "active" && m.status !== "scheduled");
   const [togglingMembershipID, setTogglingMembershipID] = useState<string | null>(null);
 
   const handleCancel = async (membershipId: string) => {
@@ -773,6 +808,15 @@ function MembershipsTab({ memberships, fmtShort, tenantTimezone, onRefresh }: { 
           </div>
         </div>
       )}
+      {scheduled.length > 0 && (
+        <div>
+          <h2 className="text-[13px] font-semibold text-amber-800 mb-3">Starting soon ({scheduled.length})</h2>
+          <p className="text-[12px] text-gray-500 mb-3">Membership starts on the start date below; billing may begin once that date is reached.</p>
+          <div className="space-y-4">
+            {scheduled.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} onCancel={() => handleCancel(m.membership_id)} onToggleContinueAfterTerm={handleToggleContinueAfterTerm} toggleBusy={togglingMembershipID === m.membership_id} />)}
+          </div>
+        </div>
+      )}
       {inactive.length > 0 && (
         <div>
           <h2 className="text-[13px] font-semibold text-gray-500 mb-3">Past ({inactive.length})</h2>
@@ -787,12 +831,15 @@ function MembershipsTab({ memberships, fmtShort, tenantTimezone, onRefresh }: { 
 
 function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinueAfterTerm, toggleBusy }: { m: MembershipRecord; fmtShort: (d: string) => string; tenantTimezone: string; onCancel?: () => void; onToggleContinueAfterTerm?: (membershipId: string, continueAfterTerm: boolean) => Promise<void> | void; toggleBusy?: boolean }) {
   const daysLeft = daysUntilDateOnly(m.end_date, tenantTimezone);
+  const daysToStart = daysUntilDateOnly(m.start_date, tenantTimezone);
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
   return (
     <div className="card overflow-hidden">
       {/* Colour stripe */}
-      <div className={`h-1 ${m.status === "active" ? "bg-emerald-500" : m.status === "expired" ? "bg-gray-300" : "bg-red-400"}`} />
+      <div className={`h-1 ${
+        m.status === "active" ? "bg-emerald-500" : m.status === "scheduled" ? "bg-amber-500" : m.status === "expired" ? "bg-gray-300" : "bg-red-400"
+      }`} />
       <div className="px-5 py-4">
         <div className="flex items-start justify-between mb-3">
           <div>
@@ -847,7 +894,7 @@ function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinu
               ) : (
                 <span className="text-[11px] text-gray-400" title="No signed agreement available for this membership">No Agreement</span>
               )}
-              {m.status === "active" && onCancel && (
+              {(m.status === "active" || m.status === "scheduled") && onCancel && (
                 <button onClick={onCancel} className="text-[11px] text-red-500 hover:text-red-700">Cancel</button>
               )}
             </div>
@@ -858,7 +905,9 @@ function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinu
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-3 border-t border-gray-100">
           <div>
             <p className="text-[11px] text-gray-400">Status</p>
-            <span className={`badge mt-1 ${m.status === "active" ? "badge-green" : m.status === "expired" ? "badge-gray" : "badge-red"}`}>
+            <span className={`badge mt-1 ${
+              m.status === "active" ? "badge-green" : m.status === "scheduled" ? "badge-yellow" : m.status === "expired" ? "badge-gray" : "badge-red"
+            }`}>
               {m.status}
             </span>
           </div>
@@ -889,12 +938,16 @@ function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinu
           </div>
           <div>
             <p className="text-[11px] text-gray-400">
-              {m.status === "active" ? "Remaining" : "Ended"}
+              {m.status === "scheduled" ? "Starts in" : m.status === "active" ? "Remaining" : "Ended"}
             </p>
             <p className={`text-[13px] font-medium mt-1 ${
-              m.status === "active" && daysLeft <= 30 ? "text-amber-600" : "text-gray-700"
+              m.status === "active" && daysLeft <= 30 ? "text-amber-600" : m.status === "scheduled" ? "text-amber-700" : "text-gray-700"
             }`}>
-              {m.status === "active" && daysLeft > 0 ? `${daysLeft} days` : fmtShort(m.end_date)}
+              {m.status === "scheduled" && daysToStart > 0
+                ? `${daysToStart} days`
+                : m.status === "active" && daysLeft > 0
+                  ? `${daysLeft} days`
+                  : fmtShort(m.end_date)}
             </p>
           </div>
         </div>
