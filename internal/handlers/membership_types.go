@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -33,6 +34,41 @@ func buildMembershipDisplayTitle(name, level string) string {
 		return name
 	}
 	return name + " - " + level
+}
+
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func ptrFloat64(v float64) *float64 {
+	x := v
+	return &x
+}
+
+func deriveTermFrequencyFees(durationMonths int, feeTotal float64) (weekly, fortnightly, monthly, quarterly *float64) {
+	if durationMonths <= 0 || feeTotal <= 0 {
+		return nil, nil, nil, nil
+	}
+	weeks := (float64(durationMonths) * 52) / 12
+	if weeks > 0 {
+		weeklyAmount := round2(feeTotal / weeks)
+		weekly = ptrFloat64(weeklyAmount)
+		fortnightly = ptrFloat64(round2(weeklyAmount * 2))
+	}
+	monthly = ptrFloat64(round2(feeTotal / float64(durationMonths)))
+	if durationMonths >= 3 {
+		quarterly = ptrFloat64(round2(feeTotal / (float64(durationMonths) / 3)))
+	}
+	return weekly, fortnightly, monthly, quarterly
+}
+
+func customScheduleMatchesContractTotal(feeTotal float64, amount *float64, numPayments *int) bool {
+	if amount == nil || numPayments == nil || *numPayments <= 0 {
+		return false
+	}
+	expected := round2(feeTotal)
+	customTotal := round2((*amount) * float64(*numPayments))
+	return math.Abs(expected-customTotal) <= 0.01
 }
 
 // MembershipTypeHandler handles membership type CRUD.
@@ -88,9 +124,9 @@ func (h *MembershipTypeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description     *string `json:"description"`
 		Inclusions      *string `json:"inclusions"`
 		TopImageURL     *string `json:"top_image_url"`
-		ApplySalesTax  *bool   `json:"apply_sales_tax"`
-		IsMostPopular  bool    `json:"is_most_popular"`
-		SortOrder      int     `json:"sort_order"`
+		ApplySalesTax   *bool   `json:"apply_sales_tax"`
+		IsMostPopular   bool    `json:"is_most_popular"`
+		SortOrder       int     `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request")
@@ -183,9 +219,9 @@ func (h *MembershipTypeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Description               *string   `json:"description"`
 		Inclusions                *string   `json:"inclusions"`
 		Benefits                  *string   `json:"benefits"`
-		TopImageURL  *string `json:"top_image_url"`
-		CurrencyCode *string `json:"currency_code"`
-		SortOrder    *int    `json:"sort_order"`
+		TopImageURL               *string   `json:"top_image_url"`
+		CurrencyCode              *string   `json:"currency_code"`
+		SortOrder                 *int      `json:"sort_order"`
 		EnabledPaymentFrequencies *[]string `json:"enabled_payment_frequencies"`
 		ApplySalesTax             *bool     `json:"apply_sales_tax"`
 		IsActive                  *bool     `json:"is_active"`
@@ -461,10 +497,22 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "custom_schedule_interval_unit must be 'week' or 'month'")
 			return
 		}
+		if !customScheduleMatchesContractTotal(input.FeeTotal, input.CustomScheduleAmount, input.CustomScheduleNumPayments) {
+			writeError(w, http.StatusBadRequest, "custom schedule total must equal contract total")
+			return
+		}
+	} else {
+		input.CustomScheduleLabel = nil
+		input.CustomScheduleAmount = nil
+		input.CustomScheduleIntervalUnit = nil
+		input.CustomScheduleIntervalCount = nil
+		input.CustomScheduleNumPayments = nil
 	}
+
+	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly := deriveTermFrequencyFees(input.DurationMonths, input.FeeTotal)
 	to, err := h.mtRepo.CreateTermOption(r.Context(), tenantID, mtID,
-		input.DurationMonths, input.FeeTotal, input.FeeWeekly,
-		input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.DurationMonths, input.FeeTotal, feeWeekly,
+		feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, input.NumPayments,
 		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
@@ -530,9 +578,21 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "custom_schedule_interval_unit must be 'week' or 'month'")
 			return
 		}
+		if !customScheduleMatchesContractTotal(input.FeeTotal, input.CustomScheduleAmount, input.CustomScheduleNumPayments) {
+			writeError(w, http.StatusBadRequest, "custom schedule total must equal contract total")
+			return
+		}
+	} else {
+		input.CustomScheduleLabel = nil
+		input.CustomScheduleAmount = nil
+		input.CustomScheduleIntervalUnit = nil
+		input.CustomScheduleIntervalCount = nil
+		input.CustomScheduleNumPayments = nil
 	}
+
+	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly := deriveTermFrequencyFees(input.DurationMonths, input.FeeTotal)
 	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
-		input.FeeTotal, input.FeeWeekly, input.FeeFortnightly, input.FeeMonthly, input.FeeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.FeeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, input.NumPayments,
 		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
