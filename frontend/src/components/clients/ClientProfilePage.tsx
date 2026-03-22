@@ -2030,9 +2030,11 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
   const [clientEmail, setClientEmail] = useState<string | null>(null);
   const [salesTaxName, setSalesTaxName] = useState("GST");
   const [salesTaxPercent, setSalesTaxPercent] = useState(10);
+  const [stripePaymentMethods, setStripePaymentMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
 
   // Selected payment method: "gocardless" | "stripe" | "gocardless_bank" | "stripe_becs"
   const [paymentMethod, setPaymentMethod] = useState<"gocardless" | "stripe" | "gocardless_bank" | "stripe_becs" | "">("");
+  const [selectedStripePaymentMethodId, setSelectedStripePaymentMethodId] = useState("");
 
   // Bank details for GoCardless (new mandate)
   const [bsb, setBsb] = useState("");
@@ -2051,15 +2053,18 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
       api.listServices(),
       api.getClientMandateStatus(clientId),
       api.getTenantSettings(),
-    ]).then(([svcData, mandateData, tenantData]) => {
+      api.listClientStripePaymentMethods(clientId).catch(() => ({ payment_methods: [] })),
+    ]).then(([svcData, mandateData, tenantData, stripeMethodsData]) => {
       const servicesData = svcData as any;
       const mandate = mandateData as any;
       const tenant = tenantData as any;
+      const stripeMethodsRes = stripeMethodsData as any;
       setServices((servicesData.services || []).filter((s: any) => s.is_active));
       setHasMandate(mandate.has_mandate || false);
       setClientEmail(mandate.client_email || null);
       setSalesTaxName(String(tenant?.sales_tax_name || "GST"));
       setSalesTaxPercent(Number.isFinite(Number(tenant?.sales_tax_percent)) ? Number(tenant.sales_tax_percent) : 10);
+      setStripePaymentMethods(Array.isArray(stripeMethodsRes.payment_methods) ? stripeMethodsRes.payment_methods : []);
       const prov: string[] = mandate.payment_providers || [];
       setProviders(prov);
       if (mandate.has_mandate) {
@@ -2072,6 +2077,17 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [clientId]);
+
+  const pickDefaultSavedStripeMethod = (mode: "stripe" | "stripe_becs") => {
+    const wantedType = mode === "stripe_becs" ? "au_becs_debit" : "card";
+    const candidates = stripePaymentMethods.filter((m) => m.type === wantedType);
+    if (candidates.length === 0) {
+      setSelectedStripePaymentMethodId("");
+      return;
+    }
+    const preferred = candidates.find((m) => m.is_default) || candidates[0];
+    setSelectedStripePaymentMethodId(preferred.id);
+  };
 
   const handleServiceSelect = (serviceId: string) => {
     setSelectedServiceId(serviceId);
@@ -2133,13 +2149,20 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
     if (!description || toNumberOrZero(amount) <= 0) { setError("Description and amount are required"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      const payload = { ...chargePayload(), payment_method: method || "card" };
+      const payload = {
+        ...chargePayload(),
+        payment_method: method || "card",
+        payment_method_id: selectedStripePaymentMethodId || undefined,
+      };
       const data = await api.chargeServiceStripe(payload) as any;
       if (data.checkout_url) {
         window.open(data.checkout_url, "_blank");
         const label = method === "direct_debit" ? "Direct debit" : "Stripe";
         setSuccess(`${label} checkout opened in a new tab. The charge will be recorded once the client completes payment.`);
         setTimeout(() => onCharged(), 3000);
+      } else if (data.charged_with_saved_method) {
+        setSuccess("Charged successfully using saved payment method.");
+        setTimeout(() => onCharged(), 2000);
       } else {
         setSuccess("Charge recorded.");
         setTimeout(() => onCharged(), 2000);
@@ -2189,8 +2212,8 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
 
   const submitLabel = (() => {
     if (saving) return "Processing...";
-    if (paymentMethod === "stripe") return `Pay $${total.toFixed(2)} via Card`;
-    if (paymentMethod === "stripe_becs") return `Pay $${total.toFixed(2)} via Direct Debit`;
+    if (paymentMethod === "stripe") return selectedStripePaymentMethodId ? `Charge $${total.toFixed(2)} saved Card` : `Pay $${total.toFixed(2)} via Card`;
+    if (paymentMethod === "stripe_becs") return selectedStripePaymentMethodId ? `Charge $${total.toFixed(2)} saved Direct Debit` : `Pay $${total.toFixed(2)} via Direct Debit`;
     if (paymentMethod === "gocardless" && hasMandate) return `Charge $${total.toFixed(2)} via Direct Debit`;
     if (paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) return `Set up mandate & charge $${total.toFixed(2)}`;
     return "Select a payment method";
@@ -2232,7 +2255,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                 <div className="flex gap-2">
                   {hasGC && hasMandate && (
                     <button
-                      onClick={() => setPaymentMethod("gocardless")}
+                      onClick={() => {
+                        setPaymentMethod("gocardless");
+                        setSelectedStripePaymentMethodId("");
+                      }}
                       className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
                         paymentMethod === "gocardless" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                       }`}
@@ -2244,7 +2270,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   )}
                   {hasGC && (
                     <button
-                      onClick={() => setPaymentMethod("gocardless_bank")}
+                      onClick={() => {
+                        setPaymentMethod("gocardless_bank");
+                        setSelectedStripePaymentMethodId("");
+                      }}
                       className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
                         paymentMethod === "gocardless_bank" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                       }`}
@@ -2256,7 +2285,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   )}
                   {!hasGC && hasStripe && (
                     <button
-                      onClick={() => setPaymentMethod("stripe_becs")}
+                      onClick={() => {
+                        setPaymentMethod("stripe_becs");
+                        pickDefaultSavedStripeMethod("stripe_becs");
+                      }}
                       className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
                         paymentMethod === "stripe_becs" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                       }`}
@@ -2268,7 +2300,10 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   )}
                   {hasStripe && (
                     <button
-                      onClick={() => setPaymentMethod("stripe")}
+                      onClick={() => {
+                        setPaymentMethod("stripe");
+                        pickDefaultSavedStripeMethod("stripe");
+                      }}
                       className={`flex-1 rounded-lg border-2 px-3 py-3 text-[12px] font-semibold transition-all text-center ${
                         paymentMethod === "stripe" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                       }`}
@@ -2301,6 +2336,40 @@ function TakePaymentModal({ clientId, clientName, onClose, onCharged }: {
                   </div>
                 )}
               </div>
+
+              {(paymentMethod === "stripe" || paymentMethod === "stripe_becs") && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <p className="text-[12px] font-semibold text-gray-700 mb-2">Use existing payment method</p>
+                  {stripePaymentMethods.filter((m) => m.type === (paymentMethod === "stripe_becs" ? "au_becs_debit" : "card")).length > 0 ? (
+                    <div className="space-y-2">
+                      {stripePaymentMethods
+                        .filter((m) => m.type === (paymentMethod === "stripe_becs" ? "au_becs_debit" : "card"))
+                        .map((m) => (
+                          <label key={m.id} className="flex items-center gap-2 text-[12px] text-gray-700">
+                            <input
+                              type="radio"
+                              name="stripe_saved_pm"
+                              checked={selectedStripePaymentMethodId === m.id}
+                              onChange={() => setSelectedStripePaymentMethodId(m.id)}
+                              className="h-4 w-4 text-indigo-600"
+                            />
+                            <span>{m.label}</span>
+                            {m.is_default && <span className="badge badge-gray">Default</span>}
+                          </label>
+                        ))}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedStripePaymentMethodId("")}
+                        className="text-[11px] text-indigo-600 hover:text-indigo-700"
+                      >
+                        Use Stripe checkout instead
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-gray-500">No saved {paymentMethod === "stripe_becs" ? "direct debit" : "card"} methods found. Stripe checkout will be used.</p>
+                  )}
+                </div>
+              )}
 
               {/* Bank details form — for GC new mandate */}
               {(paymentMethod === "gocardless_bank" || (paymentMethod === "gocardless" && !hasMandate)) && (

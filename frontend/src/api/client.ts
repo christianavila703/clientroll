@@ -276,6 +276,8 @@ export const api = {
       method: "POST",
       body: data,
     }),
+  listClientStripePaymentMethods: (clientId: string) =>
+    request(`/tenant/services/stripe-payment-methods/${clientId}`),
   listClientCharges: (clientId: string) =>
     request(`/tenant/services/charges/${clientId}`),
 

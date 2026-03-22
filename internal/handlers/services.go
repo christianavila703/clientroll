@@ -17,7 +17,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/customer"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/paymentintent"
+	"github.com/stripe/stripe-go/v82/paymentmethod"
 )
 
 var isoServiceCurrencyRegex = regexp.MustCompile(`^[A-Z]{3}$`)
@@ -54,6 +57,7 @@ func (h *ServiceHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/services/charge", h.TakePayment)
 	r.Post("/services/charge-with-bank-details", h.ChargeWithBankDetails)
 	r.Post("/services/charge-stripe", h.ChargeStripe)
+	r.Get("/services/stripe-payment-methods/{clientID}", h.ListStripePaymentMethods)
 	r.Get("/services/charges/{clientID}", h.ListCharges)
 }
 
@@ -487,6 +491,7 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		TaxAmount     float64 `json:"tax_amount"`
 		Notes         *string `json:"notes"`
 		PaymentMethod string  `json:"payment_method"`
+		PaymentMethodID string `json:"payment_method_id,omitempty"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
 		writeError(w, http.StatusBadRequest, "Client ID and positive amount required")
@@ -539,6 +544,74 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create charge")
 		return
 	}
+	stripeCustomerID := ""
+	if client.StripeCustomerID != nil {
+		stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+	}
+	if stripeCustomerID == "" && h.paymentRepo != nil {
+		stripeCustomerID, _ = h.paymentRepo.FindLatestStripeCustomerIDByClient(r.Context(), tenantID, clientID)
+	}
+	if strings.TrimSpace(input.PaymentMethodID) != "" {
+		if stripeCustomerID == "" {
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
+			writeError(w, http.StatusBadRequest, "No saved Stripe customer/payment method found for this client")
+			return
+		}
+		amountToChargeCents := totalCents + feeCents
+		if amountToChargeCents <= 0 {
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
+			writeError(w, http.StatusBadRequest, "Charge total must be greater than zero")
+			return
+		}
+		piParams := &stripe.PaymentIntentParams{
+			Amount:        stripe.Int64(amountToChargeCents),
+			Currency:      stripe.String("aud"),
+			Customer:      stripe.String(stripeCustomerID),
+			PaymentMethod: stripe.String(strings.TrimSpace(input.PaymentMethodID)),
+			Confirm:       stripe.Bool(true),
+			OffSession:    stripe.Bool(true),
+			Description:   stripe.String(input.Description),
+			Metadata: map[string]string{
+				"tenant_id":      tenantID.String(),
+				"client_id":      clientID.String(),
+				"charge_id":      charge.ID.String(),
+				"type":           "service_charge",
+				"payment_method": input.PaymentMethod,
+			},
+		}
+		pi, piErr := paymentintent.New(piParams)
+		if piErr != nil {
+			log.Printf("Stripe PaymentIntent error: %v", piErr)
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
+			writeError(w, http.StatusBadGateway, "Failed to charge saved payment method")
+			return
+		}
+		providerRef := pi.ID
+		paymentMethod := input.PaymentMethod
+		_ = h.serviceRepo.UpdateChargeProviderContext(r.Context(), tenantID, charge.ID, &providerRef, &paymentMethod)
+		_ = h.serviceRepo.MergeStripeDetailsByChargeID(r.Context(), tenantID, charge.ID, map[string]interface{}{
+			"source":                  "stripe",
+			"payment_intent_id":       pi.ID,
+			"payment_intent_status":   string(pi.Status),
+			"stripe_customer_id":      stripeCustomerID,
+			"stripe_payment_method_id": strings.TrimSpace(input.PaymentMethodID),
+		})
+		switch strings.ToLower(strings.TrimSpace(string(pi.Status))) {
+		case "succeeded":
+			now := time.Now().UTC()
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "succeeded", &now)
+		case "processing", "requires_capture", "requires_action":
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "pending", nil)
+		default:
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"charge":                      charge,
+			"payment_intent_id":          pi.ID,
+			"charged_with_saved_method":  true,
+		})
+		return
+	}
 
 	params := &stripe.CheckoutSessionParams{
 		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -586,11 +659,9 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	if input.PaymentMethod == "direct_debit" {
 		params.PaymentMethodTypes = stripe.StringSlice([]string{"au_becs_debit"})
 	}
-	if h.paymentRepo != nil {
-		if stripeCustomerID, _ := h.paymentRepo.FindLatestStripeCustomerIDByClient(r.Context(), tenantID, clientID); stripeCustomerID != "" {
-			params.Customer = stripe.String(stripeCustomerID)
-			params.PaymentMethodCollection = stripe.String("if_required")
-		}
+	if stripeCustomerID != "" {
+		params.Customer = stripe.String(stripeCustomerID)
+		params.PaymentMethodCollection = stripe.String("if_required")
 	}
 	if params.Customer == nil && client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
@@ -622,6 +693,96 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		"checkout_url": sess.URL,
 		"session_id":   sess.ID,
 	})
+}
+
+func (h *ServiceHandler) ListStripePaymentMethods(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	clientID, err := uuid.Parse(chi.URLParam(r, "clientID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+	secretKey, err := h.getStripeSecretKey(r.Context(), tenantID)
+	if err != nil || secretKey == "" {
+		writeError(w, http.StatusBadRequest, "Stripe not configured for this tenant")
+		return
+	}
+	stripe.Key = secretKey
+
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+	customerID := ""
+	if client.StripeCustomerID != nil {
+		customerID = strings.TrimSpace(*client.StripeCustomerID)
+	}
+	if customerID == "" && h.paymentRepo != nil {
+		customerID, _ = h.paymentRepo.FindLatestStripeCustomerIDByClient(r.Context(), tenantID, clientID)
+	}
+	if customerID == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"payment_methods": []interface{}{}})
+		return
+	}
+	defaultPM := ""
+	if cust, cerr := customer.Get(customerID, nil); cerr == nil && cust != nil && cust.InvoiceSettings != nil && cust.InvoiceSettings.DefaultPaymentMethod != nil {
+		defaultPM = strings.TrimSpace(cust.InvoiceSettings.DefaultPaymentMethod.ID)
+	}
+	type pmRow struct {
+		ID        string `json:"id"`
+		Type      string `json:"type"`
+		Label     string `json:"label"`
+		IsDefault bool   `json:"is_default"`
+	}
+	methods := make([]pmRow, 0)
+	appendMethods := func(pmType string) {
+		params := &stripe.PaymentMethodListParams{
+			Customer: stripe.String(customerID),
+			Type:     stripe.String(pmType),
+		}
+		it := paymentmethod.List(params)
+		for it.Next() {
+			pm := it.PaymentMethod()
+			if pm == nil || strings.TrimSpace(pm.ID) == "" {
+				continue
+			}
+			label := pmType
+			switch pmType {
+			case "card":
+				brand := strings.Title(strings.ToLower(string(pm.Card.Brand)))
+				last4 := pm.Card.Last4
+				if strings.TrimSpace(brand) == "" {
+					brand = "Card"
+				}
+				if strings.TrimSpace(last4) != "" {
+					label = fmt.Sprintf("%s ending in %s", brand, last4)
+				} else {
+					label = brand
+				}
+			case "au_becs_debit":
+				last4 := pm.AUBECSDebit.Last4
+				bsb := pm.AUBECSDebit.BSBNumber
+				if strings.TrimSpace(bsb) != "" && strings.TrimSpace(last4) != "" {
+					label = fmt.Sprintf("AU BECS debit BSB %s · %s", bsb, last4)
+				} else if strings.TrimSpace(last4) != "" {
+					label = fmt.Sprintf("AU BECS debit ending in %s", last4)
+				} else {
+					label = "AU BECS direct debit"
+				}
+			}
+			methods = append(methods, pmRow{
+				ID:        pm.ID,
+				Type:      pmType,
+				Label:     label,
+				IsDefault: defaultPM != "" && pm.ID == defaultPM,
+			})
+		}
+	}
+	appendMethods("card")
+	appendMethods("au_becs_debit")
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"payment_methods": methods})
 }
 
 func (h *ServiceHandler) getStripeSecretKey(ctx context.Context, tenantID uuid.UUID) (string, error) {
