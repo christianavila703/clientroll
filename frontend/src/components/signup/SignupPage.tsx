@@ -19,7 +19,7 @@ type Step = "select" | "detail" | "form" | "thankyou";
 type Tenant = TenantBranding;
 
 export default function SignupPage() {
-  const { tenantSlug, membershipSlug } = useParams();
+  const { tenantSlug, membershipSlug, inviteToken } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const [tenant, setTenant] = useState<Tenant | null>(null);
@@ -29,6 +29,8 @@ export default function SignupPage() {
   const [terms, setTerms] = useState<TermsDoc[]>([]);
   const [step, setStep] = useState<Step>("select");
   const [thankyou, setThankyou] = useState<Record<string, unknown>>({});
+  const [inviteContext, setInviteContext] = useState<Record<string, unknown> | null>(null);
+  const [inviteClient, setInviteClient] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState("");
@@ -41,7 +43,20 @@ export default function SignupPage() {
     try {
       const params = new URLSearchParams(window.location.search);
       const stripeState = params.get("stripe");
-      if (membershipSlug) {
+      if (inviteToken) {
+        const res = await fetch(`/api/signup/${tenantSlug}/invite/${inviteToken}${location.search}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        setTenant(data.tenant);
+        setSelected(data.membership);
+        setTerms(data.terms || []);
+        setInviteContext(data.invite || null);
+        setInviteClient(data.invite_client || null);
+        const termId = String((data.invite || {}).term_option_id || "");
+        const term = (data.membership?.term_options || []).find((t: any) => String(t.id) === termId) || null;
+        setSelectedTerm(term);
+        setStep("form");
+      } else if (membershipSlug) {
         // Direct link to specific membership
         const res = await fetch(`/api/signup/${tenantSlug}/${membershipSlug}${location.search}`);
         const data = await res.json();
@@ -65,6 +80,8 @@ export default function SignupPage() {
         }
         setStep("select");
         setSelected(null);
+        setInviteContext(null);
+        setInviteClient(null);
       }
       if (stripeState === "success") {
         setThankyou({
@@ -191,6 +208,8 @@ export default function SignupPage() {
             tenantSlug={tenantSlug || ""}
             paymentProviders={tenant.payment_providers || []}
             terms={terms}
+            inviteContext={inviteContext || undefined}
+            inviteClient={inviteClient || undefined}
             onComplete={(ty) => { setThankyou(ty); setStep("thankyou"); }}
             onBack={() => setStep("detail")}
           />

@@ -1753,6 +1753,8 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   clientId: string; clientName: string; onClose: () => void; onCreated: () => void;
 }) {
   const [step, setStep] = useState<"type" | "term" | "details" | "confirm">("type");
+  const [flowMode, setFlowMode] = useState<"create_now" | "send_invite">("create_now");
+  const [paymentStrategy, setPaymentStrategy] = useState<"ask_client" | "use_existing">("ask_client");
   const [types, setTypes] = useState<MembershipTypeOption[]>([]);
   const [selectedType, setSelectedType] = useState<MembershipTypeOption | null>(null);
   const [selectedTerm, setSelectedTerm] = useState<any>(null);
@@ -1763,9 +1765,13 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolderName, setAccountHolderName] = useState("");
   const [hasStoredMandate, setHasStoredMandate] = useState(false);
+  const [storedMandateID, setStoredMandateID] = useState("");
   const [directDebitMode, setDirectDebitMode] = useState<"existing" | "new">("new");
   const [stripePaymentMethods, setStripePaymentMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
   const [selectedStripePaymentMethodId, setSelectedStripePaymentMethodId] = useState("");
+  const [inviteURL, setInviteURL] = useState("");
+  const [inviteWarning, setInviteWarning] = useState("");
+  const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1787,12 +1793,14 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
           });
       });
       const hasMandate = !!(mandate as any)?.has_mandate;
+      const mandateID = String((mandate as any)?.mandate_id || "");
       const methods = Array.isArray((stripeMethodsData as any)?.payment_methods) ? (stripeMethodsData as any).payment_methods : [];
       const cardMethods = methods.filter((m: any) => m?.type === "card");
       const defaultCard = cardMethods.find((m: any) => m?.is_default) || cardMethods[0];
       setStripePaymentMethods(cardMethods);
       setSelectedStripePaymentMethodId(defaultCard?.id || "");
       setHasStoredMandate(hasMandate);
+      setStoredMandateID(mandateID);
       setDirectDebitMode(hasMandate ? "existing" : "new");
       setBillingMethod(hasMandate ? "direct_debit" : (defaultCard ? "card" : "direct_debit"));
     });
@@ -1800,13 +1808,23 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
 
   const handleSubmit = async () => {
     if (!selectedType || !selectedTerm) return;
-    if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && (!bsb.trim() || !accountNumber.trim())) {
+    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && (!bsb.trim() || !accountNumber.trim())) {
       setError("BSB and account number are required when adding a new payment method.");
       return;
     }
-    if (frequency !== "upfront" && billingMethod === "card" && !selectedStripePaymentMethodId) {
+    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "card" && !selectedStripePaymentMethodId) {
       setError("Select a saved Stripe card or switch to direct debit.");
       return;
+    }
+    if (flowMode === "send_invite" && paymentStrategy === "use_existing") {
+      if (billingMethod === "card" && !selectedStripePaymentMethodId) {
+        setError("Select an existing Stripe card, or switch to 'Ask client for payment method'.");
+        return;
+      }
+      if (billingMethod === "direct_debit" && !storedMandateID) {
+        setError("No existing direct debit mandate found for this client.");
+        return;
+      }
     }
     setSaving(true); setError("");
     try {
@@ -1814,26 +1832,49 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
       const paymentAmount = isCustomSchedule
         ? (selectedTerm.custom_schedule_amount || selectedTerm.fee_total)
         : (selectedTerm[`fee_${frequency}`] || selectedTerm.fee_total);
-      const body: Record<string, unknown> = {
-        client_id: clientId,
-        membership_type_id: selectedType.id,
-        term_option_id: selectedTerm.id,
-        start_date: startDate,
-        payment_method: billingMethod,
-        payment_frequency: frequency,
-        payment_amount: paymentAmount,
-        payment_interval_unit: isCustomSchedule ? selectedTerm.custom_schedule_interval_unit : undefined,
-        payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
-        num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
-        payment_method_id: billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
-      };
-      if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
-        body.bsb = bsb.trim();
-        body.account_number = accountNumber.trim();
-        if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
+      if (flowMode === "send_invite") {
+        const invitePayload: Record<string, unknown> = {
+          client_id: clientId,
+          membership_type_id: selectedType.id,
+          term_option_id: selectedTerm.id,
+          start_date: startDate,
+          payment_frequency: frequency,
+          payment_method_strategy: paymentStrategy,
+          payment_method: paymentStrategy === "use_existing" ? billingMethod : undefined,
+          payment_method_id: paymentStrategy === "use_existing" && billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
+          gocardless_mandate_id: paymentStrategy === "use_existing" && billingMethod === "direct_debit" ? storedMandateID : undefined,
+        };
+        const data = await api.createMembershipInvite(invitePayload) as {
+          invite_url?: string;
+          warning?: string;
+          email_sent?: boolean;
+        };
+        setInviteURL(data.invite_url || "");
+        setInviteWarning(data.warning || "");
+        setInviteEmailSent(!!data.email_sent);
+        setStep("confirm");
+      } else {
+        const body: Record<string, unknown> = {
+          client_id: clientId,
+          membership_type_id: selectedType.id,
+          term_option_id: selectedTerm.id,
+          start_date: startDate,
+          payment_method: billingMethod,
+          payment_frequency: frequency,
+          payment_amount: paymentAmount,
+          payment_interval_unit: isCustomSchedule ? selectedTerm.custom_schedule_interval_unit : undefined,
+          payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
+          num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
+          payment_method_id: billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
+        };
+        if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
+          body.bsb = bsb.trim();
+          body.account_number = accountNumber.trim();
+          if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
+        }
+        await api.createMembership(body);
+        onCreated();
       }
-      await api.createMembership(body);
-      onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   };
@@ -1945,6 +1986,51 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
 
                 <div className="space-y-5">
                   <div>
+                    <label className="block text-[13px] font-semibold text-gray-700 mb-2">Flow</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                      <button
+                        type="button"
+                        onClick={() => setFlowMode("create_now")}
+                        className={`rounded-md border px-3 py-2 text-[12px] font-medium ${flowMode === "create_now" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                      >
+                        Create now
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFlowMode("send_invite")}
+                        className={`rounded-md border px-3 py-2 text-[12px] font-medium ${flowMode === "send_invite" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                      >
+                        Send to client to finalise
+                      </button>
+                    </div>
+                    {flowMode === "send_invite" && (
+                      <p className="mt-2 text-[12px] text-gray-500">Client receives a unique link to review terms, sign, and complete setup.</p>
+                    )}
+                  </div>
+
+                  {flowMode === "send_invite" && frequency !== "upfront" && (
+                    <div>
+                      <label className="block text-[13px] font-semibold text-gray-700 mb-2">Payment collection mode</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                        <button
+                          type="button"
+                          onClick={() => setPaymentStrategy("ask_client")}
+                          className={`rounded-md border px-3 py-2 text-[12px] font-medium ${paymentStrategy === "ask_client" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                        >
+                          Ask client for payment method
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentStrategy("use_existing")}
+                          className={`rounded-md border px-3 py-2 text-[12px] font-medium ${paymentStrategy === "use_existing" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                        >
+                          Use existing method on client
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
                     <label className="block text-[13px] font-semibold text-gray-700 mb-2">Start Date</label>
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-field max-w-xs" />
                   </div>
@@ -1964,7 +2050,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                     </div>
                   </div>
 
-                  {frequency !== "upfront" && (
+                  {frequency !== "upfront" && (flowMode === "create_now" || (flowMode === "send_invite" && paymentStrategy === "use_existing")) && (
                     <div>
                       <label className="block text-[13px] font-semibold text-gray-700 mb-2">Billing method</label>
                       <div className="grid grid-cols-2 gap-2 max-w-md">
@@ -2000,7 +2086,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                     </div>
                   )}
 
-                  {frequency !== "upfront" && billingMethod === "direct_debit" && (
+                  {frequency !== "upfront" && billingMethod === "direct_debit" && (flowMode === "create_now" || (flowMode === "send_invite" && paymentStrategy === "use_existing")) && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
                       {hasStoredMandate && (
@@ -2021,7 +2107,9 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                           </button>
                         </div>
                       )}
-                      {hasStoredMandate && directDebitMode === "existing" ? (
+                      {flowMode === "send_invite" && paymentStrategy === "use_existing" ? (
+                        <p className="text-[12px] text-emerald-700">Existing mandate will be reused when client finalises.</p>
+                      ) : hasStoredMandate && directDebitMode === "existing" ? (
                         <p className="text-[12px] text-emerald-700">Existing direct debit mandate will be reused for this membership.</p>
                       ) : (
                         <>
@@ -2045,7 +2133,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                     </div>
                   )}
 
-                  {frequency !== "upfront" && billingMethod === "card" && (
+                  {frequency !== "upfront" && billingMethod === "card" && (flowMode === "create_now" || (flowMode === "send_invite" && paymentStrategy === "use_existing")) && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Saved Stripe card</p>
                       {stripePaymentMethods.length > 0 ? (
@@ -2079,8 +2167,42 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                 <div className="mt-6 flex justify-between">
                   <button onClick={() => setStep("term")} className="btn-secondary text-[12px]">Back</button>
                   <button onClick={handleSubmit} disabled={saving} className="btn-primary">
-                    {saving ? "Creating..." : "Create Membership"}
+                    {saving ? (flowMode === "send_invite" ? "Creating invite..." : "Creating...") : (flowMode === "send_invite" ? "Create Invite" : "Create Membership")}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {step === "confirm" && (
+              <div>
+                <p className="text-[16px] font-semibold text-gray-900">Invite created</p>
+                <p className="text-[13px] text-gray-500 mt-1">
+                  {inviteEmailSent
+                    ? "Invite email has been sent to the client."
+                    : "Email was not sent. Share this link with the client."}
+                </p>
+                {inviteWarning && (
+                  <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                    {inviteWarning}
+                  </div>
+                )}
+                {inviteURL && (
+                  <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+                    <p className="text-[11px] text-gray-500 mb-2">Client finalisation link</p>
+                    <div className="flex items-center gap-2">
+                      <input readOnly value={inviteURL} onClick={(e) => (e.target as HTMLInputElement).select()} className="input-field text-[12px] font-mono flex-1" />
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(inviteURL)}
+                        className="btn-secondary text-[12px]"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-6 flex justify-end">
+                  <button onClick={onCreated} className="btn-primary">Done</button>
                 </div>
               </div>
             )}

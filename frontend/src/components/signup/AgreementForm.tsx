@@ -11,6 +11,16 @@ interface Props {
   tenantSlug: string;
   paymentProviders: string[];
   terms?: TermsDoc[];
+  inviteContext?: {
+    token: string;
+    payment_method_strategy: "ask_client" | "use_existing";
+    payment_method?: string | null;
+    payment_method_id?: string | null;
+    gocardless_mandate_id?: string | null;
+    payment_frequency?: string;
+    start_date?: string;
+  };
+  inviteClient?: Record<string, unknown>;
   onComplete: (thankyou: Record<string, unknown>) => void;
   onBack: () => void;
 }
@@ -69,7 +79,7 @@ function resolveFrequencyAmount(termOption: TermOption, frequency: string): numb
   }
 }
 
-export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], onComplete, onBack }: Props) {
+export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
   const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
@@ -88,9 +98,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
   const [payment, setPayment] = useState({
-    payment_method: defaultMethod,
-    payment_frequency: "monthly",
-    start_date: new Date().toISOString().split("T")[0],
+    payment_method: inviteContext?.payment_method || defaultMethod,
+    payment_frequency: inviteContext?.payment_frequency || "monthly",
+    start_date: inviteContext?.start_date || new Date().toISOString().split("T")[0],
   });
   const [bank, setBank] = useState({
     institution_name: "", branch_location: "",
@@ -99,6 +109,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const [memberSignature, setMemberSignature] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState<Set<string>>(new Set());
   const [sendAgreementEmail, setSendAgreementEmail] = useState(true);
+  const useExistingPayment = inviteContext?.payment_method_strategy === "use_existing";
+  const paymentMethodLocked = useExistingPayment && !!inviteContext?.payment_method;
+  const paymentFrequencyLocked = !!inviteContext?.payment_frequency;
+  const startDateLocked = !!inviteContext?.start_date;
   const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
   const effectiveEnabledPaymentFrequencies =
     membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
@@ -123,6 +137,35 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
 
   const currentIdx = steps.findIndex((s) => s.key === formStep);
 
+  useEffect(() => {
+    if (!inviteClient) return;
+    setMember((prev) => ({
+      ...prev,
+      name: String(inviteClient.name || prev.name || ""),
+      unit_number: String(inviteClient.unit_number || prev.unit_number || ""),
+      address: String(inviteClient.address || prev.address || ""),
+      suburb: String(inviteClient.suburb || prev.suburb || ""),
+      state: String(inviteClient.state || prev.state || ""),
+      postcode: String(inviteClient.postcode || prev.postcode || ""),
+      country: String(inviteClient.country || prev.country || ""),
+      email: String(inviteClient.email || prev.email || ""),
+      phone: String(inviteClient.phone || prev.phone || ""),
+      birth_date: String(inviteClient.birth_date || "").split("T")[0] || prev.birth_date,
+      gender: String(inviteClient.gender || prev.gender || ""),
+      emergency_contact_name: String(inviteClient.emergency_contact_name || prev.emergency_contact_name || ""),
+      emergency_contact_phone: String(inviteClient.emergency_contact_phone || prev.emergency_contact_phone || ""),
+      tax_number: String(inviteClient.tax_number || prev.tax_number || ""),
+      company_number: String(inviteClient.company_number || prev.company_number || ""),
+      company_phone: String(inviteClient.company_phone || prev.company_phone || ""),
+      company_website: String(inviteClient.company_website || prev.company_website || ""),
+      company_address: String(inviteClient.company_address || prev.company_address || ""),
+      company_city: String(inviteClient.company_city || prev.company_city || ""),
+      company_state_region: String(inviteClient.company_state_region || prev.company_state_region || ""),
+      company_postcode: String(inviteClient.company_postcode || prev.company_postcode || ""),
+      company_country: String(inviteClient.company_country || prev.company_country || ""),
+    }));
+  }, [inviteClient]);
+
   const handleSubmit = async () => {
     if (!memberSignature) {
       setError("Please provide your signature");
@@ -135,11 +178,15 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       const paymentAmount = isCustomSchedule
         ? (termOption.custom_schedule_amount || termOption.fee_total)
         : resolveFrequencyAmount(termOption, payment.payment_frequency);
-      const res = await fetch(`/api/signup/${tenantSlug}/submit${window.location.search || ""}`, {
+      const submitParams = new URLSearchParams(window.location.search);
+      if (inviteContext?.token) submitParams.set("invite", inviteContext.token);
+      const submitQS = submitParams.toString();
+      const res = await fetch(`/api/signup/${tenantSlug}/submit${submitQS ? `?${submitQS}` : ""}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client: { ...member, birth_date: member.birth_date ? member.birth_date + "T00:00:00Z" : null },
+          invite_token: inviteContext?.token || undefined,
           membership_type_id: membership.id, term_option_id: termOption.id,
           start_date: payment.start_date ? payment.start_date + "T00:00:00Z" : new Date().toISOString(),
           payment_method: payment.payment_method,
@@ -153,6 +200,8 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           member_signature: memberSignature,
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
+          payment_method_id: useExistingPayment ? (inviteContext?.payment_method_id || undefined) : undefined,
+          gocardless_mandate_id: useExistingPayment ? (inviteContext?.gocardless_mandate_id || undefined) : undefined,
           ...(payment.payment_method === "direct_debit" && usesBankStep ? bank : {}),
         }),
       });
@@ -293,7 +342,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               onNext={() => setFormStep("payment")}
             />
           )}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} currencyCode={currencyCode} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} />}
+          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} currencyCode={currencyCode} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} paymentMethodLocked={paymentMethodLocked} paymentFrequencyLocked={paymentFrequencyLocked} startDateLocked={startDateLocked} useExistingPayment={useExistingPayment} />}
           {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
@@ -509,7 +558,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
 }
 
 /* ─── Section B: Payment Details ─── */
-function PaymentSection({ data, onChange, termOption, paymentProviders, currencyCode, enabledPaymentFrequencies, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; currencyCode: string; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void }) {
+function PaymentSection({ data, onChange, termOption, paymentProviders, currencyCode, enabledPaymentFrequencies, onNext, onBack, paymentMethodLocked, paymentFrequencyLocked, startDateLocked, useExistingPayment }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; currencyCode: string; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void; paymentMethodLocked: boolean; paymentFrequencyLocked: boolean; startDateLocked: boolean; useExistingPayment: boolean }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
@@ -577,7 +626,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
                 data.payment_method === "direct_debit" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`} style={data.payment_method === "direct_debit" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
-                <input type="radio" name="payment_method" value="direct_debit" checked={data.payment_method === "direct_debit"} onChange={(e) => set("payment_method", e.target.value)}
+                <input type="radio" name="payment_method" value="direct_debit" checked={data.payment_method === "direct_debit"} onChange={(e) => set("payment_method", e.target.value)} disabled={paymentMethodLocked}
                   className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div>
                   <p className="text-[14px] font-semibold text-gray-900">Direct Debit</p>
@@ -589,7 +638,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
                 data.payment_method === "card" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`} style={data.payment_method === "card" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
-                <input type="radio" name="payment_method" value="card" checked={data.payment_method === "card"} onChange={(e) => set("payment_method", e.target.value)}
+                <input type="radio" name="payment_method" value="card" checked={data.payment_method === "card"} onChange={(e) => set("payment_method", e.target.value)} disabled={paymentMethodLocked}
                   className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div>
                   <p className="text-[14px] font-semibold text-gray-900">Credit / Debit Card</p>
@@ -598,10 +647,13 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
               </label>
             )}
           </div>
+          {useExistingPayment && (
+            <p className="mt-2 text-[12px] text-emerald-700">A saved payment method will be used for this membership.</p>
+          )}
         </div>
 
         <Field label="Start Date">
-          <input type="date" value={data.start_date} onChange={(e) => set("start_date", e.target.value)} className={`${inputCls} max-w-xs`} />
+          <input type="date" value={data.start_date} onChange={(e) => set("start_date", e.target.value)} className={`${inputCls} max-w-xs`} disabled={startDateLocked} />
         </Field>
 
         <div>
@@ -613,7 +665,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
                   ? "shadow-sm"
                   : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`} style={data.payment_frequency === f.value ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
-                <input type="radio" name="frequency" value={f.value} checked={data.payment_frequency === f.value} onChange={(e) => set("payment_frequency", e.target.value)}
+                <input type="radio" name="frequency" value={f.value} checked={data.payment_frequency === f.value} onChange={(e) => set("payment_frequency", e.target.value)} disabled={paymentFrequencyLocked}
                   className="h-5 w-5 accent-[var(--brandPrimary)] border-gray-300" />
                 <div className="flex-1">
                   <p className="text-[14px] font-semibold text-gray-900">{f.label}</p>

@@ -44,6 +44,7 @@ type SignupHandler struct {
 	platformCfgRepo   *repository.PlatformBillingConfigRepo
 	bankDetailsRepo   *repository.BankDetailsRepo
 	agreementRepo     *repository.AgreementSnapshotRepo
+	inviteRepo        *repository.MembershipSetupInviteRepo
 	emailTemplateRepo *repository.TenantEmailTemplateRepo
 	encryptor         *database.Encryptor
 	emailSvc          email.Provider
@@ -64,6 +65,7 @@ func NewSignupHandler(
 	platformCfgRepo *repository.PlatformBillingConfigRepo,
 	bdr *repository.BankDetailsRepo,
 	agr *repository.AgreementSnapshotRepo,
+	inviteRepo *repository.MembershipSetupInviteRepo,
 	etr *repository.TenantEmailTemplateRepo,
 	enc *database.Encryptor,
 	es email.Provider,
@@ -72,7 +74,7 @@ func NewSignupHandler(
 	return &SignupHandler{
 		tenantRepo: tr, mtRepo: mt, bonusRepo: br, termsRepo: terms,
 		clientRepo: cr, memberRepo: mr, settingsRepo: sr,
-		credRepo: credR, platformCfgRepo: platformCfgRepo, bankDetailsRepo: bdr, agreementRepo: agr, emailTemplateRepo: etr,
+		credRepo: credR, platformCfgRepo: platformCfgRepo, bankDetailsRepo: bdr, agreementRepo: agr, inviteRepo: inviteRepo, emailTemplateRepo: etr,
 		encryptor: enc, emailSvc: es, cfg: appCfg,
 	}
 }
@@ -86,6 +88,7 @@ func (h *SignupHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/signup/{tenantSlug}", h.GetTenantMemberships)
 	r.Get("/signup/{tenantSlug}/{membershipSlug}", h.GetMembershipDetail)
+	r.Get("/signup/{tenantSlug}/invite/{inviteToken}", h.GetInviteDetail)
 	r.Get("/signup/{tenantSlug}/{membershipSlug}/term/{termOptionID}/bonuses", h.GetTermBonuses)
 	r.Post("/signup/{tenantSlug}/submit", h.SubmitSignup)
 }
@@ -93,6 +96,7 @@ func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 // RegisterTenantRoutes registers authenticated tenant routes related to signup operations.
 func (h *SignupHandler) RegisterTenantRoutes(r chi.Router) {
 	r.Get("/signup-links", h.GetSignupLinks)
+	r.Post("/signup-invites", h.CreateMembershipInvite)
 }
 
 // GetTenantMemberships returns all active memberships for a tenant (public browsing).
@@ -227,9 +231,12 @@ func (h *SignupHandler) GetTermBonuses(w http.ResponseWriter, r *http.Request) {
 // SubmitSignup processes a completed signup form.
 func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	tenantSlug := chi.URLParam(r, "tenantSlug")
-	if err := h.verifySignupAccess(r, tenantSlug, "", true); err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
-		return
+	inviteTokenFromQuery := strings.TrimSpace(r.URL.Query().Get("invite"))
+	if inviteTokenFromQuery == "" {
+		if err := h.verifySignupAccess(r, tenantSlug, "", true); err != nil {
+			writeError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
 	}
 
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
@@ -243,6 +250,52 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Signup decode error: %v", err)
 		writeError(w, http.StatusBadRequest, "Invalid submission data")
 		return
+	}
+	inviteTokenRaw := strings.TrimSpace(input.InviteToken)
+	if inviteTokenRaw == "" {
+		inviteTokenRaw = strings.TrimSpace(r.URL.Query().Get("invite"))
+	}
+	var invite *repository.MembershipSetupInvite
+	inviteStrategy := ""
+	if inviteTokenRaw != "" {
+		if h.inviteRepo == nil {
+			writeError(w, http.StatusInternalServerError, "Invite repository unavailable")
+			return
+		}
+		tokenUUID, tokenErr := uuid.Parse(inviteTokenRaw)
+		if tokenErr != nil {
+			writeError(w, http.StatusBadRequest, "Invalid invite token")
+			return
+		}
+		invite, err = h.inviteRepo.FindByToken(r.Context(), tokenUUID)
+		if err != nil || invite == nil || invite.TenantID != tenant.ID {
+			writeError(w, http.StatusNotFound, "Invite not found")
+			return
+		}
+		if invite.CompletedAt != nil {
+			writeError(w, http.StatusGone, "Invite already completed")
+			return
+		}
+		if time.Now().UTC().After(invite.ExpiresAt) {
+			writeError(w, http.StatusGone, "Invite expired")
+			return
+		}
+		inviteStrategy = invite.PaymentMethodStrategy
+		input.MembershipTypeID = invite.MembershipTypeID.String()
+		input.TermOptionID = invite.TermOptionID.String()
+		input.StartDateRaw = invite.StartDate.Format("2006-01-02")
+		input.PaymentFrequency = invite.PaymentFrequency
+		if invite.PaymentMethodStrategy == "use_existing" {
+			if invite.PaymentMethod != nil {
+				input.PaymentMethod = *invite.PaymentMethod
+			}
+			if invite.PaymentMethodID != nil {
+				input.PaymentMethodID = *invite.PaymentMethodID
+			}
+			if invite.GoCardlessMandateID != nil {
+				input.GoCardlessMandateID = *invite.GoCardlessMandateID
+			}
+		}
 	}
 
 	// Parse start_date flexibly (accepts "2006-01-02" or RFC3339)
@@ -374,6 +427,9 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	if input.PaymentMethod == "" {
 		input.PaymentMethod = "direct_debit"
 	}
+	input.PaymentMethod = strings.ToLower(strings.TrimSpace(input.PaymentMethod))
+	input.PaymentMethodID = strings.TrimSpace(input.PaymentMethodID)
+	input.GoCardlessMandateID = strings.TrimSpace(input.GoCardlessMandateID)
 	if input.PaymentIntervalCount <= 0 {
 		input.PaymentIntervalCount = 1
 	}
@@ -385,15 +441,27 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		input.PaymentIntervalUnit = &unit
 	}
-	// Look up existing client by email, or create new
+	// Look up existing client by email, or create new (invite flow always updates the targeted client).
 	var client *models.Client
-	if input.Client.Email != nil && *input.Client.Email != "" {
+	if invite != nil {
+		client, err = h.clientRepo.FindByID(r.Context(), invite.ClientID, tenant.ID)
+		if err != nil || client == nil {
+			writeError(w, http.StatusNotFound, "Client not found for invite")
+			return
+		}
+		client, err = h.clientRepo.Update(r.Context(), client.ID, tenant.ID, &input.Client)
+		if err != nil {
+			log.Printf("Error updating invited client during signup: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to update client record")
+			return
+		}
+	} else if input.Client.Email != nil && *input.Client.Email != "" {
 		client, err = h.clientRepo.FindByEmail(r.Context(), tenant.ID, *input.Client.Email)
 		if err != nil {
 			log.Printf("Error looking up client by email: %v", err)
 		}
 	}
-	if client != nil {
+	if invite == nil && client != nil {
 		// Update existing client's details with latest info from signup
 		client, err = h.clientRepo.Update(r.Context(), client.ID, tenant.ID, &input.Client)
 		if err != nil {
@@ -401,7 +469,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to update client record")
 			return
 		}
-	} else {
+	} else if invite == nil {
 		client, err = h.clientRepo.Create(r.Context(), tenant.ID, &input.Client)
 		if err != nil {
 			log.Printf("Error creating client during signup: %v", err)
@@ -485,6 +553,13 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create membership")
 		return
 	}
+	markInviteCompleted := func() {
+		if invite != nil && h.inviteRepo != nil {
+			if err := h.inviteRepo.MarkCompleted(r.Context(), invite.ID); err != nil {
+				log.Printf("signup invite mark complete failed invite=%s err=%v", invite.ID, err)
+			}
+		}
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.MembershipCreated, tenant.ID, map[string]interface{}{
 			"membership_id":      membership.ID,
@@ -498,7 +573,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// --- Stripe card checkout path ---
 	if input.PaymentMethod == "card" {
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
@@ -506,6 +581,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		// Capture the signed legal agreement at submission time (before redirect to checkout).
 		h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
+		markInviteCompleted()
 		mt := mtForCreate
 		thankyou := buildThankyouResponse(tenant, mt)
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -520,22 +596,67 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// --- Direct debit path ---
 	gcMandateID := ""
 	if input.PaymentMethod == "direct_debit" {
-		checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
-		if err != nil {
-			log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
-			writeError(w, http.StatusBadGateway, err.Error())
+		if invite != nil && inviteStrategy == "use_existing" && input.GoCardlessMandateID != "" {
+			prov, provErr := h.getGoCardlessProvider(r.Context(), tenant.ID)
+			if provErr != nil || prov == nil {
+				writeError(w, http.StatusBadGateway, "Direct debit provider unavailable")
+				return
+			}
+			_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), membership.ID, tenant.ID, input.GoCardlessMandateID)
+			subName := "Membership"
+			if mtForCreate != nil {
+				subName = mtForCreate.Title
+			}
+			numPay := membership.NumPayments
+			continueAfterTerm := false
+			if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil {
+				if numPay == nil && to.NumPayments != nil {
+					numPay = to.NumPayments
+				}
+				continueAfterTerm = to.ContinueAfterTerm
+			}
+			if continueAfterTerm {
+				numPay = nil
+			}
+			if _, gcErr := createGoCardlessSubscription(
+				r.Context(),
+				prov,
+				h.memberRepo,
+				input.GoCardlessMandateID,
+				membership,
+				tenant.ID,
+				input.PaymentFrequency,
+				input.PaymentAmount,
+				membership.PaymentIntervalUnit,
+				membership.PaymentIntervalCount,
+				subName,
+				membership.StartDate,
+				membership.MinTermEndDate,
+				numPay,
+				continueAfterTerm,
+			); gcErr != nil {
+				writeError(w, http.StatusBadGateway, "Direct debit subscription setup failed")
+				return
+			}
+		} else {
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
+			if err != nil {
+				log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
+			markInviteCompleted()
+			mt := mtForCreate
+			thankyou := buildThankyouResponse(tenant, mt)
+			writeJSON(w, http.StatusCreated, map[string]interface{}{
+				"membership":   membership,
+				"client":       client,
+				"thankyou":     thankyou,
+				"checkout_url": checkoutURL,
+			})
 			return
 		}
-		h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
-		mt := mtForCreate
-		thankyou := buildThankyouResponse(tenant, mt)
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"membership":   membership,
-			"client":       client,
-			"thankyou":     thankyou,
-			"checkout_url": checkoutURL,
-		})
-		return
 	}
 
 	// Determine thank you page
@@ -544,6 +665,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 
 	// Create agreement snapshot for legal custody
 	snapshotID := h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
+	markInviteCompleted()
 
 	// Send membership confirmation email to client (async)
 	if client.Email != nil && *client.Email != "" && mt != nil {
@@ -651,11 +773,303 @@ func (h *SignupHandler) GetSignupLinks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *SignupHandler) CreateMembershipInvite(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil || tenantID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
+	if h.inviteRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Invite repository unavailable")
+		return
+	}
+
+	var input struct {
+		ClientID              string  `json:"client_id"`
+		MembershipTypeID      string  `json:"membership_type_id"`
+		TermOptionID          string  `json:"term_option_id"`
+		StartDate             string  `json:"start_date"`
+		PaymentFrequency      string  `json:"payment_frequency"`
+		PaymentMethod         *string `json:"payment_method"`
+		PaymentMethodStrategy string  `json:"payment_method_strategy"`
+		PaymentMethodID       *string `json:"payment_method_id"`
+		GoCardlessMandateID   *string `json:"gocardless_mandate_id"`
+		ExpiryDays            int     `json:"expiry_days"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.MembershipTypeID = strings.TrimSpace(input.MembershipTypeID)
+	input.TermOptionID = strings.TrimSpace(input.TermOptionID)
+	input.StartDate = strings.TrimSpace(input.StartDate)
+	input.PaymentFrequency = strings.TrimSpace(strings.ToLower(input.PaymentFrequency))
+	input.PaymentMethodStrategy = strings.TrimSpace(strings.ToLower(input.PaymentMethodStrategy))
+	if input.PaymentMethod != nil {
+		pm := strings.TrimSpace(strings.ToLower(*input.PaymentMethod))
+		input.PaymentMethod = &pm
+	}
+	if input.PaymentMethodID != nil {
+		pmID := strings.TrimSpace(*input.PaymentMethodID)
+		if pmID == "" {
+			input.PaymentMethodID = nil
+		} else {
+			input.PaymentMethodID = &pmID
+		}
+	}
+	if input.GoCardlessMandateID != nil {
+		mid := strings.TrimSpace(*input.GoCardlessMandateID)
+		if mid == "" {
+			input.GoCardlessMandateID = nil
+		} else {
+			input.GoCardlessMandateID = &mid
+		}
+	}
+
+	if input.ClientID == "" || input.MembershipTypeID == "" || input.TermOptionID == "" || input.StartDate == "" || input.PaymentFrequency == "" {
+		writeError(w, http.StatusBadRequest, "Missing required fields")
+		return
+	}
+	if input.PaymentMethodStrategy != "ask_client" && input.PaymentMethodStrategy != "use_existing" {
+		writeError(w, http.StatusBadRequest, "payment_method_strategy must be ask_client or use_existing")
+		return
+	}
+	if input.PaymentMethodStrategy == "use_existing" {
+		if input.PaymentMethod == nil || *input.PaymentMethod == "" {
+			writeError(w, http.StatusBadRequest, "payment_method is required when using existing method")
+			return
+		}
+		if *input.PaymentMethod == "card" && input.PaymentMethodID == nil {
+			writeError(w, http.StatusBadRequest, "payment_method_id is required for existing Stripe card method")
+			return
+		}
+		if *input.PaymentMethod == "direct_debit" && input.GoCardlessMandateID == nil {
+			writeError(w, http.StatusBadRequest, "gocardless_mandate_id is required for existing direct debit method")
+			return
+		}
+	}
+
+	startDate, err := time.Parse("2006-01-02", input.StartDate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid start_date")
+		return
+	}
+	clientID, err := uuid.Parse(input.ClientID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid client_id")
+		return
+	}
+	membershipTypeID, err := uuid.Parse(input.MembershipTypeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid membership_type_id")
+		return
+	}
+	termOptionID, err := uuid.Parse(input.TermOptionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term_option_id")
+		return
+	}
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+	mt, err := h.mtRepo.FindByID(r.Context(), membershipTypeID, tenantID)
+	if err != nil || mt == nil {
+		writeError(w, http.StatusNotFound, "Membership type not found")
+		return
+	}
+	term, err := h.mtRepo.GetTermOption(r.Context(), termOptionID, tenantID)
+	if err != nil || term == nil || term.MembershipTypeID != mt.ID {
+		writeError(w, http.StatusBadRequest, "Term option not found")
+		return
+	}
+
+	expiryDays := input.ExpiryDays
+	if expiryDays <= 0 {
+		expiryDays = 7
+	}
+	if expiryDays > 30 {
+		expiryDays = 30
+	}
+	expiresAt := time.Now().UTC().Add(time.Duration(expiryDays) * 24 * time.Hour)
+	var createdBy *uuid.UUID
+	if userID != uuid.Nil {
+		createdBy = &userID
+	}
+	invite, err := h.inviteRepo.Create(
+		r.Context(),
+		tenantID,
+		clientID,
+		membershipTypeID,
+		termOptionID,
+		startDate,
+		input.PaymentFrequency,
+		input.PaymentMethod,
+		input.PaymentMethodStrategy,
+		input.PaymentMethodID,
+		input.GoCardlessMandateID,
+		expiresAt,
+		createdBy,
+	)
+	if err != nil {
+		log.Printf("signup invite create failed tenant=%s err=%v", tenantID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to create invite")
+		return
+	}
+
+	tenant, _ := h.tenantRepo.FindByID(r.Context(), tenantID)
+	tenantSlug := ""
+	tenantName := "Your organisation"
+	if tenant != nil {
+		tenantSlug = tenant.Slug
+		tenantName = tenant.Name
+	}
+	finalisePath := fmt.Sprintf("/join/%s/invite/%s", tenantSlug, invite.Token.String())
+	baseURL := strings.TrimSuffix(h.appBaseURL(r), "/")
+	finaliseURL := baseURL + finalisePath
+	emailSent := false
+	warning := ""
+
+	clientEmail := ""
+	if client.Email != nil {
+		clientEmail = strings.TrimSpace(*client.Email)
+	}
+	if clientEmail == "" {
+		warning = "Client has no email on file. Invite created as copy-link only."
+	} else if h.emailSvc != nil {
+		html := fmt.Sprintf(`
+			<h2 style="font-size:18px;font-weight:600;color:#111827;margin:0 0 12px;">Complete your membership setup</h2>
+			<p style="font-size:14px;color:#6b7280;line-height:1.6;">Hi %s,</p>
+			<p style="font-size:14px;color:#6b7280;line-height:1.6;">You've been invited to complete your membership with %s. Use the secure link below to review details, choose payment (if requested), and sign your agreement.</p>
+			<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background-color:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">Complete membership setup</a></p>
+			<p style="font-size:12px;color:#9ca3af;">This link expires on %s.</p>
+		`, client.Name, tenantName, finaliseURL, invite.ExpiresAt.In(time.UTC).Format("2 Jan 2006 15:04 MST"))
+		_, sendErr := h.emailSvc.Send(context.Background(), email.SendInput{
+			To:      clientEmail,
+			Subject: fmt.Sprintf("Complete your membership setup with %s", tenantName),
+			HTML:    html,
+			Text:    fmt.Sprintf("Complete your membership setup: %s", finaliseURL),
+		})
+		if sendErr != nil {
+			warning = "Invite created but email failed to send. Please copy and share the link."
+			log.Printf("signup invite email failed tenant=%s client=%s err=%v", tenantID, client.ID, sendErr)
+		} else {
+			emailSent = true
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"invite_id":        invite.ID,
+		"invite_token":     invite.Token.String(),
+		"invite_path":      finalisePath,
+		"invite_url":       finaliseURL,
+		"expires_at":       invite.ExpiresAt.Format(time.RFC3339),
+		"email_sent":       emailSent,
+		"warning":          warning,
+		"payment_strategy": invite.PaymentMethodStrategy,
+	})
+}
+
+func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) {
+	tenantSlug := chi.URLParam(r, "tenantSlug")
+	tokenRaw := strings.TrimSpace(chi.URLParam(r, "inviteToken"))
+	if tenantSlug == "" || tokenRaw == "" {
+		writeError(w, http.StatusBadRequest, "Invalid invite link")
+		return
+	}
+	if h.inviteRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Invite repository unavailable")
+		return
+	}
+	token, err := uuid.Parse(tokenRaw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid invite link")
+		return
+	}
+	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
+	if err != nil || tenant == nil {
+		writeError(w, http.StatusNotFound, "Tenant not found")
+		return
+	}
+	invite, err := h.inviteRepo.FindByToken(r.Context(), token)
+	if err != nil || invite == nil || invite.TenantID != tenant.ID {
+		writeError(w, http.StatusNotFound, "Invite not found")
+		return
+	}
+	if invite.CompletedAt != nil {
+		writeError(w, http.StatusGone, "Invite already completed")
+		return
+	}
+	if time.Now().UTC().After(invite.ExpiresAt) {
+		writeError(w, http.StatusGone, "Invite expired")
+		return
+	}
+	mt, err := h.mtRepo.FindByID(r.Context(), invite.MembershipTypeID, tenant.ID)
+	if err != nil || mt == nil {
+		writeError(w, http.StatusNotFound, "Membership not found")
+		return
+	}
+	for i, to := range mt.TermOptions {
+		bonuses, _ := h.bonusRepo.GetBonusesForTermOption(r.Context(), to.ID, tenant.ID)
+		mt.TermOptions[i].Bonuses = bonuses
+	}
+	terms, _ := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	client, _ := h.clientRepo.FindByID(r.Context(), invite.ClientID, tenant.ID)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tenant": map[string]interface{}{
+			"name":                          tenant.Name,
+			"slug":                          tenant.Slug,
+			"logo_url":                      tenant.LogoURL,
+			"primary_colour":                tenant.PrimaryColour,
+			"secondary_colour":              tenant.SecondaryColour,
+			"default_thankyou_heading":      tenant.DefaultThankyouHeading,
+			"default_thankyou_body":         tenant.DefaultThankyouBody,
+			"default_thankyou_image_url":    tenant.DefaultThankyouImageURL,
+			"default_thankyou_redirect_url": tenant.DefaultThankyouRedirectURL,
+			"signup_price_display_mode":     tenant.SignupPriceDisplayMode,
+			"enabled_payment_frequencies":   tenant.EnabledPaymentFrequencies,
+			"ask_emergency_contact":         tenant.AskEmergencyContact,
+			"ask_company_information":       tenant.AskCompanyInformation,
+			"google_places_api_key":         h.googlePlacesAPIKey(r.Context()),
+		},
+		"membership":        mt,
+		"terms":             terms,
+		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
+		"invite": map[string]interface{}{
+			"token":                   invite.Token.String(),
+			"client_id":               invite.ClientID,
+			"start_date":              invite.StartDate.Format("2006-01-02"),
+			"payment_frequency":       invite.PaymentFrequency,
+			"payment_method":          invite.PaymentMethod,
+			"payment_method_strategy": invite.PaymentMethodStrategy,
+			"payment_method_id":       invite.PaymentMethodID,
+			"gocardless_mandate_id":   invite.GoCardlessMandateID,
+			"expires_at":              invite.ExpiresAt.Format(time.RFC3339),
+		},
+		"invite_client": client,
+	})
+}
+
 func (h *SignupHandler) signupLinkTTL() time.Duration {
 	if h.cfg != nil && h.cfg.SignupLinkTTLMinutes > 0 {
 		return time.Duration(h.cfg.SignupLinkTTLMinutes) * time.Minute
 	}
 	return 7 * 24 * time.Hour
+}
+
+func (h *SignupHandler) appBaseURL(r *http.Request) string {
+	if h.cfg != nil && strings.TrimSpace(h.cfg.AppURL) != "" {
+		return strings.TrimSpace(h.cfg.AppURL)
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" {
+		return origin
+	}
+	return "https://app.clientroll.com"
 }
 
 func (h *SignupHandler) signupSigningSecret() string {
@@ -727,6 +1141,7 @@ func (h *SignupHandler) verifySignupAccess(r *http.Request, tenantSlug, pathMemb
 // SignupSubmission is the full signup form data.
 type SignupSubmission struct {
 	Client               models.Client `json:"client"`
+	InviteToken          string        `json:"invite_token,omitempty"`
 	MembershipTypeID     string        `json:"membership_type_id"`
 	TermOptionID         string        `json:"term_option_id"`
 	StartDateRaw         string        `json:"start_date"`
@@ -737,6 +1152,8 @@ type SignupSubmission struct {
 	PaymentIntervalCount int           `json:"payment_interval_count,omitempty"`
 	PaymentAmount        float64       `json:"payment_amount"`
 	NumPayments          *int          `json:"num_payments,omitempty"`
+	PaymentMethodID      string        `json:"payment_method_id,omitempty"`
+	GoCardlessMandateID  string        `json:"gocardless_mandate_id,omitempty"`
 	MemberSignature      string        `json:"member_signature"`
 	AcceptedTermsIDs     []string      `json:"accepted_terms_ids,omitempty"`
 	SendAgreementEmail   bool          `json:"send_agreement_email,omitempty"`
@@ -852,7 +1269,7 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -901,6 +1318,23 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		params.Metadata["cancel_at_timestamp"] = strconv.FormatInt(termEndTime.Unix(), 10)
 	} else {
 		params.Metadata["continue_after_term"] = "true"
+	}
+	if strings.TrimSpace(paymentMethodID) != "" {
+		params.Metadata["requested_payment_method_id"] = strings.TrimSpace(paymentMethodID)
+	}
+	stripeCustomerID := ""
+	if client.StripeCustomerID != nil {
+		stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+	}
+	if stripeCustomerID == "" {
+		if fromHistory, _ := h.clientRepo.FindLatestStripeCustomerIDFromHistory(r.Context(), client.ID, tenant.ID); strings.TrimSpace(fromHistory) != "" {
+			stripeCustomerID = strings.TrimSpace(fromHistory)
+			_ = h.clientRepo.SetStripeCustomerID(r.Context(), client.ID, tenant.ID, stripeCustomerID)
+		}
+	}
+	if stripeCustomerID != "" {
+		params.Customer = stripe.String(stripeCustomerID)
+		params.PaymentMethodCollection = stripe.String("if_required")
 	}
 	if client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
@@ -1025,17 +1459,17 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		ClientReferenceID:  stripe.String(client.ID.String()),
 		PaymentMethodTypes: stripe.StringSlice([]string{directDebitType}),
 		Metadata: map[string]string{
-			"tenant_id":      tenant.ID.String(),
-			"tenant_slug":    tenant.Slug,
-			"client_id":      client.ID.String(),
-			"membership_id":  membership.ID.String(),
-			"payment_amount": strconv.FormatFloat(amount, 'f', 2, 64),
-			"currency_code":  strings.ToUpper(cur),
-			"payment_freq":   frequency,
-			"payment_method": "direct_debit",
+			"tenant_id":           tenant.ID.String(),
+			"tenant_slug":         tenant.Slug,
+			"client_id":           client.ID.String(),
+			"membership_id":       membership.ID.String(),
+			"payment_amount":      strconv.FormatFloat(amount, 'f', 2, 64),
+			"currency_code":       strings.ToUpper(cur),
+			"payment_freq":        frequency,
+			"payment_method":      "direct_debit",
 			"payment_method_type": directDebitType,
 			"payment_method_label": map[string]string{
-				"au_becs_debit":  "Australia BECS Direct Debit",
+				"au_becs_debit":   "Australia BECS Direct Debit",
 				"us_bank_account": "US Bank Account (ACH Direct Debit)",
 			}[directDebitType],
 		},

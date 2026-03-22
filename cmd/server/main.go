@@ -156,7 +156,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	_ = bankDetailsRepo // used later
 	clientHandler := handlers.NewClientHandler(clientRepo, memberRepo, mtRepo, credRepo, redirectFlowRepo, enc, emailSvc)
 	agreementRepo := repository.NewAgreementSnapshotRepo(db)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, platformBillingConfigRepo, bankDetailsRepo, agreementRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
+	membershipSetupInviteRepo := repository.NewMembershipSetupInviteRepo(db)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, platformBillingConfigRepo, bankDetailsRepo, agreementRepo, membershipSetupInviteRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
 	agreementHandler := handlers.NewAgreementHandler(agreementRepo)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)

@@ -40,6 +40,7 @@ function App() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
 
         {/* Public membership signup */}
+        <Route path="/join/:tenantSlug/invite/:inviteToken" element={<SignupPage />} />
         <Route path="/join/:tenantSlug" element={<SignupPage />} />
         <Route path="/:tenantSlug/:membershipSlug" element={<SignupPage />} />
 
