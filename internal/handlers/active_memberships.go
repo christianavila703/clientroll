@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/customer"
 	"github.com/stripe/stripe-go/v82/subscription"
 )
 
@@ -69,6 +70,8 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		PaymentIntervalCount int     `json:"payment_interval_count,omitempty"`
 		PaymentAmount        float64 `json:"payment_amount"`
 		NumPayments          *int    `json:"num_payments,omitempty"`
+		PaymentMethodID      string  `json:"payment_method_id,omitempty"`
+		GoCardlessMandateID  string  `json:"gocardless_mandate_id,omitempty"`
 		// Bank details for GoCardless mandate setup
 		AccountHolderName string `json:"account_holder_name,omitempty"`
 		AccountNumber     string `json:"account_number,omitempty"`
@@ -86,6 +89,8 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
 	input.PaymentFrequency = strings.TrimSpace(strings.ToLower(input.PaymentFrequency))
 	input.PaymentIntervalUnit = strings.TrimSpace(strings.ToLower(input.PaymentIntervalUnit))
+	input.PaymentMethodID = strings.TrimSpace(input.PaymentMethodID)
+	input.GoCardlessMandateID = strings.TrimSpace(input.GoCardlessMandateID)
 	if input.PaymentIntervalCount <= 0 {
 		input.PaymentIntervalCount = 1
 	}
@@ -196,6 +201,47 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 			"source":             "staff",
 		}))
 	}
+	if (strings.EqualFold(input.PaymentMethod, "card") || strings.EqualFold(input.PaymentMethod, "direct_debit")) && input.PaymentMethodID != "" {
+		if secretKey, keyErr := h.getStripeSecretKey(r.Context(), tenantID); keyErr == nil {
+			stripe.Key = secretKey
+			client, _ := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+			if client != nil {
+				stripeCustomerID := ""
+				if client.StripeCustomerID != nil {
+					stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+				}
+				if stripeCustomerID == "" {
+					if fromHistory, _ := h.clientRepo.FindLatestStripeCustomerIDFromHistory(r.Context(), clientID, tenantID); strings.TrimSpace(fromHistory) != "" {
+						stripeCustomerID = strings.TrimSpace(fromHistory)
+						_ = h.clientRepo.SetStripeCustomerID(r.Context(), clientID, tenantID, stripeCustomerID)
+					}
+				}
+				if stripeCustomerID == "" {
+					cparams := &stripe.CustomerParams{
+						Name: stripe.String(client.Name),
+						Metadata: map[string]string{
+							"tenant_id": tenantID.String(),
+							"client_id": clientID.String(),
+						},
+					}
+					if client.Email != nil && strings.TrimSpace(*client.Email) != "" {
+						cparams.Email = stripe.String(strings.TrimSpace(*client.Email))
+					}
+					if cust, cErr := customer.New(cparams); cErr == nil && cust != nil && strings.TrimSpace(cust.ID) != "" {
+						stripeCustomerID = strings.TrimSpace(cust.ID)
+						_ = h.clientRepo.SetStripeCustomerID(r.Context(), clientID, tenantID, stripeCustomerID)
+					}
+				}
+				if stripeCustomerID != "" {
+					_, _ = customer.Update(stripeCustomerID, &stripe.CustomerParams{
+						InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
+							DefaultPaymentMethod: stripe.String(input.PaymentMethodID),
+						},
+					})
+				}
+			}
+		}
+	}
 
 	// --- GoCardless: create customer + mandate if bank details provided ---
 	if input.BSB != "" && input.AccountNumber != "" {
@@ -268,6 +314,13 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	}
 	// If no bank details were supplied, reuse an existing client mandate when possible.
 	if input.BSB == "" && input.AccountNumber == "" && strings.EqualFold(input.PaymentMethod, "direct_debit") {
+		if input.GoCardlessMandateID != "" {
+			if err := h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, input.GoCardlessMandateID); err != nil {
+				log.Printf("membership.create explicit mandate set failed tenant=%s membership=%s mandate=%s err=%v", tenantID, m.ID, input.GoCardlessMandateID, err)
+			}
+			writeJSON(w, http.StatusCreated, m)
+			return
+		}
 		prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
 		if provErr == nil && prov != nil {
 			if existingMandateID := h.findReusableMandateForClient(r.Context(), tenantID, clientID); existingMandateID != "" {

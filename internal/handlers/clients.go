@@ -21,6 +21,7 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/customer"
+	"github.com/stripe/stripe-go/v82/paymentmethod"
 )
 
 // ClientHandler handles client CRUD endpoints.
@@ -526,6 +527,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	result := map[string]interface{}{
+		"client_country":          client.Country,
 		"has_mandate":            false,
 		"mandate_id":             nil,
 		"membership_id":          nil,
@@ -534,6 +536,8 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		"client_email":           nil,
 		"payment_providers":      []string{},
 		"supports_direct_debit":  false,
+		"has_stored_direct_debit": false,
+		"direct_debit_source":     nil,
 	}
 
 	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
@@ -560,7 +564,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	result["payment_providers"] = providers
-	result["supports_direct_debit"] = hasGoCardless || hasStripe
+	result["supports_direct_debit"] = hasGoCardless || (hasStripe && stripeDirectDebitTypeForCountry(client.Country) != "")
 
 	memberships, err := h.clientRepo.GetMemberships(r.Context(), clientID, tenantID)
 	if err == nil {
@@ -580,6 +584,43 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 					result["mandate_id"] = *m.GoCardlessMandateID
 					result["membership_id"] = m.ID.String()
 					break
+				}
+			}
+		}
+	}
+	if hasMandate, _ := result["has_mandate"].(bool); hasMandate {
+		result["has_stored_direct_debit"] = true
+		result["direct_debit_source"] = "gocardless"
+	}
+	if hasStripe && stripeDirectDebitTypeForCountry(client.Country) != "" {
+		secretKey, keyErr := h.getStripeSecretKey(r.Context(), tenantID)
+		if keyErr == nil && strings.TrimSpace(secretKey) != "" {
+			stripe.Key = secretKey
+			stripeCustomerID := ""
+			if client.StripeCustomerID != nil {
+				stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+			}
+			if stripeCustomerID == "" {
+				if fromHistory, _ := h.clientRepo.FindLatestStripeCustomerIDFromHistory(r.Context(), clientID, tenantID); strings.TrimSpace(fromHistory) != "" {
+					stripeCustomerID = strings.TrimSpace(fromHistory)
+					_ = h.clientRepo.SetStripeCustomerID(r.Context(), clientID, tenantID, stripeCustomerID)
+					result["stripe_customer_id"] = stripeCustomerID
+				}
+			}
+			if stripeCustomerID != "" {
+				ddType := stripeDirectDebitTypeForCountry(client.Country)
+				pmList := paymentmethod.List(&stripe.PaymentMethodListParams{
+					Customer: stripe.String(stripeCustomerID),
+					Type:     stripe.String(ddType),
+					ListParams: stripe.ListParams{
+						Limit: stripe.Int64(1),
+					},
+				})
+				if pmList.Next() {
+					result["has_stored_direct_debit"] = true
+					if result["direct_debit_source"] == nil {
+						result["direct_debit_source"] = "stripe"
+					}
 				}
 			}
 		}
@@ -868,4 +909,19 @@ func (h *ClientHandler) getGoCardlessProvider(ctx context.Context, tenantID uuid
 		env = "sandbox"
 	}
 	return payment.NewGoCardlessProvider(apiKey, "", env), nil
+}
+
+func (h *ClientHandler) getStripeSecretKey(ctx context.Context, tenantID uuid.UUID) (string, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return "", fmt.Errorf("stripe integration unavailable")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" || !creds.IsActive {
+		return "", fmt.Errorf("stripe not configured")
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(secretKey) == "" {
+		return "", fmt.Errorf("stripe credentials invalid")
+	}
+	return secretKey, nil
 }

@@ -153,7 +153,7 @@ export default function ClientProfilePage() {
       });
       const membershipsList = memberRes.memberships || [];
       setMemberships(membershipsList);
-      const membershipByID = new Map(
+      const membershipByID = new Map<string, MembershipRecord>(
         membershipsList.map((m: MembershipRecord) => [m.membership_id, m])
       );
 
@@ -1766,9 +1766,11 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [accountHolderName, setAccountHolderName] = useState("");
   const [hasStoredMandate, setHasStoredMandate] = useState(false);
   const [storedMandateID, setStoredMandateID] = useState("");
-  const [directDebitMode, setDirectDebitMode] = useState<"existing" | "new">("new");
-  const [stripePaymentMethods, setStripePaymentMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
-  const [selectedStripePaymentMethodId, setSelectedStripePaymentMethodId] = useState("");
+  const [directDebitMode, setDirectDebitMode] = useState<"stripe_existing" | "gocardless_existing" | "new">("new");
+  const [stripeCardMethods, setStripeCardMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
+  const [stripeDirectDebitMethods, setStripeDirectDebitMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
+  const [selectedStripeCardMethodId, setSelectedStripeCardMethodId] = useState("");
+  const [selectedStripeDirectDebitMethodId, setSelectedStripeDirectDebitMethodId] = useState("");
   const [inviteURL, setInviteURL] = useState("");
   const [inviteWarning, setInviteWarning] = useState("");
   const [inviteEmailSent, setInviteEmailSent] = useState(false);
@@ -1796,15 +1798,29 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
       const mandateID = String((mandate as any)?.mandate_id || "");
       const methods = Array.isArray((stripeMethodsData as any)?.payment_methods) ? (stripeMethodsData as any).payment_methods : [];
       const cardMethods = methods.filter((m: any) => m?.type === "card");
+      const directDebitMethods = methods.filter((m: any) => m?.type === "au_becs_debit" || m?.type === "us_bank_account");
       const defaultCard = cardMethods.find((m: any) => m?.is_default) || cardMethods[0];
-      setStripePaymentMethods(cardMethods);
-      setSelectedStripePaymentMethodId(defaultCard?.id || "");
+      const defaultDirectDebit = directDebitMethods.find((m: any) => m?.is_default) || directDebitMethods[0];
+      setStripeCardMethods(cardMethods);
+      setStripeDirectDebitMethods(directDebitMethods);
+      setSelectedStripeCardMethodId(defaultCard?.id || "");
+      setSelectedStripeDirectDebitMethodId(defaultDirectDebit?.id || "");
       setHasStoredMandate(hasMandate);
       setStoredMandateID(mandateID);
-      setDirectDebitMode(hasMandate ? "existing" : "new");
-      setBillingMethod(hasMandate ? "direct_debit" : (defaultCard ? "card" : "direct_debit"));
+      setDirectDebitMode(defaultDirectDebit ? "stripe_existing" : (hasMandate ? "gocardless_existing" : "new"));
+      setBillingMethod((defaultDirectDebit || hasMandate) ? "direct_debit" : (defaultCard ? "card" : "direct_debit"));
     });
   }, []);
+
+  useEffect(() => {
+    if (flowMode === "send_invite" && paymentStrategy === "use_existing" && billingMethod === "direct_debit" && directDebitMode === "new") {
+      if (selectedStripeDirectDebitMethodId) {
+        setDirectDebitMode("stripe_existing");
+      } else if (storedMandateID) {
+        setDirectDebitMode("gocardless_existing");
+      }
+    }
+  }, [flowMode, paymentStrategy, billingMethod, directDebitMode, selectedStripeDirectDebitMethodId, storedMandateID]);
 
   const handleSubmit = async () => {
     if (!selectedType || !selectedTerm) return;
@@ -1812,18 +1828,36 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
       setError("BSB and account number are required when adding a new payment method.");
       return;
     }
-    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "card" && !selectedStripePaymentMethodId) {
+    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "card" && !selectedStripeCardMethodId) {
       setError("Select a saved Stripe card or switch to direct debit.");
       return;
     }
+    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "stripe_existing" && !selectedStripeDirectDebitMethodId) {
+      setError("Select a saved Stripe direct debit method or choose another direct debit option.");
+      return;
+    }
+    if (flowMode === "create_now" && frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "gocardless_existing" && !storedMandateID) {
+      setError("No saved GoCardless mandate is available for this client.");
+      return;
+    }
     if (flowMode === "send_invite" && paymentStrategy === "use_existing") {
-      if (billingMethod === "card" && !selectedStripePaymentMethodId) {
+      if (billingMethod === "card" && !selectedStripeCardMethodId) {
         setError("Select an existing Stripe card, or switch to 'Ask client for payment method'.");
         return;
       }
-      if (billingMethod === "direct_debit" && !storedMandateID) {
-        setError("No existing direct debit mandate found for this client.");
-        return;
+      if (billingMethod === "direct_debit") {
+        if (directDebitMode === "stripe_existing" && !selectedStripeDirectDebitMethodId) {
+          setError("Select an existing Stripe direct debit method, or switch direct debit source.");
+          return;
+        }
+        if (directDebitMode === "gocardless_existing" && !storedMandateID) {
+          setError("No existing GoCardless mandate found for this client.");
+          return;
+        }
+        if (directDebitMode === "new") {
+          setError("Use existing mode requires a saved Stripe direct debit method or GoCardless mandate.");
+          return;
+        }
       }
     }
     setSaving(true); setError("");
@@ -1841,8 +1875,12 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
           payment_frequency: frequency,
           payment_method_strategy: paymentStrategy,
           payment_method: paymentStrategy === "use_existing" ? billingMethod : undefined,
-          payment_method_id: paymentStrategy === "use_existing" && billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
-          gocardless_mandate_id: paymentStrategy === "use_existing" && billingMethod === "direct_debit" ? storedMandateID : undefined,
+          payment_method_id: paymentStrategy === "use_existing"
+            ? (billingMethod === "card"
+              ? selectedStripeCardMethodId
+              : (directDebitMode === "stripe_existing" ? selectedStripeDirectDebitMethodId : undefined))
+            : undefined,
+          gocardless_mandate_id: paymentStrategy === "use_existing" && billingMethod === "direct_debit" && directDebitMode === "gocardless_existing" ? storedMandateID : undefined,
         };
         const data = await api.createMembershipInvite(invitePayload) as {
           invite_url?: string;
@@ -1865,7 +1903,10 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
           payment_interval_unit: isCustomSchedule ? selectedTerm.custom_schedule_interval_unit : undefined,
           payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
           num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
-          payment_method_id: billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
+          payment_method_id: billingMethod === "card"
+            ? selectedStripeCardMethodId
+            : (billingMethod === "direct_debit" && directDebitMode === "stripe_existing" ? selectedStripeDirectDebitMethodId : undefined),
+          gocardless_mandate_id: billingMethod === "direct_debit" && directDebitMode === "gocardless_existing" ? storedMandateID : undefined,
         };
         if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
           body.bsb = bsb.trim();
@@ -2089,28 +2130,67 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                   {frequency !== "upfront" && billingMethod === "direct_debit" && (flowMode === "create_now" || (flowMode === "send_invite" && paymentStrategy === "use_existing")) && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
-                      {hasStoredMandate && (
-                        <div className="mb-3 grid grid-cols-2 gap-2">
+                      {(stripeDirectDebitMethods.length > 0 || hasStoredMandate) && (
+                        <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <button
                             type="button"
-                            onClick={() => setDirectDebitMode("existing")}
-                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "existing" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                            onClick={() => setDirectDebitMode("stripe_existing")}
+                            disabled={stripeDirectDebitMethods.length === 0}
+                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "stripe_existing" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"}`}
                           >
-                            Use existing
+                            Use saved Stripe DD
                           </button>
                           <button
                             type="button"
-                            onClick={() => setDirectDebitMode("new")}
-                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "new" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                            onClick={() => setDirectDebitMode("gocardless_existing")}
+                            disabled={!hasStoredMandate}
+                            className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "gocardless_existing" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"}`}
                           >
-                            Add new payment method
+                            Use GoCardless mandate
                           </button>
+                          {flowMode === "create_now" && (
+                            <button
+                              type="button"
+                              onClick={() => setDirectDebitMode("new")}
+                              className={`rounded-md border px-3 py-2 text-[12px] font-medium ${directDebitMode === "new" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                            >
+                              Add new payment method
+                            </button>
+                          )}
                         </div>
                       )}
                       {flowMode === "send_invite" && paymentStrategy === "use_existing" ? (
-                        <p className="text-[12px] text-emerald-700">Existing mandate will be reused when client finalises.</p>
-                      ) : hasStoredMandate && directDebitMode === "existing" ? (
-                        <p className="text-[12px] text-emerald-700">Existing direct debit mandate will be reused for this membership.</p>
+                        <p className="text-[12px] text-emerald-700">
+                          {directDebitMode === "stripe_existing" && selectedStripeDirectDebitMethodId
+                            ? "Saved Stripe direct debit method will be reused when client finalises."
+                            : (directDebitMode === "gocardless_existing" && storedMandateID ? "Saved GoCardless mandate will be reused when client finalises." : "No saved direct debit method selected.")}
+                        </p>
+                      ) : directDebitMode === "stripe_existing" ? (
+                        stripeDirectDebitMethods.length > 0 ? (
+                          <div className="space-y-2">
+                            {stripeDirectDebitMethods.map((m) => (
+                              <label key={m.id} className="flex items-center gap-2 text-[12px] text-gray-700">
+                                <input
+                                  type="radio"
+                                  name="membership_stripe_direct_debit"
+                                  checked={selectedStripeDirectDebitMethodId === m.id}
+                                  onChange={() => setSelectedStripeDirectDebitMethodId(m.id)}
+                                  className="h-4 w-4 text-indigo-600"
+                                />
+                                <span>{m.label}</span>
+                                {m.is_default && <span className="badge badge-gray">Default</span>}
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[12px] text-gray-500">No saved Stripe direct debit method found for this client.</p>
+                        )
+                      ) : directDebitMode === "gocardless_existing" ? (
+                        hasStoredMandate ? (
+                          <p className="text-[12px] text-emerald-700">Existing GoCardless mandate will be reused for this membership.</p>
+                        ) : (
+                          <p className="text-[12px] text-gray-500">No saved GoCardless mandate found for this client.</p>
+                        )
                       ) : (
                         <>
                           <p className="text-[12px] text-gray-500 mb-3">Enter bank details to create a new mandate for this client.</p>
@@ -2136,15 +2216,15 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                   {frequency !== "upfront" && billingMethod === "card" && (flowMode === "create_now" || (flowMode === "send_invite" && paymentStrategy === "use_existing")) && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Saved Stripe card</p>
-                      {stripePaymentMethods.length > 0 ? (
+                      {stripeCardMethods.length > 0 ? (
                         <div className="space-y-2">
-                          {stripePaymentMethods.map((m) => (
+                          {stripeCardMethods.map((m) => (
                             <label key={m.id} className="flex items-center gap-2 text-[12px] text-gray-700">
                               <input
                                 type="radio"
                                 name="membership_stripe_card"
-                                checked={selectedStripePaymentMethodId === m.id}
-                                onChange={() => setSelectedStripePaymentMethodId(m.id)}
+                                checked={selectedStripeCardMethodId === m.id}
+                                onChange={() => setSelectedStripeCardMethodId(m.id)}
                                 className="h-4 w-4 text-indigo-600"
                               />
                               <span>{m.label}</span>

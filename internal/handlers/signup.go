@@ -28,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/customer"
 )
 
 // SignupHandler handles the public membership signup flow.
@@ -639,7 +640,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else {
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID)
 			if err != nil {
 				log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, err.Error())
@@ -845,8 +846,8 @@ func (h *SignupHandler) CreateMembershipInvite(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, "payment_method_id is required for existing Stripe card method")
 			return
 		}
-		if *input.PaymentMethod == "direct_debit" && input.GoCardlessMandateID == nil {
-			writeError(w, http.StatusBadRequest, "gocardless_mandate_id is required for existing direct debit method")
+		if *input.PaymentMethod == "direct_debit" && input.GoCardlessMandateID == nil && input.PaymentMethodID == nil {
+			writeError(w, http.StatusBadRequest, "Either payment_method_id (Stripe) or gocardless_mandate_id is required for existing direct debit method")
 			return
 		}
 	}
@@ -1332,9 +1333,36 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			_ = h.clientRepo.SetStripeCustomerID(r.Context(), client.ID, tenant.ID, stripeCustomerID)
 		}
 	}
+	if stripeCustomerID == "" {
+		cparams := &stripe.CustomerParams{
+			Name: stripe.String(client.Name),
+			Metadata: map[string]string{
+				"tenant_id": tenant.ID.String(),
+				"client_id": client.ID.String(),
+			},
+		}
+		if client.Email != nil && strings.TrimSpace(*client.Email) != "" {
+			cparams.Email = stripe.String(strings.TrimSpace(*client.Email))
+		}
+		cust, cErr := customer.New(cparams)
+		if cErr != nil || cust == nil || strings.TrimSpace(cust.ID) == "" {
+			return "", errors.New("failed to create stripe customer")
+		}
+		stripeCustomerID = strings.TrimSpace(cust.ID)
+		_ = h.clientRepo.SetStripeCustomerID(r.Context(), client.ID, tenant.ID, stripeCustomerID)
+	}
 	if stripeCustomerID != "" {
 		params.Customer = stripe.String(stripeCustomerID)
 		params.PaymentMethodCollection = stripe.String("if_required")
+	}
+	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
+		pmID := strings.TrimSpace(paymentMethodID)
+		_, _ = customer.Update(stripeCustomerID, &stripe.CustomerParams{
+			InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
+				DefaultPaymentMethod: stripe.String(pmID),
+			},
+		})
+		params.Metadata["requested_payment_method_id"] = pmID
 	}
 	if client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
@@ -1414,7 +1442,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 
 // createStripeBECSCheckoutSession creates a Stripe Checkout session for Stripe direct debit.
 // The direct debit rail is selected by client country (AU -> BECS, US -> ACH).
-func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time) (string, error) {
+func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -1473,6 +1501,47 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 				"us_bank_account": "US Bank Account (ACH Direct Debit)",
 			}[directDebitType],
 		},
+	}
+	stripeCustomerID := ""
+	if client.StripeCustomerID != nil {
+		stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+	}
+	if stripeCustomerID == "" {
+		if fromHistory, _ := h.clientRepo.FindLatestStripeCustomerIDFromHistory(r.Context(), client.ID, tenant.ID); strings.TrimSpace(fromHistory) != "" {
+			stripeCustomerID = strings.TrimSpace(fromHistory)
+			_ = h.clientRepo.SetStripeCustomerID(r.Context(), client.ID, tenant.ID, stripeCustomerID)
+		}
+	}
+	if stripeCustomerID == "" {
+		cparams := &stripe.CustomerParams{
+			Name: stripe.String(client.Name),
+			Metadata: map[string]string{
+				"tenant_id": tenant.ID.String(),
+				"client_id": client.ID.String(),
+			},
+		}
+		if client.Email != nil && strings.TrimSpace(*client.Email) != "" {
+			cparams.Email = stripe.String(strings.TrimSpace(*client.Email))
+		}
+		cust, cErr := customer.New(cparams)
+		if cErr != nil || cust == nil || strings.TrimSpace(cust.ID) == "" {
+			return "", errors.New("failed to create stripe customer")
+		}
+		stripeCustomerID = strings.TrimSpace(cust.ID)
+		_ = h.clientRepo.SetStripeCustomerID(r.Context(), client.ID, tenant.ID, stripeCustomerID)
+	}
+	if stripeCustomerID != "" {
+		params.Customer = stripe.String(stripeCustomerID)
+		params.PaymentMethodCollection = stripe.String("if_required")
+	}
+	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
+		pmID := strings.TrimSpace(paymentMethodID)
+		_, _ = customer.Update(stripeCustomerID, &stripe.CustomerParams{
+			InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
+				DefaultPaymentMethod: stripe.String(pmID),
+			},
+		})
+		params.Metadata["requested_payment_method_id"] = pmID
 	}
 	if !continueAfterTerm {
 		params.Metadata["continue_after_term"] = "false"
