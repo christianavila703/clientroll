@@ -293,12 +293,17 @@ export default function ClientProfilePage() {
       )}
 
       {activeSignupInvite && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-amber-900">Active signup invite link</p>
-              <p className="text-[12px] text-amber-800">Expires {fmtDate(activeSignupInvite.expires_at)}</p>
-              <p className="text-[12px] text-amber-700 truncate mt-1">{activeSignupInvite.invite_url}</p>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                <p className="text-[13px] font-semibold text-gray-900">Signup invite link is active</p>
+              </div>
+              <p className="mt-0.5 text-[12px] text-gray-500">Expires {fmtDate(activeSignupInvite.expires_at)}</p>
+              <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+                <p className="truncate text-[12px] text-gray-600">{activeSignupInvite.invite_url}</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -310,7 +315,7 @@ export default function ClientProfilePage() {
               <button
                 onClick={handleRevokeSignupInvite}
                 disabled={revokingSignupInvite}
-                className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-[12px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
                 {revokingSignupInvite ? "Revoking..." : "Revoke link"}
               </button>
