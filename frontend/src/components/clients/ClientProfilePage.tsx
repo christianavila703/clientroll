@@ -55,6 +55,7 @@ export default function ClientProfilePage() {
   const [tab, setTab] = useState<"summary" | "memberships" | "billing" | "payments">("summary");
   const [showEdit, setShowEdit] = useState(false);
   const [showSetupMembership, setShowSetupMembership] = useState(false);
+  const [showManageSignupInvite, setShowManageSignupInvite] = useState(false);
   const [showTakePayment, setShowTakePayment] = useState(false);
   const [showAddPaymentMethod, setShowAddPaymentMethod] = useState(false);
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -70,7 +71,6 @@ export default function ClientProfilePage() {
     supportsDirectDebit: false,
   });
   const [activeSignupInvite, setActiveSignupInvite] = useState<ActiveSignupInvite | null>(null);
-  const [revokingSignupInvite, setRevokingSignupInvite] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
@@ -199,22 +199,6 @@ export default function ClientProfilePage() {
     finally { setLoading(false); }
   };
 
-  const handleRevokeSignupInvite = async () => {
-    if (!activeSignupInvite?.id || revokingSignupInvite) return;
-    const ok = window.confirm("Revoke this signup invite link? The client will not be able to use it.");
-    if (!ok) return;
-    setRevokingSignupInvite(true);
-    try {
-      await api.revokeMembershipInvite(activeSignupInvite.id);
-      setMandateCompleteMessage({ type: "success", text: "Signup invite revoked." });
-      await loadAll();
-    } catch (err) {
-      setMandateCompleteMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to revoke invite." });
-    } finally {
-      setRevokingSignupInvite(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="card px-5 py-12 text-center text-[13px] text-gray-500">Loading...</div>
@@ -276,6 +260,7 @@ export default function ClientProfilePage() {
             clientId={client.id}
             clientName={client.name}
             onSetupMembership={() => setShowSetupMembership(true)}
+            onManageSignupInvite={() => setShowManageSignupInvite(true)}
             onTakePayment={() => setShowTakePayment(true)}
             onAddPaymentMethod={() => setShowAddPaymentMethod(true)}
           />
@@ -289,38 +274,6 @@ export default function ClientProfilePage() {
       {mandateCompleteMessage && (
         <div className={`mb-4 rounded-md px-4 py-3 text-[13px] ${mandateCompleteMessage.type === "success" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-700"}`}>
           {mandateCompleteMessage.text}
-        </div>
-      )}
-
-      {activeSignupInvite && (
-        <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                <p className="text-[13px] font-semibold text-gray-900">Signup invite link is active</p>
-              </div>
-              <p className="mt-0.5 text-[12px] text-gray-500">Expires {fmtDate(activeSignupInvite.expires_at)}</p>
-              <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5">
-                <p className="truncate text-[12px] text-gray-600">{activeSignupInvite.invite_url}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigator.clipboard.writeText(activeSignupInvite.invite_url)}
-                className="btn-secondary text-[12px]"
-              >
-                Copy link
-              </button>
-              <button
-                onClick={handleRevokeSignupInvite}
-                disabled={revokingSignupInvite}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {revokingSignupInvite ? "Revoking..." : "Revoke link"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -593,6 +546,22 @@ export default function ClientProfilePage() {
           clientName={client.name}
           onClose={() => setShowSetupMembership(false)}
           onCreated={() => { setShowSetupMembership(false); loadAll(); }}
+        />
+      )}
+      {showManageSignupInvite && (
+        <ManageSignupInviteModal
+          clientName={client.name}
+          activeInvite={activeSignupInvite}
+          onClose={() => setShowManageSignupInvite(false)}
+          onCreateInvite={() => {
+            setShowManageSignupInvite(false);
+            setShowSetupMembership(true);
+          }}
+          onRevoked={async () => {
+            setShowManageSignupInvite(false);
+            setMandateCompleteMessage({ type: "success", text: "Signup invite revoked." });
+            await loadAll();
+          }}
         />
       )}
 
@@ -1422,17 +1391,126 @@ function AddPaymentMethodModal({
   );
 }
 
+function ManageSignupInviteModal({
+  clientName,
+  activeInvite,
+  onClose,
+  onCreateInvite,
+  onRevoked,
+}: {
+  clientName: string;
+  activeInvite: ActiveSignupInvite | null;
+  onClose: () => void;
+  onCreateInvite: () => void;
+  onRevoked: () => Promise<void> | void;
+}) {
+  const [revoking, setRevoking] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleRevoke = async () => {
+    if (!activeInvite?.id || revoking) return;
+    const ok = window.confirm("Revoke this signup invite link? The client will not be able to use it.");
+    if (!ok) return;
+    setRevoking(true);
+    setError("");
+    try {
+      await api.revokeMembershipInvite(activeInvite.id);
+      await onRevoked();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke invite.");
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative min-h-screen flex items-start justify-center pt-10 pb-10 px-4">
+        <div className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-[15px] font-bold text-gray-900">Manage signup invite</h2>
+              <p className="text-[12px] text-gray-500">for {clientName}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {error && <div className="mx-6 mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-[13px] text-red-600">{error}</div>}
+
+          <div className="px-6 py-5">
+            {!activeInvite ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4">
+                <p className="text-[13px] font-medium text-gray-800">No active signup invite</p>
+                <p className="mt-1 text-[12px] text-gray-500">
+                  Create a new invite from membership setup when you are ready to send one.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                    <p className="text-[13px] font-semibold text-gray-900">Active</p>
+                  </div>
+                  <p className="mt-1 text-[12px] text-gray-500">Expires {new Date(activeInvite.expires_at).toLocaleString()}</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 mb-1">Invite link</p>
+                  <input
+                    readOnly
+                    value={activeInvite.invite_url}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                    className="input-field text-[12px] font-mono"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button onClick={onClose} className="btn-secondary text-[12px]">Close</button>
+              {activeInvite ? (
+                <>
+                  <button onClick={() => navigator.clipboard.writeText(activeInvite.invite_url)} className="btn-secondary text-[12px]">
+                    Copy link
+                  </button>
+                  <button
+                    onClick={handleRevoke}
+                    disabled={revoking}
+                    className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-[12px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {revoking ? "Revoking..." : "Revoke link"}
+                  </button>
+                </>
+              ) : (
+                <button onClick={onCreateInvite} className="btn-primary text-[12px]">
+                  Create invite
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── More Actions Dropdown ─── */
 function MoreActionsMenu({
   clientId,
   clientName,
   onSetupMembership,
+  onManageSignupInvite,
   onTakePayment,
   onAddPaymentMethod,
 }: {
   clientId: string;
   clientName: string;
   onSetupMembership: () => void;
+  onManageSignupInvite: () => void;
   onTakePayment: () => void;
   onAddPaymentMethod: () => void;
 }) {
@@ -1456,6 +1534,10 @@ function MoreActionsMenu({
           <button onClick={() => { setOpen(false); onSetupMembership(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-indigo-700 hover:bg-indigo-50 font-medium">
             <svg className="h-3.5 w-3.5 text-indigo-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
             Set up membership
+          </button>
+          <button onClick={() => { setOpen(false); onManageSignupInvite(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 font-medium">
+            <svg className="h-3.5 w-3.5 text-gray-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12m-12 4.5h12m-12 4.5h12M3.75 6.75h.008v.008H3.75V6.75zm0 4.5h.008v.008H3.75v-.008zm0 4.5h.008v.008H3.75v-.008z" /></svg>
+            Manage signup invite
           </button>
           <button onClick={() => { setOpen(false); onTakePayment(); }} className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-emerald-700 hover:bg-emerald-50 font-medium">
             <svg className="h-3.5 w-3.5 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
