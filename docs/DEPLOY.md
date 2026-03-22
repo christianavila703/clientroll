@@ -21,10 +21,17 @@ git push origin main
 
 ## 2. On the server: pull and deploy
 
-SSH into the server, then from the app directory (e.g. `/var/www/clientroll`):
+**Layout (default in `scripts/deploy-on-server.sh`):**
+
+| Path | Role |
+|------|------|
+| `/var/www/clientroll-repo` | **Git clone** — run `git pull` and `./scripts/deploy-on-server.sh` here (`SOURCE_REPO`) |
+| `/var/www/clientroll` | **Runtime deploy** — binary, `web/`, often `.env` (`DEPLOY_PATH`) |
+
+SSH into the server, then from the **repo** directory:
 
 ```bash
-cd /var/www/clientroll   # or your DEPLOY_PATH
+cd /var/www/clientroll-repo
 git pull origin main
 chmod +x scripts/deploy-on-server.sh   # first time only
 ./scripts/deploy-on-server.sh

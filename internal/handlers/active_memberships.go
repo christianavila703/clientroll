@@ -488,7 +488,8 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 
 	params := &stripe.SubscriptionParams{}
 	if input.ContinueAfterTerm {
-		// Unset explicit cancellation date so billing continues.
+		// Clear scheduled cancellation; must not send cancel_at together with cancel_at_period_end.
+		params.CancelAtPeriodEnd = stripe.Bool(false)
 		params.AddExtra("cancel_at", "")
 	} else {
 		cancelAt := time.Date(
@@ -502,6 +503,7 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 			writeError(w, http.StatusBadRequest, "Membership term end date is invalid")
 			return
 		}
+		params.CancelAtPeriodEnd = stripe.Bool(false)
 		params.CancelAt = stripe.Int64(cancelAt)
 	}
 	if _, err := subscription.Update(subID, params); err != nil {

@@ -95,6 +95,7 @@ func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/signup/{tenantSlug}", h.GetTenantMemberships)
 	// More specific paths before /{membershipSlug} (chi resolves correctly either way; explicit order for readers).
 	r.Get("/signup/{tenantSlug}/invite/{inviteToken}", h.GetInviteDetail)
+	r.Get("/signup/{tenantSlug}/checkout-session", h.VerifyCheckoutSessionReturn)
 	r.Get("/signup/{tenantSlug}/{membershipSlug}/term/{termOptionID}/bonuses", h.GetTermBonuses)
 	r.Get("/signup/{tenantSlug}/{membershipSlug}", h.GetMembershipDetail)
 	r.Post("/signup/{tenantSlug}/submit", h.SubmitSignup)
@@ -246,6 +247,80 @@ func (h *SignupHandler) GetTermBonuses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"bonuses": bonuses})
+}
+
+// VerifyCheckoutSessionReturn loads a Stripe Checkout Session and confirms it completed for this tenant.
+// Prevents showing a false "payment complete" screen from ?stripe=success alone (bookmarkable / stale URLs).
+func (h *SignupHandler) VerifyCheckoutSessionReturn(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "tenantSlug")
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	if !strings.HasPrefix(sessionID, "cs_") {
+		writeError(w, http.StatusBadRequest, "invalid session_id")
+		return
+	}
+	if err := h.verifySignupAccess(r, slug, "", true); err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	tenant, err := h.tenantRepo.FindBySlug(r.Context(), slug)
+	if err != nil || tenant == nil || !tenant.IsActive {
+		writeError(w, http.StatusNotFound, "Organisation not found")
+		return
+	}
+	if h.credRepo == nil || h.encryptor == nil {
+		writeError(w, http.StatusServiceUnavailable, "Payment verification unavailable")
+		return
+	}
+	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		writeError(w, http.StatusServiceUnavailable, "Stripe not configured")
+		return
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || secretKey == "" {
+		writeError(w, http.StatusServiceUnavailable, "Stripe credentials invalid")
+		return
+	}
+	stripe.Key = secretKey
+	params := &stripe.CheckoutSessionParams{}
+	params.AddExpand("subscription")
+	sess, err := checkoutsession.Get(sessionID, params)
+	if err != nil || sess == nil {
+		if err != nil {
+			log.Printf("signup checkout verify tenant=%s session=%s err=%v", slug, sessionID, err)
+		}
+		writeError(w, http.StatusBadRequest, "Could not load checkout session")
+		return
+	}
+	meta := sess.Metadata
+	if strings.TrimSpace(meta["tenant_id"]) != tenant.ID.String() {
+		writeError(w, http.StatusForbidden, "This payment does not match this signup page")
+		return
+	}
+	if sess.Status != stripe.CheckoutSessionStatusComplete {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"verified":        false,
+			"checkout_status": string(sess.Status),
+			"payment_status":  string(sess.PaymentStatus),
+			"checkout_mode":   string(sess.Mode),
+			"reason":          "checkout_not_complete",
+		})
+		return
+	}
+	out := map[string]interface{}{
+		"verified":        true,
+		"checkout_mode":   string(sess.Mode),
+		"payment_status":  string(sess.PaymentStatus),
+		"checkout_status": string(sess.Status),
+	}
+	if sess.Subscription != nil && strings.TrimSpace(sess.Subscription.ID) != "" {
+		out["stripe_subscription_id"] = strings.TrimSpace(sess.Subscription.ID)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // SubmitSignup processes a completed signup form.
@@ -1645,7 +1720,14 @@ func (h *SignupHandler) signupStripeCardSubscriptionWithSavedPM(
 		OffSession:           stripe.Bool(true),
 	}
 	if trialEnd != nil {
-		subParams.TrialEnd = trialEnd
+		anchor := time.Unix(*trialEnd, 0).UTC()
+		if anchor.Sub(nowUTC) >= stripeMinTrialEndLead {
+			subParams.TrialEnd = trialEnd
+		} else {
+			subParams.BillingCycleAnchor = trialEnd
+			subParams.ProrationBehavior = stripe.String("none")
+			subMeta["defer_first_charge_mode"] = "billing_cycle_anchor"
+		}
 	}
 	subParams.AddExpand("latest_invoice")
 	sub, err := subscription.New(subParams)
@@ -1665,7 +1747,8 @@ func (h *SignupHandler) signupStripeCardSubscriptionWithSavedPM(
 
 	if !continueAfterTerm && termEndTime.Unix() > 0 {
 		if _, caErr := subscription.Update(sub.ID, &stripe.SubscriptionParams{
-			CancelAt: stripe.Int64(termEndTime.Unix()),
+			CancelAt:          stripe.Int64(termEndTime.Unix()),
+			CancelAtPeriodEnd: stripe.Bool(false),
 		}); caErr != nil {
 			return fmt.Errorf("set subscription cancel_at: %w", caErr)
 		}
@@ -1719,7 +1802,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 
 	params := &stripe.CheckoutSessionParams{
 		Mode:              stripe.String(string(mode)),
-		SuccessURL:        stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
+		SuccessURL:        stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success&session_id={CHECKOUT_SESSION_ID}"),
 		CancelURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
 		ClientReferenceID: stripe.String(client.ID.String()),
 		Metadata: map[string]string{
@@ -1788,10 +1871,12 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		}
 		params.Metadata["requested_payment_method_id"] = pmID
 	}
-	// Stripe rejects Checkout when both customer and customer_email are set.
-	if params.Customer == nil && client.Email != nil && *client.Email != "" {
-		params.CustomerEmail = stripe.String(*client.Email)
+	// Prefill email only when we are not passing an existing Stripe customer id.
+	hasStripeCustomer := params.Customer != nil && strings.TrimSpace(*params.Customer) != ""
+	if !hasStripeCustomer && client.Email != nil && strings.TrimSpace(*client.Email) != "" {
+		params.CustomerEmail = stripe.String(strings.TrimSpace(*client.Email))
 	}
+	sanitizeCheckoutCustomerParams(params)
 
 	cur := strings.ToLower(strings.TrimSpace(currencyCode))
 	if cur == "" {
@@ -1879,11 +1964,11 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			nowUTC := time.Now().UTC()
 			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
 			if startAt.After(nowUTC) {
-				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+				applyDeferFirstSubscriptionChargeCheckout(params.SubscriptionData, startAt, nowUTC, params.Metadata)
 			} else {
 				nextAnchor := nextRecurringAnchorUTC(startAt, interval, count, nowUTC)
 				if nextAnchor.After(nowUTC) {
-					params.SubscriptionData.TrialEnd = stripe.Int64(nextAnchor.Unix())
+					applyDeferFirstSubscriptionChargeCheckout(params.SubscriptionData, nextAnchor, nowUTC, params.Metadata)
 					params.Metadata["late_start_catch_up"] = "true"
 					params.Metadata["late_start_next_anchor"] = nextAnchor.Format(time.RFC3339)
 					// Add a one-off initial charge now while recurring billing starts on next anchor.
@@ -1896,6 +1981,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 	}
 
+	sanitizeCheckoutCustomerParams(params)
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		return "", err
@@ -1945,7 +2031,7 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 
 	params := &stripe.CheckoutSessionParams{
 		Mode:               stripe.String(string(mode)),
-		SuccessURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
+		SuccessURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success&session_id={CHECKOUT_SESSION_ID}"),
 		CancelURL:          stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
 		ClientReferenceID:  stripe.String(client.ID.String()),
 		PaymentMethodTypes: stripe.StringSlice([]string{directDebitType}),
@@ -2018,10 +2104,11 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	} else {
 		params.Metadata["continue_after_term"] = "true"
 	}
-	// Stripe rejects Checkout when both customer and customer_email are set.
-	if params.Customer == nil && client.Email != nil && *client.Email != "" {
-		params.CustomerEmail = stripe.String(*client.Email)
+	hasStripeCustomer := params.Customer != nil && strings.TrimSpace(*params.Customer) != ""
+	if !hasStripeCustomer && client.Email != nil && strings.TrimSpace(*client.Email) != "" {
+		params.CustomerEmail = stripe.String(strings.TrimSpace(*client.Email))
 	}
+	sanitizeCheckoutCustomerParams(params)
 
 	feeCents := stripeProcessingFee(unitAmount, "direct_debit")
 	totalAmount := float64(unitAmount+feeCents) / 100.0
@@ -2107,11 +2194,11 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			nowUTC := time.Now().UTC()
 			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
 			if startAt.After(nowUTC) {
-				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+				applyDeferFirstSubscriptionChargeCheckout(params.SubscriptionData, startAt, nowUTC, params.Metadata)
 			} else {
 				nextAnchor := nextRecurringAnchorUTC(startAt, interval, count, nowUTC)
 				if nextAnchor.After(nowUTC) {
-					params.SubscriptionData.TrialEnd = stripe.Int64(nextAnchor.Unix())
+					applyDeferFirstSubscriptionChargeCheckout(params.SubscriptionData, nextAnchor, nowUTC, params.Metadata)
 					params.Metadata["late_start_catch_up"] = "true"
 					params.Metadata["late_start_next_anchor"] = nextAnchor.Format(time.RFC3339)
 					// Add a one-off initial charge now while recurring billing starts on next anchor.
@@ -2124,6 +2211,7 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 	}
 
+	sanitizeCheckoutCustomerParams(params)
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		return "", err
@@ -2151,6 +2239,40 @@ func stripeProcessingFee(baseAmountCents int64, method string) int64 {
 		return 0
 	}
 	return fee
+}
+
+// stripeMinTrialEndLead is Stripe's minimum horizon for subscription trial_end (Checkout + Subscriptions).
+const stripeMinTrialEndLead = 48 * time.Hour
+
+// sanitizeCheckoutCustomerParams clears customer_email whenever a Stripe customer id is set.
+// Stripe returns 400 if both are present on checkout.session.create.
+func sanitizeCheckoutCustomerParams(p *stripe.CheckoutSessionParams) {
+	if p == nil {
+		return
+	}
+	if p.Customer != nil && strings.TrimSpace(*p.Customer) != "" {
+		p.CustomerEmail = nil
+	}
+}
+
+// applyDeferFirstSubscriptionChargeCheckout defers the first recurring charge to anchor (membership start
+// or next billing anchor). Uses trial_end when it is at least ~48h ahead; otherwise billing_cycle_anchor
+// because Stripe rejects shorter trial_end values.
+func applyDeferFirstSubscriptionChargeCheckout(sub *stripe.CheckoutSessionSubscriptionDataParams, anchor, nowUTC time.Time, meta map[string]string) {
+	if sub == nil || !anchor.After(nowUTC) {
+		return
+	}
+	if anchor.Sub(nowUTC) >= stripeMinTrialEndLead {
+		sub.TrialEnd = stripe.Int64(anchor.Unix())
+		return
+	}
+	sub.BillingCycleAnchor = stripe.Int64(anchor.Unix())
+	if sub.ProrationBehavior == nil {
+		sub.ProrationBehavior = stripe.String("none")
+	}
+	if meta != nil {
+		meta["defer_first_charge_mode"] = "billing_cycle_anchor"
+	}
 }
 
 // tenantDateStartUTC returns UTC timestamp for local 00:00 on the same calendar date

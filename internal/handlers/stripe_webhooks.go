@@ -181,6 +181,89 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// shouldSyncMembershipAfterSubscriptionCheckout is true when Checkout completed and either the customer
+// paid (or no payment was required), or the subscription is in trial (deferred first charge / future start).
+// We do not treat async direct-debit "unpaid + active" as succeeded here — invoice events will settle that.
+func shouldSyncMembershipAfterSubscriptionCheckout(sess *stripe.CheckoutSession, raw []byte) bool {
+	if sess == nil {
+		return false
+	}
+	if sess.Status != stripe.CheckoutSessionStatusComplete {
+		return false
+	}
+	switch sess.PaymentStatus {
+	case stripe.CheckoutSessionPaymentStatusPaid, stripe.CheckoutSessionPaymentStatusNoPaymentRequired:
+		return true
+	}
+	if sess.Subscription != nil && sess.Subscription.Status == stripe.SubscriptionStatusTrialing {
+		return true
+	}
+	return checkoutSessionSubscriptionRawIsTrialing(raw)
+}
+
+func checkoutSessionSubscriptionRawIsTrialing(raw []byte) bool {
+	var payload struct {
+		Subscription json.RawMessage `json:"subscription"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Subscription) == 0 {
+		return false
+	}
+	var subObj struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload.Subscription, &subObj); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(subObj.Status), string(stripe.SubscriptionStatusTrialing))
+}
+
+func invoiceSubscriptionIDFromPayload(inv *stripe.Invoice, raw []byte) string {
+	if inv != nil && inv.Parent != nil && inv.Parent.SubscriptionDetails != nil &&
+		inv.Parent.SubscriptionDetails.Subscription != nil &&
+		strings.TrimSpace(inv.Parent.SubscriptionDetails.Subscription.ID) != "" {
+		return strings.TrimSpace(inv.Parent.SubscriptionDetails.Subscription.ID)
+	}
+	var payload struct {
+		Subscription interface{} `json:"subscription"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	switch v := payload.Subscription.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case map[string]interface{}:
+		if id, _ := v["id"].(string); strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+// subscriptionMetadataForStripeAPI loads subscription metadata (e.g. membership_id) using the tenant secret key.
+func (h *StripeWebhookHandler) subscriptionMetadataForStripeAPI(ctx context.Context, tenantID uuid.UUID, subscriptionID string) (map[string]string, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return nil, fmt.Errorf("stripe unavailable")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || strings.TrimSpace(creds.APIKeyEncrypted) == "" {
+		return nil, fmt.Errorf("stripe not configured")
+	}
+	key, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("stripe key invalid")
+	}
+	stripe.Key = strings.TrimSpace(key)
+	sub, err := subscription.Get(strings.TrimSpace(subscriptionID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("subscription get: %w", err)
+	}
+	if sub == nil {
+		return nil, fmt.Errorf("subscription missing")
+	}
+	return sub.Metadata, nil
+}
+
 func (h *StripeWebhookHandler) processStripeEvent(ctx context.Context, tenantID uuid.UUID, event stripe.Event) error {
 	switch event.Type {
 	case "checkout.session.completed":
@@ -470,6 +553,20 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 			log.Printf("stripe recordPendingFromSubscriptionCheckout tenant=%s err=%v", tenantID, err)
 			// non-fatal: invoice/payment events can still create/update this ledger row later.
 		}
+		// Align membership with billing: subscription-mode checkout used to skip the payment-mode path
+		// below, so we never called syncMembershipStatusAfterPayment. Invoice webhooks also often lack
+		// membership_id on the Invoice object (metadata lives on the Subscription), so invoice handlers
+		// could no-op. Session metadata always has membership_id from signup.
+		if h.memberRepo != nil {
+			if mid, err := uuid.Parse(strings.TrimSpace(metadata["membership_id"])); err == nil {
+				now := time.Now().UTC()
+				if shouldSyncMembershipAfterSubscriptionCheckout(&sess, event.Data.Raw) {
+					if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, mid, "succeeded", now); err != nil {
+						log.Printf("stripe checkout.subscription membership sync tenant=%s membership=%s err=%v", tenantID, mid, err)
+					}
+				}
+			}
+		}
 		return nil
 	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
@@ -649,7 +746,8 @@ func (h *StripeWebhookHandler) setSubscriptionCancelAtFromCheckout(ctx context.C
 	}
 	stripe.Key = secretKey
 	_, err = subscription.Update(subID, &stripe.SubscriptionParams{
-		CancelAt: stripe.Int64(cancelAt),
+		CancelAt:          stripe.Int64(cancelAt),
+		CancelAtPeriodEnd: stripe.Bool(false),
 	})
 	return err
 }
@@ -722,9 +820,38 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	if err := json.Unmarshal(event.Data.Raw, &inv); err != nil {
 		return fmt.Errorf("decode invoice event: %w", err)
 	}
-	metadata := inv.Metadata
-	membershipID, err1 := uuid.Parse(metadata["membership_id"])
-	clientID, err2 := uuid.Parse(metadata["client_id"])
+	metadata := make(map[string]string)
+	for k, v := range inv.Metadata {
+		metadata[k] = v
+	}
+	// Stripe v82+ attaches a snapshot of subscription metadata under parent.subscription_details (June 2023+).
+	if inv.Parent != nil && inv.Parent.SubscriptionDetails != nil && inv.Parent.SubscriptionDetails.Metadata != nil {
+		for k, v := range inv.Parent.SubscriptionDetails.Metadata {
+			if strings.TrimSpace(metadata[k]) == "" && strings.TrimSpace(v) != "" {
+				metadata[k] = v
+			}
+		}
+	}
+	membershipID, err1 := uuid.Parse(strings.TrimSpace(metadata["membership_id"]))
+	clientID, err2 := uuid.Parse(strings.TrimSpace(metadata["client_id"]))
+	if err1 != nil || err2 != nil {
+		// Older payloads / edge cases: subscription metadata lives only on the Subscription object.
+		subID := invoiceSubscriptionIDFromPayload(&inv, event.Data.Raw)
+		if subID != "" {
+			subMeta, metaErr := h.subscriptionMetadataForStripeAPI(ctx, tenantID, subID)
+			if metaErr != nil {
+				log.Printf("stripe invoice webhook subscription metadata tenant=%s invoice=%s sub=%s err=%v", tenantID, inv.ID, subID, metaErr)
+				return nil
+			}
+			for k, v := range subMeta {
+				if strings.TrimSpace(metadata[k]) == "" && strings.TrimSpace(v) != "" {
+					metadata[k] = v
+				}
+			}
+			membershipID, err1 = uuid.Parse(strings.TrimSpace(metadata["membership_id"]))
+			clientID, err2 = uuid.Parse(strings.TrimSpace(metadata["client_id"]))
+		}
+	}
 	if err1 != nil || err2 != nil {
 		return nil
 	}
@@ -809,12 +936,39 @@ func (h *StripeWebhookHandler) handleInvoiceFinalized(ctx context.Context, tenan
 	if inv.Status != stripe.InvoiceStatusOpen {
 		return nil
 	}
-	metadata := inv.Metadata
+	metadata := make(map[string]string)
+	for k, v := range inv.Metadata {
+		metadata[k] = v
+	}
+	if inv.Parent != nil && inv.Parent.SubscriptionDetails != nil && inv.Parent.SubscriptionDetails.Metadata != nil {
+		for k, v := range inv.Parent.SubscriptionDetails.Metadata {
+			if strings.TrimSpace(metadata[k]) == "" && strings.TrimSpace(v) != "" {
+				metadata[k] = v
+			}
+		}
+	}
 	if metadata["type"] == "service_charge" {
 		return nil
 	}
-	membershipID, err1 := uuid.Parse(metadata["membership_id"])
-	clientID, err2 := uuid.Parse(metadata["client_id"])
+	membershipID, err1 := uuid.Parse(strings.TrimSpace(metadata["membership_id"]))
+	clientID, err2 := uuid.Parse(strings.TrimSpace(metadata["client_id"]))
+	if err1 != nil || err2 != nil {
+		subID := invoiceSubscriptionIDFromPayload(&inv, event.Data.Raw)
+		if subID != "" {
+			subMeta, metaErr := h.subscriptionMetadataForStripeAPI(ctx, tenantID, subID)
+			if metaErr != nil {
+				log.Printf("stripe invoice.finalized subscription metadata tenant=%s invoice=%s sub=%s err=%v", tenantID, inv.ID, subID, metaErr)
+				return nil
+			}
+			for k, v := range subMeta {
+				if strings.TrimSpace(metadata[k]) == "" && strings.TrimSpace(v) != "" {
+					metadata[k] = v
+				}
+			}
+			membershipID, err1 = uuid.Parse(strings.TrimSpace(metadata["membership_id"]))
+			clientID, err2 = uuid.Parse(strings.TrimSpace(metadata["client_id"]))
+		}
+	}
 	if err1 != nil || err2 != nil {
 		return nil
 	}

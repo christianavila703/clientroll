@@ -44,6 +44,7 @@ export default function SignupPage() {
     try {
       const params = new URLSearchParams(window.location.search);
       const stripeState = params.get("stripe");
+      const checkoutSessionId = params.get("session_id");
       if (inviteToken) {
         const res = await fetch(`/api/signup/${tenantSlug}/invite/${inviteToken}${location.search}`);
         const data = await res.json();
@@ -89,10 +90,50 @@ export default function SignupPage() {
         setInviteClient(null);
       }
       if (stripeState === "success") {
-        setThankyou({
-          heading: "Payment complete",
-          body: "Your membership and card payment were processed successfully.",
-        });
+        // Do not trust ?stripe=success alone — verify session with Stripe when we have session_id.
+        if (checkoutSessionId && tenantSlug) {
+          try {
+            const vr = await fetch(
+              `/api/signup/${tenantSlug}/checkout-session?session_id=${encodeURIComponent(checkoutSessionId)}`
+            );
+            const v = (await vr.json()) as Record<string, unknown>;
+            if (!vr.ok) {
+              setThankyou({
+                heading: "Payment status unclear",
+                body: String(v.error || "We could not verify your payment. Please contact the organisation or check your email."),
+              });
+            } else if (v.verified === true) {
+              const mode = String(v.checkout_mode || "");
+              let body = "Your membership setup is complete.";
+              if (mode === "payment") {
+                body =
+                  "Your pay-in-full payment was received. In Stripe, one-time checkouts appear under Payments (not the Subscriptions list).";
+              } else if (mode === "subscription" && v.stripe_subscription_id) {
+                body = "Your membership and recurring billing are set up.";
+              } else if (mode === "subscription") {
+                body =
+                  "Your checkout finished. If you used bank debit, the mandate or first charge may still be processing.";
+              }
+              setThankyou({ heading: "Payment complete", body });
+            } else {
+              setThankyou({
+                heading: "Payment not finished",
+                body: "Stripe reports this checkout is not complete. You can open your membership link and try again.",
+              });
+            }
+          } catch {
+            setThankyou({
+              heading: "Payment status unclear",
+              body: "We could not verify your payment. Please contact the organisation.",
+            });
+          }
+        } else {
+          setThankyou({
+            heading: "Thanks",
+            body:
+              "If you just paid in Stripe, confirmation can take a moment. Pay-in-full checkouts do not create a Subscription in Stripe — look under Payments. If something looks wrong, contact us.",
+          });
+        }
         setStep("thankyou");
       } else if (stripeState === "cancelled") {
         setError("Card payment was cancelled. You can try again.");
