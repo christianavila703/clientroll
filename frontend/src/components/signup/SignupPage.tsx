@@ -52,8 +52,12 @@ export default function SignupPage() {
         setTerms(data.terms || []);
         setInviteContext(data.invite || null);
         setInviteClient(data.invite_client || null);
+        const termsForMembership = data.membership?.term_options || [];
         const termId = String((data.invite || {}).term_option_id || "");
-        const term = (data.membership?.term_options || []).find((t: any) => String(t.id) === termId) || null;
+        const term = termsForMembership.find((t: any) => String(t.id) === termId) || termsForMembership[0] || null;
+        if (!term) {
+          throw new Error("This invite is missing a valid term option. Please request a new invite.");
+        }
         setSelectedTerm(term);
         setStep("form");
       } else if (membershipSlug) {

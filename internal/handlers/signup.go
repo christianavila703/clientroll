@@ -1042,6 +1042,8 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
 		"invite": map[string]interface{}{
 			"token":                   invite.Token.String(),
+			"membership_type_id":      invite.MembershipTypeID,
+			"term_option_id":          invite.TermOptionID,
 			"client_id":               invite.ClientID,
 			"start_date":              invite.StartDate.Format("2006-01-02"),
 			"payment_frequency":       invite.PaymentFrequency,
@@ -1401,6 +1403,30 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			},
 		},
 	}
+	buildOneOffLineItems := func() []*stripe.CheckoutSessionLineItemParams {
+		return []*stripe.CheckoutSessionLineItemParams{
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(cur),
+					UnitAmount: stripe.Int64(unitAmount),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Membership - " + tenant.Name),
+					},
+				},
+			},
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(cur),
+					UnitAmount: stripe.Int64(feeCents),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Processing Fee"),
+					},
+				},
+			},
+		}
+	}
 	if mode == stripe.CheckoutSessionModeSubscription {
 		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
 		recurring := &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
@@ -1423,15 +1449,29 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 				"payment_freq":          frequency,
 			},
 		}
-		// When membership starts in the future, defer first invoice/charge until start date.
-		if !membershipStart.IsZero() {
+		// Option A behavior:
+		// - Future start date: defer first recurring invoice to configured start date.
+		// - Start date already passed at signup time: charge now, but anchor recurring from next cycle date.
+		if !membershipStart.IsZero() && params.SubscriptionData != nil {
+			nowUTC := time.Now().UTC()
 			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
-			if startAt.After(time.Now().UTC()) {
+			if startAt.After(nowUTC) {
 				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+			} else {
+				nextAnchor := nextRecurringAnchorUTC(startAt, interval, count, nowUTC)
+				if nextAnchor.After(nowUTC) {
+					params.SubscriptionData.TrialEnd = stripe.Int64(nextAnchor.Unix())
+					params.Metadata["late_start_catch_up"] = "true"
+					params.Metadata["late_start_next_anchor"] = nextAnchor.Format(time.RFC3339)
+					// Add a one-off initial charge now while recurring billing starts on next anchor.
+					params.LineItems = append(buildOneOffLineItems(), lineItem, feeItem)
+				}
 			}
 		}
 	}
-	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
+	if len(params.LineItems) == 0 {
+		params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
+	}
 
 	sess, err := checkoutsession.New(params)
 	if err != nil {
@@ -1581,6 +1621,30 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			},
 		},
 	}
+	buildOneOffLineItems := func() []*stripe.CheckoutSessionLineItemParams {
+		return []*stripe.CheckoutSessionLineItemParams{
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(cur),
+					UnitAmount: stripe.Int64(unitAmount),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Membership - " + tenant.Name),
+					},
+				},
+			},
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(cur),
+					UnitAmount: stripe.Int64(feeCents),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Processing Fee"),
+					},
+				},
+			},
+		}
+	}
 	if mode == stripe.CheckoutSessionModeSubscription {
 		interval, count := stripeRecurringInterval(frequency, intervalUnit, intervalCount)
 		recurring := &stripe.CheckoutSessionLineItemPriceDataRecurringParams{
@@ -1606,15 +1670,29 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 				"payment_method_label":  params.Metadata["payment_method_label"],
 			},
 		}
-		// When membership starts in the future, defer first invoice/charge until start date.
-		if !membershipStart.IsZero() {
+		// Option A behavior:
+		// - Future start date: defer first recurring invoice to configured start date.
+		// - Start date already passed at signup time: charge now, but anchor recurring from next cycle date.
+		if !membershipStart.IsZero() && params.SubscriptionData != nil {
+			nowUTC := time.Now().UTC()
 			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
-			if startAt.After(time.Now().UTC()) {
+			if startAt.After(nowUTC) {
 				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
+			} else {
+				nextAnchor := nextRecurringAnchorUTC(startAt, interval, count, nowUTC)
+				if nextAnchor.After(nowUTC) {
+					params.SubscriptionData.TrialEnd = stripe.Int64(nextAnchor.Unix())
+					params.Metadata["late_start_catch_up"] = "true"
+					params.Metadata["late_start_next_anchor"] = nextAnchor.Format(time.RFC3339)
+					// Add a one-off initial charge now while recurring billing starts on next anchor.
+					params.LineItems = append(buildOneOffLineItems(), lineItem, feeItem)
+				}
 			}
 		}
 	}
-	params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
+	if len(params.LineItems) == 0 {
+		params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
+	}
 
 	sess, err := checkoutsession.New(params)
 	if err != nil {
@@ -1679,6 +1757,21 @@ func stripeRecurringInterval(freq string, intervalUnit *string, intervalCount in
 	default:
 		return "month", 1
 	}
+}
+
+func nextRecurringAnchorUTC(startAt time.Time, interval string, count int64, nowUTC time.Time) time.Time {
+	if count <= 0 {
+		count = 1
+	}
+	anchor := startAt
+	for !anchor.After(nowUTC) {
+		if interval == "week" {
+			anchor = anchor.AddDate(0, 0, int(7*count))
+			continue
+		}
+		anchor = anchor.AddDate(0, int(count), 0)
+	}
+	return anchor
 }
 
 func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, input SignupSubmission, mtID, toID uuid.UUID) string {
