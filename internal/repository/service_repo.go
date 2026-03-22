@@ -56,7 +56,7 @@ func NewServiceRepo(db *database.Postgres) *ServiceRepo {
 func (r *ServiceRepo) List(ctx context.Context, tenantID uuid.UUID) ([]Service, error) {
 	rows, err := r.db.Pool.Query(ctx,
 		`SELECT id, tenant_id, name, description, price, currency_code, tax_rate, is_active, sort_order, created_at, updated_at
-		 FROM services WHERE tenant_id=$1 ORDER BY sort_order, name`, tenantID)
+		 FROM services WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY sort_order, name`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (r *ServiceRepo) Update(ctx context.Context, id, tenantID uuid.UUID, name s
 	var s Service
 	err := r.db.Pool.QueryRow(ctx,
 		`UPDATE services SET name=$3, description=$4, price=$5, currency_code=$6, tax_rate=$7, is_active=$8, sort_order=$9, updated_at=NOW()
-		 WHERE id=$1 AND tenant_id=$2
+		 WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		 RETURNING id, tenant_id, name, description, price, currency_code, tax_rate, is_active, sort_order, created_at, updated_at`,
 		id, tenantID, name, description, price, currencyCode, taxRate, isActive, sortOrder).Scan(
 		&s.ID, &s.TenantID, &s.Name, &s.Description, &s.Price, &s.CurrencyCode,
@@ -104,7 +104,12 @@ func (r *ServiceRepo) Update(ctx context.Context, id, tenantID uuid.UUID, name s
 }
 
 func (r *ServiceRepo) Delete(ctx context.Context, id, tenantID uuid.UUID) error {
-	_, err := r.db.Pool.Exec(ctx, "DELETE FROM services WHERE id=$1 AND tenant_id=$2", id, tenantID)
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE services
+		 SET deleted_at = NOW(), is_active = false, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+		id, tenantID,
+	)
 	return err
 }
 
