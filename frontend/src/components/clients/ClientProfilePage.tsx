@@ -368,16 +368,16 @@ export default function ClientProfilePage() {
                   <span className="text-[13px] text-gray-900">{fmtDate(client.birth_date)}</span>
                 </div>
               )}
-              {client.tax_number && (
-                <div className="flex justify-between gap-4">
-                  <span className="text-[13px] text-gray-500">Tax number</span>
-                  <span className="text-[13px] text-gray-900">{client.tax_number}</span>
-                </div>
-              )}
               {(hasAnyCompanyInfo || clientFieldSettings.askCompanyInformation) && (
                 <div className="flex justify-between gap-4">
                   <span className="text-[13px] text-gray-500">Company / business name</span>
                   <span className="text-[13px] text-gray-900">{client.company_name || "—"}</span>
+                </div>
+              )}
+              {client.tax_number && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[13px] text-gray-500">Tax number</span>
+                  <span className="text-[13px] text-gray-900">{client.tax_number}</span>
                 </div>
               )}
               {client.company_number && (
@@ -1821,11 +1821,11 @@ function EditClientModal({
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <LabeledInput label="Company / business name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} colSpan />
                     <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
-                    <LabeledInput label="Company / business name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} />
                     <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
                     <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" />
-                    <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" colSpan />
+                    <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" />
                   </div>
                 </div>
                 <div>
