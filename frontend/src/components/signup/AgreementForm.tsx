@@ -106,7 +106,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
     tax_number: "", company_name: "", company_number: "", company_phone: "", company_website: "",
-    company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: defaultCountryCode,
+    company_unit_number: "", company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: defaultCountryCode,
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
   const [payment, setPayment] = useState({
@@ -174,6 +174,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       company_number: String(inviteClient.company_number || prev.company_number || ""),
       company_phone: String(inviteClient.company_phone || prev.company_phone || ""),
       company_website: String(inviteClient.company_website || prev.company_website || ""),
+      company_unit_number: String(inviteClient.company_unit_number || prev.company_unit_number || ""),
       company_address: String(inviteClient.company_address || prev.company_address || ""),
       company_city: String(inviteClient.company_city || prev.company_city || ""),
       company_state_region: String(inviteClient.company_state_region || prev.company_state_region || ""),
@@ -520,17 +521,17 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
   companyAddressSameAsClient: boolean;
   onCompanyAddressSameAsClientChange: (next: boolean) => void;
 }) {
-  const personalStreetWithUnit = (unit: string, street: string) => {
-    const u = (unit || "").trim();
-    const s = (street || "").trim();
-    if (!u) return s;
-    if (!s) return `Unit ${u}`;
-    return `Unit ${u}, ${s}`;
-  };
   const set = (k: string, v: string) => {
     const next = { ...data, [k]: v };
     if (companyAddressSameAsClient) {
-      if (k === "address" || k === "unit_number") next.company_address = personalStreetWithUnit(k === "unit_number" ? v : next.unit_number, k === "address" ? v : next.address);
+      if (k === "address") {
+        next.company_address = v;
+        next.company_unit_number = next.unit_number;
+      }
+      if (k === "unit_number") {
+        next.company_unit_number = v;
+        next.company_address = next.address;
+      }
       if (k === "suburb") next.company_city = v;
       if (k === "state") next.company_state_region = v;
       if (k === "postcode") next.company_postcode = v;
@@ -563,7 +564,8 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
                 postcode: postcode || data.postcode,
               };
               if (companyAddressSameAsClient) {
-                next.company_address = personalStreetWithUnit(unit_number || data.unit_number, address || data.address);
+                next.company_unit_number = unit_number || data.unit_number;
+                next.company_address = address || data.address;
                 next.company_city = suburb || data.suburb;
                 next.company_state_region = state || data.state;
                 next.company_postcode = postcode || data.postcode;
@@ -633,7 +635,8 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
                   if (checked) {
                     onChange({
                       ...data,
-                      company_address: personalStreetWithUnit(data.unit_number, data.address),
+                      company_unit_number: data.unit_number,
+                      company_address: data.address,
                       company_city: data.suburb,
                       company_state_region: data.state,
                       company_postcode: data.postcode,
@@ -646,7 +649,33 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
               Same as personal address
             </label>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <Field label="Address" required full><input value={data.company_address} onChange={(e) => set("company_address", e.target.value)} className={inputCls} placeholder="Company street address" required /></Field>
+              <Field label="Street address" required full>
+                <AddressAutocompleteInput
+                  value={data.company_address}
+                  onChange={(v) => onChange({ ...data, company_address: v })}
+                  onAddressSelect={({ unit_number, address, suburb, state, postcode }) =>
+                    onChange({
+                      ...data,
+                      company_unit_number: unit_number || data.company_unit_number,
+                      company_address: address || data.company_address,
+                      company_city: suburb || data.company_city,
+                      company_state_region: state || data.company_state_region,
+                      company_postcode: postcode || data.company_postcode,
+                    })
+                  }
+                  apiKey={googlePlacesApiKey}
+                  className={inputCls}
+                  placeholder="Start typing an address..."
+                />
+              </Field>
+              <Field label="Unit / Apt Number">
+                <input
+                  value={data.company_unit_number}
+                  onChange={(e) => onChange({ ...data, company_unit_number: e.target.value })}
+                  className={inputCls}
+                  placeholder="Unit 4"
+                />
+              </Field>
               <Field label="City" required><input value={data.company_city} onChange={(e) => set("company_city", e.target.value)} className={inputCls} placeholder="City" required /></Field>
               <Field label="State / Region" required><input value={data.company_state_region} onChange={(e) => set("company_state_region", e.target.value)} className={inputCls} placeholder="State or region" required /></Field>
               <Field label="ZIP / Postcode" required><input value={data.company_postcode} onChange={(e) => set("company_postcode", e.target.value)} className={inputCls} placeholder="Postcode" required /></Field>

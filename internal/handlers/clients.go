@@ -124,6 +124,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CompanyNumber         *string `json:"company_number"`
 		CompanyPhone          *string `json:"company_phone"`
 		CompanyWebsite        *string `json:"company_website"`
+		CompanyUnitNumber     *string `json:"company_unit_number"`
 		CompanyAddress        *string `json:"company_address"`
 		CompanyCity           *string `json:"company_city"`
 		CompanyStateRegion    *string `json:"company_state_region"`
@@ -185,6 +186,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CompanyNumber:         normalize(input.CompanyNumber),
 		CompanyPhone:          normalize(input.CompanyPhone),
 		CompanyWebsite:        normalize(input.CompanyWebsite),
+		CompanyUnitNumber:     normalize(input.CompanyUnitNumber),
 		CompanyAddress:        normalize(input.CompanyAddress),
 		CompanyCity:           normalize(input.CompanyCity),
 		CompanyStateRegion:    normalize(input.CompanyStateRegion),
@@ -266,6 +268,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		CompanyNumber         *string `json:"company_number"`
 		CompanyPhone          *string `json:"company_phone"`
 		CompanyWebsite        *string `json:"company_website"`
+		CompanyUnitNumber     *string `json:"company_unit_number"`
 		CompanyAddress        *string `json:"company_address"`
 		CompanyCity           *string `json:"company_city"`
 		CompanyStateRegion    *string `json:"company_state_region"`
@@ -326,6 +329,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		CompanyNumber:         normalize(input.CompanyNumber),
 		CompanyPhone:          normalize(input.CompanyPhone),
 		CompanyWebsite:        normalize(input.CompanyWebsite),
+		CompanyUnitNumber:     normalize(input.CompanyUnitNumber),
 		CompanyAddress:        normalize(input.CompanyAddress),
 		CompanyCity:           normalize(input.CompanyCity),
 		CompanyStateRegion:    normalize(input.CompanyStateRegion),

@@ -16,7 +16,8 @@ const TC_VARIABLES = [
   { key: "start_date", label: "Start Date", desc: "When the membership begins" },
   { key: "end_date", label: "End Date", desc: "When the minimum term ends" },
   { key: "company_name", label: "Company Name", desc: "Your business name" },
-  { key: "company_address", label: "Company Address", desc: "Your business address" },
+  { key: "company_unit_number", label: "Company Unit Number", desc: "Unit or suite (member business address)" },
+  { key: "company_address", label: "Company Street Address", desc: "Street line only (member business address)" },
   { key: "company_phone", label: "Company Phone", desc: "Your business phone" },
   { key: "today_date", label: "Today's Date", desc: "Date the agreement is signed" },
 ];

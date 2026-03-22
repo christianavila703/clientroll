@@ -23,6 +23,7 @@ interface Client {
   company_number?: string;
   company_phone?: string;
   company_website?: string;
+  company_unit_number?: string;
   company_address?: string;
   company_city?: string;
   company_state_region?: string;
@@ -379,6 +380,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     emergency_contact_name: editing?.emergency_contact_name || "", emergency_contact_phone: editing?.emergency_contact_phone || "",
     tax_number: editing?.tax_number || "", company_name: editing?.company_name || "", company_number: editing?.company_number || "",
     company_phone: editing?.company_phone || "", company_website: editing?.company_website || "",
+    company_unit_number: editing?.company_unit_number || "",
     company_address: editing?.company_address || "", company_city: editing?.company_city || "",
     company_state_region: editing?.company_state_region || "", company_postcode: editing?.company_postcode || "",
     company_country: editing?.company_country || "",
@@ -389,13 +391,6 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
   const [askEmergencyContact, setAskEmergencyContact] = useState(true);
   const [askCompanyInformation, setAskCompanyInformation] = useState(false);
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
-  const personalStreetWithUnit = (unit: string, street: string) => {
-    const u = (unit || "").trim();
-    const s = (street || "").trim();
-    if (!u) return s;
-    if (!s) return `Unit ${u}`;
-    return `Unit ${u}, ${s}`;
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -462,6 +457,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         company_number: askCompanyInformation ? normalizeStringOrNull(form.company_number) : null,
         company_phone: askCompanyInformation ? normalizeStringOrNull(form.company_phone) : null,
         company_website: askCompanyInformation ? normalizeStringOrNull(form.company_website) : null,
+        company_unit_number: askCompanyInformation ? normalizeStringOrNull(form.company_unit_number) : null,
         company_address: askCompanyInformation ? normalizeStringOrNull(form.company_address) : null,
         company_city: askCompanyInformation ? normalizeStringOrNull(form.company_city) : null,
         company_state_region: askCompanyInformation ? normalizeStringOrNull(form.company_state_region) : null,
@@ -548,7 +544,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                     setForm((prev) => ({
                       ...prev,
                       address: v,
-                      ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(prev.unit_number, v) } : {}),
+                      ...(companyAddressSameAsClient ? { company_address: v, company_unit_number: prev.unit_number } : {}),
                     }))
                   }
                   onAddressSelect={({ unit_number, address, suburb, state, postcode }) =>
@@ -561,7 +557,8 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                       postcode: postcode || prev.postcode,
                       ...(companyAddressSameAsClient
                         ? {
-                            company_address: personalStreetWithUnit(unit_number || prev.unit_number, address || prev.address),
+                            company_unit_number: unit_number || prev.unit_number,
+                            company_address: address || prev.address,
                             company_city: suburb || prev.suburb,
                             company_state_region: state || prev.state,
                             company_postcode: postcode || prev.postcode,
@@ -582,7 +579,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                   setForm((prev) => ({
                     ...prev,
                     unit_number: v,
-                    ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(v, prev.address) } : {}),
+                    ...(companyAddressSameAsClient ? { company_unit_number: v, company_address: prev.address } : {}),
                   }))
                 }
                 required
@@ -659,7 +656,8 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                         if (checked) {
                           setForm((prev) => ({
                             ...prev,
-                            company_address: personalStreetWithUnit(prev.unit_number, prev.address),
+                            company_unit_number: prev.unit_number,
+                            company_address: prev.address,
                             company_city: prev.suburb,
                             company_state_region: prev.state,
                             company_postcode: prev.postcode,
@@ -673,7 +671,33 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                   </label>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <LabeledInput label="Address" value={form.company_address} onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))} required colSpan />
+                  <div className="sm:col-span-2">
+                    <label className="block text-[13px] font-medium text-gray-700 mb-1">
+                      Street address<span className="text-red-500"> *</span>
+                    </label>
+                    <AddressAutocompleteInput
+                      value={form.company_address}
+                      onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))}
+                      onAddressSelect={({ unit_number, address, suburb, state, postcode }) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          company_unit_number: unit_number || prev.company_unit_number,
+                          company_address: address || prev.company_address,
+                          company_city: suburb || prev.company_city,
+                          company_state_region: state || prev.company_state_region,
+                          company_postcode: postcode || prev.company_postcode,
+                        }))
+                      }
+                      apiKey={googlePlacesKey}
+                      className="input-field"
+                      placeholder="Start typing an address..."
+                    />
+                  </div>
+                  <LabeledInput
+                    label="Unit number"
+                    value={form.company_unit_number}
+                    onChange={(v) => setForm((prev) => ({ ...prev, company_unit_number: v }))}
+                  />
                   <LabeledInput label="City" value={form.company_city} onChange={(v) => setForm((prev) => ({ ...prev, company_city: v }))} required />
                   <LabeledInput label="State / region" value={form.company_state_region} onChange={(v) => setForm((prev) => ({ ...prev, company_state_region: v }))} required />
                   <LabeledInput label="ZIP / Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} required />

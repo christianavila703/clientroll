@@ -16,7 +16,8 @@ interface Client {
   birth_date?: string; gender?: string;
   emergency_contact_name?: string; emergency_contact_phone?: string;
   tax_number?: string;
-  company_name?: string; company_number?: string; company_phone?: string; company_website?: string;
+  company_name?: string; company_number?: string; company_phone?: string;   company_website?: string;
+  company_unit_number?: string;
   company_address?: string; company_city?: string; company_state_region?: string; company_postcode?: string; company_country?: string;
   created_at: string;
 }
@@ -240,6 +241,7 @@ export default function ClientProfilePage() {
     client.company_number ||
     client.company_phone ||
     client.company_website ||
+    client.company_unit_number ||
     client.company_address
   );
 
@@ -396,11 +398,16 @@ export default function ClientProfilePage() {
                   <span className="text-[13px] text-gray-900 truncate">{client.company_website}</span>
                 </div>
               )}
-              {client.company_address && (
+              {(client.company_address || client.company_unit_number) && (
                 <div className="flex justify-between gap-4">
                   <span className="text-[13px] text-gray-500">Company address</span>
                   <span className="text-[13px] text-gray-900 text-right whitespace-pre-line">
-                    {[client.company_address, [client.company_city, client.company_state_region].filter(Boolean).join(", "), client.company_postcode, client.company_country]
+                    {[
+                      [client.company_unit_number ? `Unit ${client.company_unit_number},` : null, client.company_address].filter(Boolean).join(" "),
+                      [client.company_city, client.company_state_region].filter(Boolean).join(", "),
+                      client.company_postcode,
+                      client.company_country,
+                    ]
                       .filter(Boolean)
                       .join("\n")}
                   </span>
@@ -1586,18 +1593,12 @@ function EditClientModal({
     emergency_contact_phone: client.emergency_contact_phone || "",
     tax_number: client.tax_number || "", company_name: client.company_name || "", company_number: client.company_number || "",
     company_phone: client.company_phone || "", company_website: client.company_website || "",
+    company_unit_number: client.company_unit_number || "",
     company_address: client.company_address || "", company_city: client.company_city || "",
     company_state_region: client.company_state_region || "", company_postcode: client.company_postcode || "",
     company_country: client.company_country || "",
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
-  const personalStreetWithUnit = (unit: string, street: string) => {
-    const u = (unit || "").trim();
-    const s = (street || "").trim();
-    if (!u) return s;
-    if (!s) return `Unit ${u}`;
-    return `Unit ${u}, ${s}`;
-  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -1634,6 +1635,7 @@ function EditClientModal({
         company_number: askCompanyInformation ? form.company_number : null,
         company_phone: askCompanyInformation ? form.company_phone : null,
         company_website: askCompanyInformation ? form.company_website : null,
+        company_unit_number: askCompanyInformation ? form.company_unit_number : null,
         company_address: askCompanyInformation ? form.company_address : null,
         company_city: askCompanyInformation ? form.company_city : null,
         company_state_region: askCompanyInformation ? form.company_state_region : null,
@@ -1732,7 +1734,7 @@ function EditClientModal({
                         setForm((prev) => ({
                           ...prev,
                           address: v,
-                          ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(prev.unit_number, v) } : {}),
+                          ...(companyAddressSameAsClient ? { company_address: v, company_unit_number: prev.unit_number } : {}),
                         }))
                       }
                       colSpan
@@ -1744,7 +1746,7 @@ function EditClientModal({
                         setForm((prev) => ({
                           ...prev,
                           unit_number: v,
-                          ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(v, prev.address) } : {}),
+                          ...(companyAddressSameAsClient ? { company_unit_number: v, company_address: prev.address } : {}),
                         }))
                       }
                     />
@@ -1839,7 +1841,8 @@ function EditClientModal({
                           if (checked) {
                             setForm((prev) => ({
                               ...prev,
-                              company_address: personalStreetWithUnit(prev.unit_number, prev.address),
+                              company_unit_number: prev.unit_number,
+                              company_address: prev.address,
                               company_city: prev.suburb,
                               company_state_region: prev.state,
                               company_postcode: prev.postcode,
@@ -1854,6 +1857,7 @@ function EditClientModal({
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <LabeledInput label="Street address" value={form.company_address} onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))} colSpan />
+                    <LabeledInput label="Unit number" value={form.company_unit_number} onChange={(v) => setForm((prev) => ({ ...prev, company_unit_number: v }))} />
                     <LabeledInput label="City" value={form.company_city} onChange={(v) => setForm((prev) => ({ ...prev, company_city: v }))} />
                     <LabeledInput label="State / region" value={form.company_state_region} onChange={(v) => setForm((prev) => ({ ...prev, company_state_region: v }))} />
                     <LabeledInput label="ZIP / Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} />

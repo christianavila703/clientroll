@@ -29,7 +29,7 @@ func (r *ClientRepo) DB() *database.Postgres {
 const clientFields = `id, tenant_id, name, unit_number, address, suburb, state, postcode,
 	country, email, phone, birth_date, gender, emergency_contact_name,
 	emergency_contact_phone, tax_number, company_name, company_number, company_phone, company_website,
-	company_address, company_city, company_state_region, company_postcode, company_country,
+	company_unit_number, company_address, company_city, company_state_region, company_postcode, company_country,
 	gocardless_customer_id, stripe_customer_id, deleted_at, created_at, updated_at`
 
 // List returns all clients for a tenant with optional search and status filter.
@@ -96,16 +96,16 @@ func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.C
 	query := `
 		INSERT INTO clients (tenant_id, name, unit_number, address, suburb, state, postcode, country,
 		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone,
-			tax_number, company_name, company_number, company_phone, company_website, company_address, company_city,
+			tax_number, company_name, company_number, company_phone, company_website, company_unit_number, company_address, company_city,
 			company_state_region, company_postcode, company_country)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		RETURNING ` + clientFields
 
 	var out models.Client
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Country, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyName, c.CompanyNumber, c.CompanyPhone,
-		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
+		c.CompanyWebsite, c.CompanyUnitNumber, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client: %w", err)
 	}
@@ -118,8 +118,8 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 		UPDATE clients SET name=$3, unit_number=$4, address=$5, suburb=$6, state=$7, postcode=$8,
 		    country=$9, email=$10, phone=$11, birth_date=$12, gender=$13,
 		    emergency_contact_name=$14, emergency_contact_phone=$15, tax_number=$16, company_name=$17, company_number=$18,
-			company_phone=$19, company_website=$20, company_address=$21, company_city=$22,
-			company_state_region=$23, company_postcode=$24, company_country=$25, updated_at=NOW()
+			company_phone=$19, company_website=$20, company_unit_number=$21, company_address=$22, company_city=$23,
+			company_state_region=$24, company_postcode=$25, company_country=$26, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		RETURNING ` + clientFields
 
@@ -127,7 +127,7 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Country, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyName, c.CompanyNumber, c.CompanyPhone,
-		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
+		c.CompanyWebsite, c.CompanyUnitNumber, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
 		return nil, fmt.Errorf("updating client: %w", err)
 	}
@@ -241,7 +241,7 @@ func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Country, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
 		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.TaxNumber, &c.CompanyName, &c.CompanyNumber, &c.CompanyPhone,
-		&c.CompanyWebsite, &c.CompanyAddress, &c.CompanyCity, &c.CompanyStateRegion, &c.CompanyPostcode, &c.CompanyCountry,
+		&c.CompanyWebsite, &c.CompanyUnitNumber, &c.CompanyAddress, &c.CompanyCity, &c.CompanyStateRegion, &c.CompanyPostcode, &c.CompanyCountry,
 		&c.GoCardlessCustomerID, &c.StripeCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 	}
 }

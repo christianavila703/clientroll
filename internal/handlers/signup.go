@@ -347,6 +347,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.CompanyNumber)
 	trimStringPtr(&input.Client.CompanyPhone)
 	trimStringPtr(&input.Client.CompanyWebsite)
+	trimStringPtr(&input.Client.CompanyUnitNumber)
 	trimStringPtr(&input.Client.CompanyAddress)
 	trimStringPtr(&input.Client.CompanyCity)
 	trimStringPtr(&input.Client.CompanyStateRegion)

@@ -28,6 +28,7 @@ type Client struct {
 	CompanyNumber         *string    `json:"company_number"`
 	CompanyPhone          *string    `json:"company_phone"`
 	CompanyWebsite        *string    `json:"company_website"`
+	CompanyUnitNumber     *string    `json:"company_unit_number"`
 	CompanyAddress        *string    `json:"company_address"`
 	CompanyCity           *string    `json:"company_city"`
 	CompanyStateRegion    *string    `json:"company_state_region"`
