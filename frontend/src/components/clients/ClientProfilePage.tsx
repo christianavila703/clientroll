@@ -1120,11 +1120,6 @@ function PaymentsTab({
                     Payment submitted to bank — awaiting confirmation
                   </p>
                 )}
-                {p.status === "pending" && (
-                  <p className="text-[11px] text-amber-600">
-                    Payment pending
-                  </p>
-                )}
                 {p.status === "failed" && (
                   <p className="text-[11px] text-red-500">
                     Payment failed{p.failure_reason ? `: ${p.failure_reason}` : ""}
