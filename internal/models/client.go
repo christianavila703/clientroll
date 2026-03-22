@@ -24,6 +24,7 @@ type Client struct {
 	EmergencyContactName  *string    `json:"emergency_contact_name"`
 	EmergencyContactPhone *string    `json:"emergency_contact_phone"`
 	TaxNumber             *string    `json:"tax_number"`
+	CompanyName           *string    `json:"company_name"`
 	CompanyNumber         *string    `json:"company_number"`
 	CompanyPhone          *string    `json:"company_phone"`
 	CompanyWebsite        *string    `json:"company_website"`

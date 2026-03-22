@@ -101,7 +101,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "", country: defaultCountryCode,
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
-    tax_number: "", company_number: "", company_phone: "", company_website: "",
+    tax_number: "", company_name: "", company_number: "", company_phone: "", company_website: "",
     company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: defaultCountryCode,
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
@@ -163,6 +163,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       emergency_contact_name: String(inviteClient.emergency_contact_name || prev.emergency_contact_name || ""),
       emergency_contact_phone: String(inviteClient.emergency_contact_phone || prev.emergency_contact_phone || ""),
       tax_number: String(inviteClient.tax_number || prev.tax_number || ""),
+      company_name: String(inviteClient.company_name || prev.company_name || ""),
       company_number: String(inviteClient.company_number || prev.company_number || ""),
       company_phone: String(inviteClient.company_phone || prev.company_phone || ""),
       company_website: String(inviteClient.company_website || prev.company_website || ""),
@@ -498,9 +499,10 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
             <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Company Information</h3>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <Field label="Tax Number" required><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" required /></Field>
+              <Field label="Company Name" required><input value={data.company_name} onChange={(e) => set("company_name", e.target.value)} className={inputCls} placeholder="Company name" required /></Field>
               <Field label="Company Number" required><input value={data.company_number} onChange={(e) => set("company_number", e.target.value)} className={inputCls} placeholder="Company number" required /></Field>
               <Field label="Phone" required><input type="tel" value={data.company_phone} onChange={(e) => set("company_phone", e.target.value)} className={inputCls} placeholder="03 9000 0000" required /></Field>
-              <Field label="Website" required><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" required /></Field>
+              <Field label="Website"><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" /></Field>
             </div>
           </div>
 
@@ -551,9 +553,9 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         if (askCompanyInformation) {
           required.push(
             ["tax_number", "Tax Number"],
+            ["company_name", "Company Name"],
             ["company_number", "Company Number"],
             ["company_phone", "Company Phone"],
-            ["company_website", "Company Website"],
             ["company_address", "Company Address"],
             ["company_city", "Company City"],
             ["company_state_region", "Company State / Region"],

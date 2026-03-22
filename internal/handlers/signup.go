@@ -341,6 +341,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.EmergencyContactName)
 	trimStringPtr(&input.Client.EmergencyContactPhone)
 	trimStringPtr(&input.Client.TaxNumber)
+	trimStringPtr(&input.Client.CompanyName)
 	trimStringPtr(&input.Client.CompanyNumber)
 	trimStringPtr(&input.Client.CompanyPhone)
 	trimStringPtr(&input.Client.CompanyWebsite)
@@ -394,14 +395,14 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			if input.Client.TaxNumber == nil {
 				missing = append(missing, "tax_number")
 			}
+			if input.Client.CompanyName == nil {
+				missing = append(missing, "company_name")
+			}
 			if input.Client.CompanyNumber == nil {
 				missing = append(missing, "company_number")
 			}
 			if input.Client.CompanyPhone == nil {
 				missing = append(missing, "company_phone")
-			}
-			if input.Client.CompanyWebsite == nil {
-				missing = append(missing, "company_website")
 			}
 			if input.Client.CompanyAddress == nil {
 				missing = append(missing, "company_address")

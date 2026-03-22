@@ -16,7 +16,7 @@ interface Client {
   birth_date?: string; gender?: string;
   emergency_contact_name?: string; emergency_contact_phone?: string;
   tax_number?: string;
-  company_number?: string; company_phone?: string; company_website?: string;
+  company_name?: string; company_number?: string; company_phone?: string; company_website?: string;
   company_address?: string; company_city?: string; company_state_region?: string; company_postcode?: string; company_country?: string;
   created_at: string;
 }
@@ -348,6 +348,12 @@ export default function ClientProfilePage() {
                 <div className="flex justify-between gap-4">
                   <span className="text-[13px] text-gray-500">Tax number</span>
                   <span className="text-[13px] text-gray-900">{client.tax_number}</span>
+                </div>
+              )}
+              {client.company_name && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[13px] text-gray-500">Company name</span>
+                  <span className="text-[13px] text-gray-900">{client.company_name}</span>
                 </div>
               )}
               {client.company_number && (
@@ -1427,7 +1433,7 @@ function EditClientModal({
     postcode: client.postcode || "", country: client.country || "", birth_date: client.birth_date?.split("T")[0] || "", gender: client.gender || "",
     emergency_contact_name: client.emergency_contact_name || "",
     emergency_contact_phone: client.emergency_contact_phone || "",
-    tax_number: client.tax_number || "", company_number: client.company_number || "",
+    tax_number: client.tax_number || "", company_name: client.company_name || "", company_number: client.company_number || "",
     company_phone: client.company_phone || "", company_website: client.company_website || "",
     company_address: client.company_address || "", company_city: client.company_city || "",
     company_state_region: client.company_state_region || "", company_postcode: client.company_postcode || "",
@@ -1466,6 +1472,7 @@ function EditClientModal({
         emergency_contact_name: askEmergencyContact ? form.emergency_contact_name : null,
         emergency_contact_phone: askEmergencyContact ? form.emergency_contact_phone : null,
         tax_number: askCompanyInformation ? form.tax_number : null,
+        company_name: askCompanyInformation ? form.company_name : null,
         company_number: askCompanyInformation ? form.company_number : null,
         company_phone: askCompanyInformation ? form.company_phone : null,
         company_website: askCompanyInformation ? form.company_website : null,
@@ -1649,6 +1656,7 @@ function EditClientModal({
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
+                    <LabeledInput label="Company name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} />
                     <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
                     <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" />
                     <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" colSpan />

@@ -19,6 +19,7 @@ interface Client {
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   tax_number?: string;
+  company_name?: string;
   company_number?: string;
   company_phone?: string;
   company_website?: string;
@@ -376,7 +377,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
     postcode: editing?.postcode || "", country: editing?.country || "", birth_date: editing?.birth_date?.split("T")[0] || "", gender: editing?.gender || "",
     emergency_contact_name: editing?.emergency_contact_name || "", emergency_contact_phone: editing?.emergency_contact_phone || "",
-    tax_number: editing?.tax_number || "", company_number: editing?.company_number || "",
+    tax_number: editing?.tax_number || "", company_name: editing?.company_name || "", company_number: editing?.company_number || "",
     company_phone: editing?.company_phone || "", company_website: editing?.company_website || "",
     company_address: editing?.company_address || "", company_city: editing?.company_city || "",
     company_state_region: editing?.company_state_region || "", company_postcode: editing?.company_postcode || "",
@@ -421,9 +422,9 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
       const missingEmergency = askEmergencyContact && (!form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim());
       const missingCompany = askCompanyInformation && (
         !form.tax_number.trim() ||
+        !form.company_name.trim() ||
         !form.company_number.trim() ||
         !form.company_phone.trim() ||
-        !form.company_website.trim() ||
         !form.company_address.trim() ||
         !form.company_city.trim() ||
         !form.company_state_region.trim() ||
@@ -450,6 +451,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         emergency_contact_name: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_name) : null,
         emergency_contact_phone: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_phone) : null,
         tax_number: askCompanyInformation ? normalizeStringOrNull(form.tax_number) : null,
+        company_name: askCompanyInformation ? normalizeStringOrNull(form.company_name) : null,
         company_number: askCompanyInformation ? normalizeStringOrNull(form.company_number) : null,
         company_phone: askCompanyInformation ? normalizeStringOrNull(form.company_phone) : null,
         company_website: askCompanyInformation ? normalizeStringOrNull(form.company_website) : null,
@@ -625,9 +627,10 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} required />
+                  <LabeledInput label="Company name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} required />
                   <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} required />
                   <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" required />
-                  <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" required />
+                  <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" />
                 </div>
               </div>
               <div>

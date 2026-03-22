@@ -120,6 +120,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		EmergencyContactName  *string `json:"emergency_contact_name"`
 		EmergencyContactPhone *string `json:"emergency_contact_phone"`
 		TaxNumber             *string `json:"tax_number"`
+		CompanyName           *string `json:"company_name"`
 		CompanyNumber         *string `json:"company_number"`
 		CompanyPhone          *string `json:"company_phone"`
 		CompanyWebsite        *string `json:"company_website"`
@@ -180,6 +181,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		EmergencyContactName:  normalize(input.EmergencyContactName),
 		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
 		TaxNumber:             normalize(input.TaxNumber),
+		CompanyName:           normalize(input.CompanyName),
 		CompanyNumber:         normalize(input.CompanyNumber),
 		CompanyPhone:          normalize(input.CompanyPhone),
 		CompanyWebsite:        normalize(input.CompanyWebsite),
@@ -260,6 +262,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		EmergencyContactName  *string `json:"emergency_contact_name"`
 		EmergencyContactPhone *string `json:"emergency_contact_phone"`
 		TaxNumber             *string `json:"tax_number"`
+		CompanyName           *string `json:"company_name"`
 		CompanyNumber         *string `json:"company_number"`
 		CompanyPhone          *string `json:"company_phone"`
 		CompanyWebsite        *string `json:"company_website"`
@@ -319,6 +322,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		EmergencyContactName:  normalize(input.EmergencyContactName),
 		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
 		TaxNumber:             normalize(input.TaxNumber),
+		CompanyName:           normalize(input.CompanyName),
 		CompanyNumber:         normalize(input.CompanyNumber),
 		CompanyPhone:          normalize(input.CompanyPhone),
 		CompanyWebsite:        normalize(input.CompanyWebsite),
