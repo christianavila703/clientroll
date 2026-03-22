@@ -79,6 +79,13 @@ function resolveFrequencyAmount(termOption: TermOption, frequency: string): numb
   }
 }
 
+function inferCountryCodeFromCurrency(currencyCode: string): string {
+  const cur = String(currencyCode || "").trim().toUpperCase();
+  if (cur === "AUD") return "AU";
+  if (cur === "USD") return "US";
+  return "";
+}
+
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
@@ -88,13 +95,14 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const [formStep, setFormStep] = useState<FormStep>("member");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const defaultCountryCode = inferCountryCodeFromCurrency(String((membership as any).currency_code || "AUD"));
 
   const [member, setMember] = useState({
-    name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "", country: "",
+    name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "", country: defaultCountryCode,
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
     tax_number: "", company_number: "", company_phone: "", company_website: "",
-    company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: "",
+    company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: defaultCountryCode,
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
   const [payment, setPayment] = useState({
@@ -147,7 +155,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       suburb: String(inviteClient.suburb || prev.suburb || ""),
       state: String(inviteClient.state || prev.state || ""),
       postcode: String(inviteClient.postcode || prev.postcode || ""),
-      country: String(inviteClient.country || prev.country || ""),
+      country: String(inviteClient.country || inviteClient.company_country || prev.country || defaultCountryCode),
       email: String(inviteClient.email || prev.email || ""),
       phone: String(inviteClient.phone || prev.phone || ""),
       birth_date: String(inviteClient.birth_date || "").split("T")[0] || prev.birth_date,
@@ -162,9 +170,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       company_city: String(inviteClient.company_city || prev.company_city || ""),
       company_state_region: String(inviteClient.company_state_region || prev.company_state_region || ""),
       company_postcode: String(inviteClient.company_postcode || prev.company_postcode || ""),
-      company_country: String(inviteClient.company_country || prev.company_country || ""),
+      company_country: String(inviteClient.company_country || inviteClient.country || prev.company_country || defaultCountryCode),
     }));
-  }, [inviteClient]);
+  }, [inviteClient, defaultCountryCode]);
 
   const handleSubmit = async () => {
     if (!memberSignature) {
@@ -525,7 +533,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
               <Field label="City" required><input value={data.company_city} onChange={(e) => set("company_city", e.target.value)} className={inputCls} placeholder="City" required /></Field>
               <Field label="State / Region" required><input value={data.company_state_region} onChange={(e) => set("company_state_region", e.target.value)} className={inputCls} placeholder="State or region" required /></Field>
               <Field label="ZIP / Postcode" required><input value={data.company_postcode} onChange={(e) => set("company_postcode", e.target.value)} className={inputCls} placeholder="Postcode" required /></Field>
-              <Field label="Country" required full><input value={data.company_country} onChange={(e) => set("company_country", e.target.value)} className={inputCls} placeholder="Country" required /></Field>
+              <Field label="Country" required full><input value={data.company_country} onChange={(e) => set("company_country", e.target.value.toUpperCase())} className={inputCls} placeholder="AU or US" required maxLength={2} /></Field>
             </div>
           </div>
         </div>
