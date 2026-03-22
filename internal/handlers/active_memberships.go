@@ -430,9 +430,7 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 	stripe.Key = secretKey
 	defer func() { stripe.Key = previousStripeKey }()
 
-	params := &stripe.SubscriptionParams{
-		CancelAtPeriodEnd: stripe.Bool(false),
-	}
+	params := &stripe.SubscriptionParams{}
 	if input.ContinueAfterTerm {
 		// Unset explicit cancellation date so billing continues.
 		params.AddExtra("cancel_at", "")
