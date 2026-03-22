@@ -67,7 +67,7 @@ clientroll/
 │   ├── rspack.config.ts
 │   ├── tailwind.config.ts
 │   └── package.json
-├── migrations/             # Numbered SQL up/down (e.g. 001_... to 022_...)
+├── migrations/             # Numbered SQL up/down migrations (NNN_*.up.sql/.down.sql)
 ├── web/                    # Frontend build output (served by API)
 ├── docs/                   # DEPLOY, WEBHOOKS, GOCARDLESS_DEPLOY, this file
 ├── scripts/                # deploy-on-server.sh
@@ -234,6 +234,16 @@ Base path: **`/api`**. The frontend uses `API_BASE = "/api"` in `frontend/src/ap
 - **Encryption:** Tenant secrets (e.g. GoCardless tokens) are encrypted at rest with `database.Encryptor` using `MASTER_ENCRYPTION_KEY`.
 - **Migrations:** Numbered `NNN_description.up.sql` and `.down.sql`. Apply with `go run ./cmd/migrate up` (or `make migrate-up`). Schema version tracked in `schema_migrations`.
 
+### Agreement snapshots and PDF retrieval
+
+- **Snapshot lifecycle:** A signed agreement HTML snapshot is created when membership acceptance happens in signup flows and for staff-created memberships. Historical memberships can be populated with `cmd/backfill-agreements`.
+- **Tenant-scoped storage:** Agreement data is stored in `membership_agreement_snapshots` and accepted terms in `membership_accepted_terms`; both are tenant-scoped and covered by RLS policy migration updates.
+- **Render model:** The system stores canonical agreement HTML at acceptance time, then renders PDF on demand from that stored HTML instead of rebuilding from current membership settings.
+- **Download route:** `GET /api/tenant/memberships/{id}/agreement.pdf` returns the PDF (and should align with the agreement details UI route behavior).
+- **Runtime dependency:** PDF generation uses `chromedp`; production hosts must have `google-chrome`, `chromium`, or `chromium-browser` available on `PATH`.
+- **Failure mode:** If Chromium is unavailable, PDF generation fails while the stored HTML snapshot still exists. Troubleshooting starts with server logs and host Chromium availability checks.
+- **Backfill runbook:** Use `go run ./cmd/backfill-agreements --dry-run` first, then rerun without `--dry-run`; scope with `--tenant <slug>` and `--limit <n>` when needed.
+
 ---
 
 ## 9. Frontend Conventions
@@ -248,7 +258,7 @@ Base path: **`/api`**. The frontend uses `API_BASE = "/api"` in `frontend/src/ap
 
 ## 10. Database and Migrations
 
-- **Migrations:** 22 migration pairs in `migrations/` (e.g. extensions, platform, tenant, client, membership, payments, webhooks, RLS, email verifications, services, GoCardless, inbound webhook keys, idempotency, flexible payment schedules).
+- **Migrations:** Numbered migration pairs live in `migrations/` (extensions, platform, tenant, client, membership, payments, webhooks, RLS, email verifications, services, GoCardless, agreement snapshots, inbound webhook keys, idempotency, and flexible payment schedules).
 - **RLS:** Migration `009_enable_rls.up.sql` enables row-level security for tenant isolation where applicable.
 - **Run migrations:** `make migrate-up` (dev) or on server with `DATABASE_URL` set: `go run ./cmd/migrate up`. Rollback: `make migrate-down` or `go run ./cmd/migrate down`.
 

@@ -10,9 +10,24 @@ It is intended as a developer-facing “what’s missing” index, not a product
 
 ---
 
-## 1. Confirmed placeholders / missing implementations
+## 1. Recently resolved
 
-### 1.1 Platform Billing (Phase 8) – end-to-end missing
+### 1.1 Agreement snapshots and PDF retrieval coverage
+
+- Agreement snapshots are captured in the active signup pathways (including card, direct debit, and invite-driven flows) and in staff-created membership flow.
+- Agreement retrieval is available through the membership agreement endpoints, including on-demand PDF download from stored snapshot HTML.
+- Historical gaps are covered operationally via `cmd/backfill-agreements`, which can be run tenant-scoped and dry-run first before mutation.
+- Agreement/terms tables are tenant-scoped and governed by RLS policy updates on:
+  - `membership_agreement_snapshots`
+  - `membership_accepted_terms`
+  - `membership_setup_invites`
+- Operational caveat remains documented: PDF generation requires Chromium/Chrome runtime availability on server hosts.
+
+---
+
+## 2. Confirmed placeholders / missing implementations
+
+### 2.1 Platform Billing (Phase 8) – end-to-end missing
 
 - **Frontend route is a placeholder**
   - `frontend/src/App.tsx` routes `/platform/billing` to `PlaceholderPage` (“Coming in Phase 8”).
@@ -62,7 +77,7 @@ It is intended as a developer-facing “what’s missing” index, not a product
 
 ---
 
-## 2. “Silent error” placeholders in the frontend
+## 3. “Silent error” placeholders in the frontend
 
 Several pages intentionally swallow fetch errors with empty handlers, e.g. `.catch(() => {})`. This is effectively a UX placeholder: failures become invisible and can look like “empty data”.
 
@@ -83,14 +98,14 @@ Suggested improvements:
 
 ---
 
-## 3. What we did *not* find
+## 4. What we did *not* find
 
 - No first-party backend `TODO`/`FIXME` markers in `internal/` at time of scan.
 - Many `TODO`/`Not implemented` matches exist in third-party dependencies (for example Playwright), which are not actionable for the application.
 
 ---
 
-## 4. Quick reference (files)
+## 5. Quick reference (files)
 
 ### Platform billing (Phase 8)
 

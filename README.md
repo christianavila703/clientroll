@@ -17,10 +17,10 @@ Open http://localhost:3000.
 
 | Doc | Description |
 |-----|-------------|
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | **Internal dev guide** — architecture, structure, API, auth, conventions |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | **Internal dev guide** — architecture, agreement snapshot lifecycle, API, auth, conventions |
 | [docs/IMPLEMENTATION-GAPS.md](docs/IMPLEMENTATION-GAPS.md) | Internal review — placeholders and missing implementations |
 | [docs/ENV-REFERENCE.md](docs/ENV-REFERENCE.md) | Environment variables |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | Deployment (Git + server script or local build + SCP) |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | Deployment + production checks (includes Chromium requirement for agreement PDFs) |
 | [docs/WEBHOOKS.md](docs/WEBHOOKS.md) | Inbound and outbound webhooks |
 | [docs/GOCARDLESS_DEPLOY.md](docs/GOCARDLESS_DEPLOY.md) | GoCardless Connect setup |
 
@@ -29,6 +29,7 @@ Open http://localhost:3000.
 - **Backend:** Go 1.22, Chi, PostgreSQL (pgx), Redis
 - **Frontend:** React 18, TypeScript, Rspack, Tailwind
 - **Payments:** GoCardless (primary), Stripe (webhooks)
+- **Documents/PDF:** Agreement HTML snapshots + on-demand PDF generation (`chromedp`, requires Chromium/Chrome on host)
 
 ## Commands
 
@@ -41,3 +42,4 @@ Open http://localhost:3000.
 | `make frontend` | Build frontend to `web/` |
 | `make test` | Go tests |
 | `make migrate-up` / `make migrate-down` | Migrations |
+| `go run ./cmd/backfill-agreements --dry-run` | Preview memberships missing agreement snapshots |
