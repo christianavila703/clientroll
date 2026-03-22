@@ -801,7 +801,7 @@ function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
               {t.version > 1 && <span className="text-[11px] text-gray-400 ml-2">v{t.version}</span>}
             </div>
             <div
-              className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed tc-content"
+              className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap break-words tc-content"
               dangerouslySetInnerHTML={{ __html: t.content }}
             />
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
