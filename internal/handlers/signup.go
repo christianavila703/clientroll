@@ -1718,3 +1718,9 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 	b.WriteString(`</body></html>`)
 	return b.String()
 }
+
+// RenderAgreementHTMLForSnapshot builds the legal agreement HTML for a prepared snapshot.
+// Exported for operational tooling such as historical snapshot backfills.
+func RenderAgreementHTMLForSnapshot(snap *repository.AgreementSnapshot, terms []repository.AcceptedTermInput, tenant *models.Tenant) string {
+	return renderAgreementHTML(snap, terms, tenant)
+}
