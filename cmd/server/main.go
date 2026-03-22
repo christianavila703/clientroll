@@ -245,16 +245,23 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				role := middleware.GetRole(r.Context())
 
 				var setupCompletedAt *string
+				tenantTimezone := "UTC"
 				if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
-					if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
-						ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
-						setupCompletedAt = &ts
+					if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil {
+						if tenant.SetupCompletedAt != nil {
+							ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
+							setupCompletedAt = &ts
+						}
+						if tenant.Timezone != "" {
+							tenantTimezone = tenant.Timezone
+						}
 					}
 				}
 
 				resp := map[string]interface{}{
 					"user_id":            userID,
 					"tenant_id":          tenantIDStr,
+					"tenant_timezone":    tenantTimezone,
 					"role":               role,
 					"setup_completed_at": setupCompletedAt,
 				}
@@ -276,16 +283,23 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 					role := middleware.GetRole(r.Context())
 
 					var setupCompletedAt *string
+					tenantTimezone := "UTC"
 					if tid, err := uuid.Parse(tenantIDStr); err == nil && tid != uuid.Nil {
-						if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil && tenant.SetupCompletedAt != nil {
-							ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
-							setupCompletedAt = &ts
+						if tenant, err := tenantRepo.FindByID(r.Context(), tid); err == nil && tenant != nil {
+							if tenant.SetupCompletedAt != nil {
+								ts := tenant.SetupCompletedAt.Format("2006-01-02T15:04:05Z07:00")
+								setupCompletedAt = &ts
+							}
+							if tenant.Timezone != "" {
+								tenantTimezone = tenant.Timezone
+							}
 						}
 					}
 
 					resp := map[string]interface{}{
 						"user_id":            userID,
 						"tenant_id":          tenantIDStr,
+						"tenant_timezone":    tenantTimezone,
 						"role":               role,
 						"setup_completed_at": setupCompletedAt,
 					}

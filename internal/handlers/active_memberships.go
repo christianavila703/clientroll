@@ -260,7 +260,7 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 						}
 						createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, m,
 							tenantID, input.PaymentFrequency, input.PaymentAmount,
-							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
+							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.StartDate, m.MinTermEndDate, numPay, continueAfterTerm)
 					}
 				}
 			}
@@ -289,7 +289,7 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 						}
 						createGoCardlessSubscription(r.Context(), prov, h.memberRepo, existingMandateID, m,
 							tenantID, input.PaymentFrequency, input.PaymentAmount,
-							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
+							m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.StartDate, m.MinTermEndDate, numPay, continueAfterTerm)
 					}
 				}
 			}

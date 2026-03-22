@@ -94,12 +94,13 @@ func runAlertChecks(ctx context.Context, db *database.Postgres) {
 			SELECT
 				m.status AS current_status,
 				CASE
-					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN m.start_date > ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date) THEN 'scheduled'
 					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
 					WHEN lp.status = 'succeeded' THEN 'active'
 					ELSE m.status
 				END AS target_status
 			FROM memberships m
+			JOIN tenants t ON t.id = m.tenant_id
 			LEFT JOIN latest_payment lp
 				ON lp.tenant_id = m.tenant_id
 				AND lp.membership_id = m.id
@@ -145,11 +146,13 @@ func runAlertChecks(ctx context.Context, db *database.Postgres) {
 
 func activateScheduledMemberships(ctx context.Context, db *database.Postgres) {
 	tag, err := db.Pool.Exec(ctx, `
-		UPDATE memberships
+		UPDATE memberships m
 		SET status = 'active',
 		    updated_at = NOW()
-		WHERE status = 'scheduled'
-		  AND start_date <= (NOW() AT TIME ZONE 'UTC')::date
+		FROM tenants t
+		WHERE m.tenant_id = t.id
+		  AND m.status = 'scheduled'
+		  AND m.start_date <= ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date)
 	`)
 	if err != nil {
 		log.Printf("alerts.monitor activate_scheduled_memberships_failed err=%v", err)
@@ -173,12 +176,13 @@ func reconcileMembershipStatusDrift(ctx context.Context, db *database.Postgres) 
 				m.id,
 				m.tenant_id,
 				CASE
-					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN m.start_date > ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date) THEN 'scheduled'
 					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
 					WHEN lp.status = 'succeeded' THEN 'active'
 					ELSE m.status
 				END AS target_status
 			FROM memberships m
+			JOIN tenants t ON t.id = m.tenant_id
 			LEFT JOIN latest_payment lp
 				ON lp.tenant_id = m.tenant_id
 				AND lp.membership_id = m.id

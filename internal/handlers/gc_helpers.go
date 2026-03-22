@@ -38,17 +38,20 @@ func normalizeIntervalUnit(unit string) string {
 	}
 }
 
-// subscriptionEndDateFromNumPayments computes the subscription end date when num_payments is set:
-// end = now + (num_payments * period). GoCardless will stop after that date.
-func subscriptionEndDateFromNumPayments(interval string, intervalCount, numPayments int) time.Time {
-	now := time.Now()
+// subscriptionEndDateFromNumPayments computes end date when num_payments is set:
+// end = membership_start + (num_payments * period), so schedules align to term start.
+func subscriptionEndDateFromNumPayments(membershipStart time.Time, interval string, intervalCount, numPayments int) time.Time {
+	anchor := membershipStart
+	if anchor.IsZero() {
+		anchor = time.Now()
+	}
 	switch interval {
 	case "weekly":
-		return now.AddDate(0, 0, 7*intervalCount*numPayments)
+		return anchor.AddDate(0, 0, 7*intervalCount*numPayments)
 	case "monthly":
-		return now.AddDate(0, intervalCount*numPayments, 0)
+		return anchor.AddDate(0, intervalCount*numPayments, 0)
 	default:
-		return now.AddDate(0, intervalCount*numPayments, 0)
+		return anchor.AddDate(0, intervalCount*numPayments, 0)
 	}
 }
 
@@ -67,6 +70,7 @@ func createGoCardlessSubscription(
 	paymentIntervalUnit *string,
 	paymentIntervalCount int,
 	membershipName string,
+	membershipStart time.Time,
 	endDate time.Time,
 	numPayments *int,
 	continueAfterTerm bool,
@@ -93,7 +97,7 @@ func createGoCardlessSubscription(
 
 	var ed *time.Time
 	if numPayments != nil && *numPayments > 0 {
-		computed := subscriptionEndDateFromNumPayments(interval, intervalCount, *numPayments)
+		computed := subscriptionEndDateFromNumPayments(membershipStart, interval, intervalCount, *numPayments)
 		ed = &computed
 	} else if !continueAfterTerm && !endDate.IsZero() {
 		ed = &endDate

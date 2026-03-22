@@ -59,7 +59,17 @@ func (r *MembershipRepo) Create(
 	}
 
 	status := "active"
-	if startDate.UTC().After(time.Now().UTC()) {
+	var startsInFuture bool
+	if err := r.db.Pool.QueryRow(ctx, `
+		SELECT $1::date > ((NOW() AT TIME ZONE COALESCE(NULLIF(timezone, ''), 'UTC'))::date)
+		FROM tenants
+		WHERE id = $2
+	`, startDate, tenantID).Scan(&startsInFuture); err == nil {
+		if startsInFuture {
+			status = "scheduled"
+		}
+	} else if startDate.UTC().After(time.Now().UTC()) {
+		// Fallback keeps previous behavior if tenant timezone lookup fails unexpectedly.
 		status = "scheduled"
 	}
 
@@ -288,12 +298,13 @@ func (r *MembershipRepo) ReconcileLifecycleStatuses(ctx context.Context, tenantI
 				m.id,
 				m.tenant_id,
 				CASE
-					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN m.start_date > ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date) THEN 'scheduled'
 					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
 					WHEN lp.status = 'succeeded' THEN 'active'
 					ELSE m.status
 				END AS target_status
 			FROM memberships m
+			JOIN tenants t ON t.id = m.tenant_id
 			LEFT JOIN latest_payment lp
 				ON lp.tenant_id = m.tenant_id
 				AND lp.membership_id = m.id
@@ -331,12 +342,13 @@ func (r *MembershipRepo) CountLifecycleStatusDrift(ctx context.Context, tenantID
 				m.tenant_id,
 				m.status AS current_status,
 				CASE
-					WHEN m.start_date > (NOW() AT TIME ZONE 'UTC')::date THEN 'scheduled'
+					WHEN m.start_date > ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date) THEN 'scheduled'
 					WHEN lp.status IN ('failed', 'disputed') THEN 'past_due'
 					WHEN lp.status = 'succeeded' THEN 'active'
 					ELSE m.status
 				END AS target_status
 			FROM memberships m
+			JOIN tenants t ON t.id = m.tenant_id
 			LEFT JOIN latest_payment lp
 				ON lp.tenant_id = m.tenant_id
 				AND lp.membership_id = m.id
@@ -358,12 +370,14 @@ func (r *MembershipRepo) CountLifecycleStatusDrift(ctx context.Context, tenantID
 // If tenantID is nil, it applies across all tenants.
 func (r *MembershipRepo) ActivateScheduledDue(ctx context.Context, tenantID *uuid.UUID) (int64, error) {
 	cmd, err := r.db.Pool.Exec(ctx, `
-		UPDATE memberships
+		UPDATE memberships m
 		SET status = 'active',
 		    updated_at = NOW()
-		WHERE status = 'scheduled'
-		  AND start_date <= (NOW() AT TIME ZONE 'UTC')::date
-		  AND ($1::uuid IS NULL OR tenant_id = $1::uuid)
+		FROM tenants t
+		WHERE m.tenant_id = t.id
+		  AND m.status = 'scheduled'
+		  AND m.start_date <= ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date)
+		  AND ($1::uuid IS NULL OR m.tenant_id = $1::uuid)
 	`, tenantID)
 	if err != nil {
 		return 0, fmt.Errorf("activate scheduled due memberships: %w", err)

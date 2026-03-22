@@ -6,6 +6,8 @@ import StripeTransactionPanel, { hasStripeDetails } from "../payments/StripeTran
 import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 import type { MembershipRecord } from "../../types/memberships";
 import type { PaymentRecord } from "../../types/payments";
+import { useAuth } from "../../store/AuthContext";
+import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
 
 /* ─── Types ─── */
 interface Client {
@@ -34,6 +36,8 @@ function membershipFrequencyLabel(m: MembershipRecord): string {
 export default function ClientProfilePage() {
   const { clientId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const tenantTimezone = tenantTimezoneOrUTC(user?.tenant_timezone);
   const [searchParams, setSearchParams] = useSearchParams();
   const [client, setClient] = useState<Client | null>(null);
   const [memberships, setMemberships] = useState<MembershipRecord[]>([]);
@@ -205,8 +209,8 @@ export default function ClientProfilePage() {
   const totalTaxAmount = succeededPayments.reduce((sum, p) => sum + (Number(p.tax_amount) || 0), 0);
   const totalProcessingFees = succeededPayments.reduce((sum, p) => sum + (Number(p.processing_fee_amount) || 0), 0);
   const totalBaseExTax = Math.max(0, totalToOrganisation - totalTaxAmount);
-  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" }) : "—";
-  const fmtShort = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const fmtDate = (d: string) => formatTenantDate(d, tenantTimezone, { day: "numeric", month: "long", year: "numeric" });
+  const fmtShort = (d: string) => formatTenantDate(d, tenantTimezone, { day: "numeric", month: "short", year: "numeric" });
 
   const tabs = [
     { key: "summary" as const, label: "Summary" },
@@ -274,7 +278,7 @@ export default function ClientProfilePage() {
             />
           )}
           {tab === "memberships" && (
-            <MembershipsTab memberships={memberships} fmtShort={fmtShort} onRefresh={loadAll} />
+            <MembershipsTab memberships={memberships} fmtShort={fmtShort} tenantTimezone={tenantTimezone} onRefresh={loadAll} />
           )}
           {tab === "billing" && (
             <BillingScheduleTab memberships={activeMemberships} subscriptionDetails={subscriptionDetails} fmtDate={fmtDate} tenantTaxPercent={tenantTax.percent} />
@@ -551,7 +555,7 @@ function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
         ) : (
           <div className="divide-y divide-gray-100">
             {active.map(m => (
-              <MembershipSummaryRow key={m.membership_id} m={m} fmtShort={fmtShort} />
+              <MembershipSummaryRow key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} />
             ))}
           </div>
         )}
@@ -565,7 +569,7 @@ function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
           </div>
           <div className="divide-y divide-gray-100">
             {past.map(m => (
-              <MembershipSummaryRow key={m.membership_id} m={m} fmtShort={fmtShort} />
+              <MembershipSummaryRow key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} />
             ))}
           </div>
         </div>
@@ -605,8 +609,8 @@ function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
 }
 
 /* ─── Membership Summary Row ─── */
-function MembershipSummaryRow({ m, fmtShort }: { m: MembershipRecord; fmtShort: (d: string) => string }) {
-  const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+function MembershipSummaryRow({ m, fmtShort, tenantTimezone }: { m: MembershipRecord; fmtShort: (d: string) => string; tenantTimezone: string }) {
+  const daysLeft = daysUntilDateOnly(m.end_date, tenantTimezone);
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
   return (
@@ -668,7 +672,7 @@ function MembershipSummaryRow({ m, fmtShort }: { m: MembershipRecord; fmtShort: 
 }
 
 /* ─── Memberships Tab (detailed cards) ─── */
-function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: MembershipRecord[]; fmtShort: (d: string) => string; onRefresh: () => void }) {
+function MembershipsTab({ memberships, fmtShort, tenantTimezone, onRefresh }: { memberships: MembershipRecord[]; fmtShort: (d: string) => string; tenantTimezone: string; onRefresh: () => void }) {
   const active = memberships.filter(m => m.status === "active");
   const inactive = memberships.filter(m => m.status !== "active");
   const [togglingMembershipID, setTogglingMembershipID] = useState<string | null>(null);
@@ -713,7 +717,7 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
         <div>
           <h2 className="text-[13px] font-semibold text-gray-700 mb-3">Active ({active.length})</h2>
           <div className="space-y-4">
-            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} onCancel={() => handleCancel(m.membership_id)} onToggleContinueAfterTerm={handleToggleContinueAfterTerm} toggleBusy={togglingMembershipID === m.membership_id} />)}
+            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} onCancel={() => handleCancel(m.membership_id)} onToggleContinueAfterTerm={handleToggleContinueAfterTerm} toggleBusy={togglingMembershipID === m.membership_id} />)}
           </div>
         </div>
       )}
@@ -721,7 +725,7 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
         <div>
           <h2 className="text-[13px] font-semibold text-gray-500 mb-3">Past ({inactive.length})</h2>
           <div className="space-y-4">
-            {inactive.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} />)}
+            {inactive.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} tenantTimezone={tenantTimezone} />)}
           </div>
         </div>
       )}
@@ -729,8 +733,8 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
   );
 }
 
-function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, toggleBusy }: { m: MembershipRecord; fmtShort: (d: string) => string; onCancel?: () => void; onToggleContinueAfterTerm?: (membershipId: string, continueAfterTerm: boolean) => Promise<void> | void; toggleBusy?: boolean }) {
-  const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinueAfterTerm, toggleBusy }: { m: MembershipRecord; fmtShort: (d: string) => string; tenantTimezone: string; onCancel?: () => void; onToggleContinueAfterTerm?: (membershipId: string, continueAfterTerm: boolean) => Promise<void> | void; toggleBusy?: boolean }) {
+  const daysLeft = daysUntilDateOnly(m.end_date, tenantTimezone);
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
   return (

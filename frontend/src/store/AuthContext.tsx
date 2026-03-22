@@ -11,6 +11,7 @@ import api from "../api/client";
 interface User {
   id: string;
   tenant_id?: string;
+  tenant_timezone?: string;
   email: string;
   first_name?: string;
   last_name?: string;
@@ -35,6 +36,7 @@ interface MeResponse {
   user_id: string;
   tenant_id: string;
   role: string;
+  tenant_timezone?: string;
   setup_completed_at?: string | null;
 }
 
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser({
             id: d.user_id,
             tenant_id: d.tenant_id,
+            tenant_timezone: d.tenant_timezone || "UTC",
             email: "",
             role: d.role,
             setup_completed_at: d.setup_completed_at ?? null,
@@ -103,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ? {
             ...prev,
             tenant_id: me.tenant_id || prev.tenant_id,
+            tenant_timezone: me.tenant_timezone || prev.tenant_timezone || "UTC",
             role: me.role || prev.role,
             setup_completed_at: me.setup_completed_at ?? null,
           }
@@ -128,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? {
               ...prev,
               tenant_id: me.tenant_id || prev.tenant_id,
+              tenant_timezone: me.tenant_timezone || prev.tenant_timezone || "UTC",
               role: me.role || prev.role,
               setup_completed_at: me.setup_completed_at ?? null,
             }

@@ -4,9 +4,13 @@ import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
 import StripeTransactionPanel, { hasStripeDetails } from "./StripeTransactionPanel";
 import { customerCharged, fmtMoney } from "../../utils/paymentLabels";
 import type { AdminPaymentRecord } from "../../types/payments";
+import { useAuth } from "../../store/AuthContext";
+import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
 
 export default function PaymentsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const tenantTimezone = tenantTimezoneOrUTC(user?.tenant_timezone);
   const [payments, setPayments] = useState<AdminPaymentRecord[]>([]);
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -35,7 +39,7 @@ export default function PaymentsPage() {
     p.membership_type.toLowerCase().includes(search.toLowerCase())
   );
 
-  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const fmtDate = (d: string) => formatTenantDate(d, tenantTimezone, { day: "numeric", month: "short", year: "numeric" });
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
   const methodBadge = (p: AdminPaymentRecord): { label: string; className: string } | null => {
     const explicitMethod = String(p.payment_method || "").toLowerCase();
@@ -62,7 +66,7 @@ export default function PaymentsPage() {
     return null;
   };
   const daysUntilEnd = (endDate: string) => {
-    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const diff = daysUntilDateOnly(endDate, tenantTimezone);
     if (diff < 0) return { text: `Ended ${Math.abs(diff)}d ago`, colour: "text-gray-400" };
     if (diff <= 30) return { text: `${diff} days left`, colour: "text-amber-600" };
     return { text: `${diff} days left`, colour: "text-gray-500" };

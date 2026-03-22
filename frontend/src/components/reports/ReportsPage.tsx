@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import api from "../../api/client";
 import type { ComprehensiveReport } from "../../types/reports";
+import { useAuth } from "../../store/AuthContext";
+import { formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
 
 type Report = ComprehensiveReport;
 
@@ -61,6 +63,8 @@ const fmtMoney = (value: number) =>
   value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ReportsPage() {
+  const { user } = useAuth();
+  const tenantTimezone = tenantTimezoneOrUTC(user?.tenant_timezone);
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -89,7 +93,7 @@ export default function ReportsPage() {
   const successRate = totalPayments > 0 ? Math.round(((safeData.payment_statuses.succeeded || 0) / totalPayments) * 100) : 0;
   const revDelta = safeData.prev_month_revenue > 0 ? Math.round(((safeData.month_revenue - safeData.prev_month_revenue) / safeData.prev_month_revenue) * 100) : 0;
   const churnRate = safeData.active_members > 0 ? ((safeData.churned_month / safeData.active_members) * 100).toFixed(1) : "0";
-  const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  const fmtDate = (d: string) => formatTenantDate(d, tenantTimezone, { day: "numeric", month: "short", year: "numeric" });
 
   return (
     <div>
@@ -113,7 +117,7 @@ export default function ReportsPage() {
       {tab === "overview" && <OverviewTab data={safeData} revDelta={revDelta} successRate={successRate} churnRate={churnRate} />}
       {tab === "revenue" && <RevenueTab data={safeData} />}
       {tab === "memberships" && <MembershipsTab data={safeData} />}
-      {tab === "payments" && <PaymentsTab data={safeData} totalPayments={totalPayments} successRate={successRate} />}
+      {tab === "payments" && <PaymentsTab data={safeData} totalPayments={totalPayments} successRate={successRate} fmtDate={fmtDate} />}
       {tab === "clients" && <ClientsTab data={safeData} fmtDate={fmtDate} />}
     </div>
   );
@@ -401,7 +405,7 @@ function MembershipsTab({ data }: { data: Report }) {
 }
 
 /* ─── Payments Tab ─── */
-function PaymentsTab({ data, totalPayments, successRate }: { data: Report; totalPayments: number; successRate: number }) {
+function PaymentsTab({ data, totalPayments, successRate, fmtDate }: { data: Report; totalPayments: number; successRate: number; fmtDate: (d: string) => string }) {
   data = normalizeReport(data as any);
   const donut = {
     tooltip: { trigger: "item" as const, formatter: "{b}: {c} ({d}%)" },
@@ -456,7 +460,7 @@ function PaymentsTab({ data, totalPayments, successRate }: { data: Report; total
             <thead><tr><th>Client</th><th>Amount</th><th>Reason</th><th>Due Date</th></tr></thead>
             <tbody>
               {data.recent_failures.map((rf, i) => (
-                <tr key={i}><td className="font-medium text-gray-900">{rf.client_name}</td><td className="tabular-nums text-red-600">${rf.amount.toFixed(2)}</td><td className="text-[12px] text-gray-500">{rf.failure_reason}</td><td className="text-[12px] text-gray-500">{rf.due_date}</td></tr>
+                <tr key={i}><td className="font-medium text-gray-900">{rf.client_name}</td><td className="tabular-nums text-red-600">${rf.amount.toFixed(2)}</td><td className="text-[12px] text-gray-500">{rf.failure_reason}</td><td className="text-[12px] text-gray-500">{fmtDate(rf.due_date)}</td></tr>
               ))}
             </tbody>
           </table>

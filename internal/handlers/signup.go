@@ -618,6 +618,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 				membership.PaymentIntervalUnit,
 				membership.PaymentIntervalCount,
 				subName,
+				membership.StartDate,
 				membership.MinTermEndDate,
 				numPay,
 				continueAfterTerm,
@@ -1071,7 +1072,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		}
 		// When membership starts in the future, defer first invoice/charge until start date.
 		if !membershipStart.IsZero() {
-			startAt := membershipStart.UTC().Truncate(time.Second)
+			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
 			if startAt.After(time.Now().UTC()) {
 				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
 			}
@@ -1203,7 +1204,7 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		}
 		// When membership starts in the future, defer first invoice/charge until start date.
 		if !membershipStart.IsZero() {
-			startAt := membershipStart.UTC().Truncate(time.Second)
+			startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
 			if startAt.After(time.Now().UTC()) {
 				params.SubscriptionData.TrialEnd = stripe.Int64(startAt.Unix())
 			}
@@ -1238,6 +1239,19 @@ func stripeProcessingFee(baseAmountCents int64, method string) int64 {
 		return 0
 	}
 	return fee
+}
+
+// tenantDateStartUTC returns UTC timestamp for local 00:00 on the same calendar date
+// in the tenant's timezone. This keeps start-date semantics anchored to tenant-local dates.
+func tenantDateStartUTC(value time.Time, timezone string) time.Time {
+	loc := time.UTC
+	if tz := strings.TrimSpace(timezone); tz != "" {
+		if loaded, err := time.LoadLocation(tz); err == nil {
+			loc = loaded
+		}
+	}
+	y, m, d := value.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, loc).UTC()
 }
 
 func stripeRecurringInterval(freq string, intervalUnit *string, intervalCount int) (string, int64) {

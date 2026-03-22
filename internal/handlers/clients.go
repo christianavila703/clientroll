@@ -790,7 +790,7 @@ func (h *ClientHandler) CompleteMandateLink(w http.ResponseWriter, r *http.Reque
 					numPay = nil
 				}
 				subID, _ := createGoCardlessSubscription(r.Context(), prov, h.memberRepo, mandateID, &m,
-					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.MinTermEndDate, numPay, continueAfterTerm)
+					tenantID, *m.PaymentFrequency, *m.PaymentAmount, m.PaymentIntervalUnit, m.PaymentIntervalCount, "Membership", m.StartDate, m.MinTermEndDate, numPay, continueAfterTerm)
 				subscriptionID = subID
 			}
 			break

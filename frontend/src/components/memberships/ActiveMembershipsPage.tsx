@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../store/AuthContext";
+import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
 
 interface Membership {
   membership_id: string;
@@ -27,6 +29,8 @@ interface Membership {
 
 export default function ActiveMembershipsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const tenantTimezone = tenantTimezoneOrUTC(user?.tenant_timezone);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("active");
@@ -76,13 +80,13 @@ export default function ActiveMembershipsPage() {
   };
 
   const daysUntilEnd = (endDate: string) => {
-    const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const diff = daysUntilDateOnly(endDate, tenantTimezone);
     if (diff < 0) return { text: `Ended ${Math.abs(diff)}d ago`, colour: "text-gray-400" };
     if (diff <= 30) return { text: `${diff} days left`, colour: "text-amber-600" };
     return { text: `${diff} days left`, colour: "text-gray-500" };
   };
 
-  const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  const fmtDate = (d: string) => formatTenantDate(d, tenantTimezone, { day: "numeric", month: "short", year: "numeric" });
   const fmtFreq = (f?: string) => f ? f.charAt(0).toUpperCase() + f.slice(1) : "—";
 
   return (

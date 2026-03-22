@@ -91,6 +91,23 @@ func NewReportsRepo(db *database.Postgres) *ReportsRepo {
 	return &ReportsRepo{db: db}
 }
 
+func (r *ReportsRepo) tenantTimezone(ctx context.Context, tenantID uuid.UUID) string {
+	var tz string
+	if err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(timezone, ''), 'UTC') FROM tenants WHERE id = $1`, tenantID).Scan(&tz); err != nil {
+		return "UTC"
+	}
+	return tz
+}
+
+func monthStartUTC(now time.Time, timezone string) time.Time {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	localNow := now.In(loc)
+	return time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, loc).UTC()
+}
+
 // GetDashboardSummary returns summary card data for the dashboard.
 func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUID) (*DashboardSummary, error) {
 	var s DashboardSummary
@@ -106,8 +123,8 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 	`, tenantID).Scan(&s.ActiveMembers)
 
 	// This month amounts (membership payments + service charges)
-	now := time.Now()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	tz := r.tenantTimezone(ctx, tenantID)
+	monthStart := monthStartUTC(time.Now(), tz)
 	r.db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(SUM(rev), 0) FROM (
 			SELECT %s AS rev FROM payments WHERE tenant_id=$1 AND status='succeeded' AND paid_date >= $2
@@ -185,6 +202,8 @@ func (r *ReportsRepo) GetDashboardSummary(ctx context.Context, tenantID uuid.UUI
 
 // GetMonthlyRevenue returns monthly revenue for the past 12 months (membership payments + service charges).
 func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID) ([]MonthlyRevenue, error) {
+	tz := r.tenantTimezone(ctx, tenantID)
+	windowStart := monthStartUTC(time.Now(), tz).AddDate(0, -11, 0)
 	query := fmt.Sprintf(`
 		SELECT
 			month,
@@ -194,27 +213,27 @@ func (r *ReportsRepo) GetMonthlyRevenue(ctx context.Context, tenantID uuid.UUID)
 			COALESCE(SUM(to_organisation_amount), 0) AS to_organisation_amount
 		FROM (
 			SELECT
-				TO_CHAR(paid_date, 'YYYY-MM') AS month,
+				TO_CHAR((paid_date AT TIME ZONE $2), 'YYYY-MM') AS month,
 				%s AS collected_amount,
 				%s AS tax_amount,
 				%s AS surcharge_amount,
 				%s AS to_organisation_amount
 			FROM payments
-			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
+			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= $3
 			UNION ALL
 			SELECT
-				TO_CHAR(paid_date, 'YYYY-MM') AS month,
+				TO_CHAR((paid_date AT TIME ZONE $2), 'YYYY-MM') AS month,
 				%s AS collected_amount,
 				%s AS tax_amount,
 				%s AS surcharge_amount,
 				%s AS to_organisation_amount
 			FROM service_charges
-			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= NOW() - INTERVAL '12 months'
+			WHERE tenant_id = $1 AND status = 'succeeded' AND paid_date >= $3
 		) combined
 		GROUP BY month
 		ORDER BY month`, reportCollectedMembershipExpr, reportTaxMembershipExpr, reportSurchargeMembershipExpr, reportToOrgMembershipExpr, reportCollectedServiceExpr, reportTaxServiceExpr, reportSurchargeServiceExpr, reportToOrgServiceExpr)
 
-	rows, err := r.db.Pool.Query(ctx, query, tenantID)
+	rows, err := r.db.Pool.Query(ctx, query, tenantID, tz, windowStart)
 	if err != nil {
 		return nil, fmt.Errorf("getting monthly revenue: %w", err)
 	}
@@ -370,8 +389,9 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	rpt := &ComprehensiveReport{
 		PaymentStatuses: make(map[string]int),
 	}
+	tz := r.tenantTimezone(ctx, tenantID)
 	now := time.Now()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	monthStart := monthStartUTC(now, tz)
 	prevMonthStart := monthStart.AddDate(0, -1, 0)
 
 	// Active members: distinct non-deleted clients with at least one active membership.
@@ -564,7 +584,8 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	}
 
 	// Monthly signups (12 months)
-	rows1, err := r.db.Pool.Query(ctx, `SELECT TO_CHAR(created_at, 'YYYY-MM'), COUNT(*) FROM memberships WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '12 months' GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY 1`, tenantID)
+	windowStart := monthStart.AddDate(0, -11, 0)
+	rows1, err := r.db.Pool.Query(ctx, `SELECT TO_CHAR((created_at AT TIME ZONE $2), 'YYYY-MM'), COUNT(*) FROM memberships WHERE tenant_id=$1 AND created_at >= $3 GROUP BY TO_CHAR((created_at AT TIME ZONE $2), 'YYYY-MM') ORDER BY 1`, tenantID, tz, windowStart)
 	if err == nil {
 		defer rows1.Close()
 		for rows1.Next() {
@@ -575,7 +596,7 @@ func (r *ReportsRepo) GetComprehensiveReport(ctx context.Context, tenantID uuid.
 	}
 
 	// Monthly churn
-	rows2, err := r.db.Pool.Query(ctx, `SELECT TO_CHAR(updated_at, 'YYYY-MM'), COUNT(*) FROM memberships WHERE tenant_id=$1 AND status IN ('expired','cancelled') AND updated_at >= NOW() - INTERVAL '12 months' GROUP BY TO_CHAR(updated_at, 'YYYY-MM') ORDER BY 1`, tenantID)
+	rows2, err := r.db.Pool.Query(ctx, `SELECT TO_CHAR((updated_at AT TIME ZONE $2), 'YYYY-MM'), COUNT(*) FROM memberships WHERE tenant_id=$1 AND status IN ('expired','cancelled') AND updated_at >= $3 GROUP BY TO_CHAR((updated_at AT TIME ZONE $2), 'YYYY-MM') ORDER BY 1`, tenantID, tz, windowStart)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {

@@ -352,10 +352,11 @@ func (h *PlatformHandler) buildOpsSnapshot(ctx context.Context, tenantID *uuid.U
 	}
 	if err := h.db.Pool.QueryRow(ctx, `
 		SELECT COUNT(*)
-		FROM memberships
-		WHERE status = 'scheduled'
-		  AND start_date <= (NOW() AT TIME ZONE 'UTC')::date
-		  AND ($1::uuid IS NULL OR tenant_id = $1::uuid)
+		FROM memberships m
+		JOIN tenants t ON t.id = m.tenant_id
+		WHERE m.status = 'scheduled'
+		  AND m.start_date <= ((NOW() AT TIME ZONE COALESCE(NULLIF(t.timezone, ''), 'UTC'))::date)
+		  AND ($1::uuid IS NULL OR m.tenant_id = $1::uuid)
 	`, tenantID).Scan(&scheduledDue); err != nil {
 		return nil, err
 	}
