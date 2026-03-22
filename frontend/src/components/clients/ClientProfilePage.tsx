@@ -274,6 +274,7 @@ export default function ClientProfilePage() {
               memberships={memberships}
               payments={payments}
               fmtShort={fmtShort}
+              tenantTimezone={tenantTimezone}
               onViewAll={() => setTab("payments")}
             />
           )}
@@ -533,8 +534,8 @@ export default function ClientProfilePage() {
 }
 
 /* ─── Summary Tab ─── */
-function SummaryTab({ memberships, payments, fmtShort, onViewAll }: {
-  memberships: MembershipRecord[]; payments: PaymentRecord[]; fmtShort: (d: string) => string; onViewAll: () => void;
+function SummaryTab({ memberships, payments, fmtShort, tenantTimezone, onViewAll }: {
+  memberships: MembershipRecord[]; payments: PaymentRecord[]; fmtShort: (d: string) => string; tenantTimezone: string; onViewAll: () => void;
 }) {
   const active = memberships.filter(m => m.status === "active");
   const past = memberships.filter(m => m.status !== "active");
