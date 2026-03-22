@@ -61,6 +61,7 @@ export interface MembershipRecord {
   payment_interval_count?: number;
   payment_amount?: number;
   num_payments?: number;
+  continue_after_term?: boolean;
   status: string;
   mandate_id?: string;
   subscription_id?: string;

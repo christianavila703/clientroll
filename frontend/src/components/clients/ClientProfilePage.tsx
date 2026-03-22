@@ -633,6 +633,7 @@ function MembershipSummaryRow({ m, fmtShort }: { m: MembershipRecord; fmtShort: 
 function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: MembershipRecord[]; fmtShort: (d: string) => string; onRefresh: () => void }) {
   const active = memberships.filter(m => m.status === "active");
   const inactive = memberships.filter(m => m.status !== "active");
+  const [togglingMembershipID, setTogglingMembershipID] = useState<string | null>(null);
 
   const handleCancel = async (membershipId: string) => {
     if (!confirm("Cancel this membership? This will also cancel any GoCardless subscription and mandate.")) return;
@@ -645,6 +646,18 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
       if (!res.ok) { const d = await res.json(); alert(d.error || "Unable to cancel membership. Please try again."); return; }
       onRefresh();
     } catch { alert("Unable to cancel membership. Please try again."); }
+  };
+
+  const handleToggleContinueAfterTerm = async (membershipId: string, continueAfterTerm: boolean) => {
+    setTogglingMembershipID(membershipId);
+    try {
+      await api.updateMembershipContinueAfterTerm(membershipId, continueAfterTerm);
+      onRefresh();
+    } catch (e: any) {
+      alert(e?.message || "Unable to update billing continuation right now.");
+    } finally {
+      setTogglingMembershipID(null);
+    }
   };
 
   if (memberships.length === 0) {
@@ -662,7 +675,7 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
         <div>
           <h2 className="text-[13px] font-semibold text-gray-700 mb-3">Active ({active.length})</h2>
           <div className="space-y-4">
-            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} onCancel={() => handleCancel(m.membership_id)} />)}
+            {active.map(m => <MembershipCard key={m.membership_id} m={m} fmtShort={fmtShort} onCancel={() => handleCancel(m.membership_id)} onToggleContinueAfterTerm={handleToggleContinueAfterTerm} toggleBusy={togglingMembershipID === m.membership_id} />)}
           </div>
         </div>
       )}
@@ -678,7 +691,7 @@ function MembershipsTab({ memberships, fmtShort, onRefresh }: { memberships: Mem
   );
 }
 
-function MembershipCard({ m, fmtShort, onCancel }: { m: MembershipRecord; fmtShort: (d: string) => string; onCancel?: () => void }) {
+function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, toggleBusy }: { m: MembershipRecord; fmtShort: (d: string) => string; onCancel?: () => void; onToggleContinueAfterTerm?: (membershipId: string, continueAfterTerm: boolean) => Promise<void> | void; toggleBusy?: boolean }) {
   const daysLeft = Math.ceil((new Date(m.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   const paidPct = m.total_expected > 0 ? Math.round((m.total_paid / m.total_expected) * 100) : 0;
 
@@ -783,6 +796,24 @@ function MembershipCard({ m, fmtShort, onCancel }: { m: MembershipRecord; fmtSho
             </p>
           </div>
         </div>
+
+        {m.status === "active" && m.payment_method === "card" && onToggleContinueAfterTerm && (
+          <div className="mt-2 border-t border-gray-100 pt-3">
+            <label className="inline-flex items-center gap-2 text-[12px] text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!m.continue_after_term}
+                disabled={!!toggleBusy}
+                onChange={(e) => onToggleContinueAfterTerm(m.membership_id, e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 disabled:opacity-50"
+              />
+              Continue billing after term
+            </label>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Updates this member's Stripe subscription only.
+            </p>
+          </div>
+        )}
 
         {/* Progress */}
         <div className="mt-3">

@@ -527,6 +527,11 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "Invalid term option ID")
 		return
 	}
+	existingTermOption, err := h.mtRepo.GetTermOption(r.Context(), toID, tenantID)
+	if err != nil || existingTermOption == nil {
+		writeError(w, http.StatusNotFound, "Term option not found")
+		return
+	}
 	var input struct {
 		DurationMonths              int      `json:"duration_months"`
 		FeeTotal                    float64  `json:"fee_total"`

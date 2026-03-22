@@ -338,6 +338,7 @@ type ClientMembershipRow struct {
 	PaymentIntervalCount    int      `json:"payment_interval_count"`
 	PaymentAmount           *float64 `json:"payment_amount"`
 	NumPayments             *int     `json:"num_payments"`
+	ContinueAfterTerm       bool     `json:"continue_after_term"`
 	Status                  string   `json:"status"`
 	MandateID               *string  `json:"mandate_id"`
 	SubscriptionID          *string  `json:"subscription_id"`
@@ -373,6 +374,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			m.payment_interval_count,
 			m.payment_amount,
 			m.num_payments,
+			m.continue_after_term,
 			m.status,
 			m.gocardless_mandate_id,
 			m.gocardless_subscription_id,
@@ -420,7 +422,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 			&row.MembershipID, &row.MembershipType, &row.MembershipTypeID,
 			&row.TermMonths, &row.StartDate, &row.EndDate,
 			&row.PaymentMethod, &row.PaymentFrequency, &row.PaymentIntervalUnit, &row.PaymentIntervalCount, &row.PaymentAmount, &row.NumPayments,
-			&row.Status, &row.MandateID, &row.SubscriptionID,
+			&row.ContinueAfterTerm, &row.Status, &row.MandateID, &row.SubscriptionID,
 			&row.HasAgreement,
 			&row.TotalPaid, &row.TotalExpected,
 			&row.FailedCount, &row.LastPaymentDate, &row.LastPaymentStatus,
@@ -581,11 +583,11 @@ func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.
 	successURL := origin + "/clients/" + clientID.String() + "?stripe_setup=success"
 	cancelURL := origin + "/clients/" + clientID.String() + "?stripe_setup=cancelled"
 	params := &stripe.CheckoutSessionParams{
-		Mode:                    stripe.String(string(stripe.CheckoutSessionModeSetup)),
-		Customer:                stripe.String(stripeCustomerID),
-		SuccessURL:              stripe.String(successURL),
-		CancelURL:               stripe.String(cancelURL),
-		PaymentMethodTypes:      stripe.StringSlice([]string{"card", "au_becs_debit"}),
+		Mode:               stripe.String(string(stripe.CheckoutSessionModeSetup)),
+		Customer:           stripe.String(stripeCustomerID),
+		SuccessURL:         stripe.String(successURL),
+		CancelURL:          stripe.String(cancelURL),
+		PaymentMethodTypes: stripe.StringSlice([]string{"card", "au_becs_debit"}),
 		Metadata: map[string]string{
 			"type":      "client_payment_method_setup",
 			"tenant_id": tenantID.String(),

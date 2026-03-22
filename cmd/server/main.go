@@ -170,7 +170,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, tenantRepo, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, mtRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
 	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo, serviceRepo)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
-	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, credRepo, enc)
+	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, memberRepo, mtRepo, clientRepo, paymentRepo, credRepo, enc)
 	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)

@@ -246,6 +246,27 @@ func (r *PaymentRepo) FindLatestStripeCustomerIDByClient(ctx context.Context, te
 	return strings.TrimSpace(customerID), nil
 }
 
+// FindLatestStripeSubscriptionIDByMembership returns the most recent Stripe subscription id seen for a membership.
+func (r *PaymentRepo) FindLatestStripeSubscriptionIDByMembership(ctx context.Context, tenantID, membershipID uuid.UUID) (string, error) {
+	var subscriptionID string
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT p.stripe_details->>'stripe_subscription_id'
+		FROM payments p
+		WHERE p.tenant_id = $1
+		  AND p.membership_id = $2
+		  AND COALESCE(p.stripe_details->>'stripe_subscription_id', '') <> ''
+		ORDER BY p.created_at DESC
+		LIMIT 1
+	`, tenantID, membershipID).Scan(&subscriptionID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("find latest stripe subscription id by membership: %w", err)
+	}
+	return strings.TrimSpace(subscriptionID), nil
+}
+
 // MergeStripeDetails deep-merges a JSON patch into payments.stripe_details for the row
 // matched by tenant + provider_reference (Stripe invoice id for subscription flows).
 func (r *PaymentRepo) MergeStripeDetails(ctx context.Context, tenantID uuid.UUID, providerRef string, patch map[string]interface{}) error {

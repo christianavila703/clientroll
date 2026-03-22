@@ -45,6 +45,7 @@ type Membership struct {
 	PaymentIntervalCount     int        `json:"payment_interval_count"`
 	PaymentAmount            *float64   `json:"payment_amount"`
 	NumPayments              *int       `json:"num_payments"`
+	ContinueAfterTerm        bool       `json:"continue_after_term"`
 	PaymentsMade             int        `json:"payments_made"`
 	Status                   string     `json:"status"`
 	GoCardlessMandateID      *string    `json:"gocardless_mandate_id,omitempty"`

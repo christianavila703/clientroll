@@ -17,22 +17,25 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/subscription"
 )
 
 // ActiveMembershipsHandler serves the active memberships view.
 type ActiveMembershipsHandler struct {
-	db         *database.Postgres
-	memberRepo *repository.MembershipRepo
-	mtRepo     *repository.MembershipTypeRepo
-	clientRepo *repository.ClientRepo
-	credRepo   *repository.TenantCredentialRepo
-	encryptor  *database.Encryptor
-	dispatcher *events.Dispatcher
+	db          *database.Postgres
+	memberRepo  *repository.MembershipRepo
+	mtRepo      *repository.MembershipTypeRepo
+	clientRepo  *repository.ClientRepo
+	paymentRepo *repository.PaymentRepo
+	credRepo    *repository.TenantCredentialRepo
+	encryptor   *database.Encryptor
+	dispatcher  *events.Dispatcher
 }
 
 // NewActiveMembershipsHandler creates a new handler.
-func NewActiveMembershipsHandler(db *database.Postgres, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, cr *repository.ClientRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ActiveMembershipsHandler {
-	return &ActiveMembershipsHandler{db: db, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, credRepo: credR, encryptor: enc}
+func NewActiveMembershipsHandler(db *database.Postgres, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, cr *repository.ClientRepo, pr *repository.PaymentRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ActiveMembershipsHandler {
+	return &ActiveMembershipsHandler{db: db, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, paymentRepo: pr, credRepo: credR, encryptor: enc}
 }
 
 // SetDispatcher sets optional outbound webhook event dispatcher.
@@ -45,6 +48,7 @@ func (h *ActiveMembershipsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/active-memberships", h.List)
 	r.Post("/memberships", h.CreateMembership)
 	r.Post("/memberships/{membershipID}/cancel", h.CancelMembership)
+	r.Put("/memberships/{membershipID}/continue-after-term", h.UpdateContinueAfterTerm)
 }
 
 // CreateMembership creates a membership for a client (staff-initiated).
@@ -175,7 +179,7 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 				return nil
 			}
 			return &input.PaymentIntervalUnit
-		}(), input.PaymentIntervalCount, input.NumPayments,
+		}(), input.PaymentIntervalCount, input.NumPayments, term.ContinueAfterTerm,
 		"", &userID, "")
 	if err != nil {
 		log.Printf("Error creating membership: %v", err)
@@ -382,6 +386,87 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
+// UpdateContinueAfterTerm updates Stripe cancel_at for a single membership instance.
+func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	membershipID, err := uuid.Parse(chi.URLParam(r, "membershipID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid membership ID")
+		return
+	}
+	var input struct {
+		ContinueAfterTerm bool `json:"continue_after_term"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+
+	m, err := h.memberRepo.FindByID(r.Context(), membershipID, tenantID)
+	if err != nil || m == nil {
+		writeError(w, http.StatusNotFound, "Membership not found")
+		return
+	}
+
+	subID, err := h.paymentRepo.FindLatestStripeSubscriptionIDByMembership(r.Context(), tenantID, membershipID)
+	if err != nil {
+		log.Printf("membership.continue_after_term lookup_failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to resolve Stripe subscription")
+		return
+	}
+	if strings.TrimSpace(subID) == "" {
+		writeError(w, http.StatusBadRequest, "No Stripe subscription found for this membership")
+		return
+	}
+
+	secretKey, err := h.getStripeSecretKey(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("membership.continue_after_term stripe_key tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+		writeError(w, http.StatusBadGateway, "Stripe is not configured for this tenant")
+		return
+	}
+
+	previousStripeKey := stripe.Key
+	stripe.Key = secretKey
+	defer func() { stripe.Key = previousStripeKey }()
+
+	params := &stripe.SubscriptionParams{
+		CancelAtPeriodEnd: stripe.Bool(false),
+	}
+	if input.ContinueAfterTerm {
+		// Unset explicit cancellation date so billing continues.
+		params.AddExtra("cancel_at", "")
+	} else {
+		cancelAt := time.Date(
+			m.MinTermEndDate.Year(),
+			m.MinTermEndDate.Month(),
+			m.MinTermEndDate.Day(),
+			0, 0, 0, 0,
+			time.UTC,
+		).Unix()
+		if cancelAt <= 0 {
+			writeError(w, http.StatusBadRequest, "Membership term end date is invalid")
+			return
+		}
+		params.CancelAt = stripe.Int64(cancelAt)
+	}
+	if _, err := subscription.Update(subID, params); err != nil {
+		log.Printf("membership.continue_after_term stripe_update tenant=%s membership=%s subscription=%s err=%v", tenantID, membershipID, subID, err)
+		writeError(w, http.StatusBadGateway, "Failed to update Stripe subscription")
+		return
+	}
+	if err := h.memberRepo.UpdateContinueAfterTerm(r.Context(), membershipID, tenantID, input.ContinueAfterTerm); err != nil {
+		log.Printf("membership.continue_after_term persist_failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+		writeError(w, http.StatusInternalServerError, "Stripe updated but failed to save membership setting")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"membership_id":          membershipID.String(),
+		"continue_after_term":    input.ContinueAfterTerm,
+		"stripe_subscription_id": subID,
+	})
+}
+
 // getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
 func (h *ActiveMembershipsHandler) getGoCardlessProvider(ctx context.Context, tenantID uuid.UUID) (payment.GoCardlessExtended, error) {
 	if h.credRepo == nil || h.encryptor == nil {
@@ -400,6 +485,21 @@ func (h *ActiveMembershipsHandler) getGoCardlessProvider(ctx context.Context, te
 		env = "sandbox"
 	}
 	return payment.NewGoCardlessProvider(apiKey, "", env), nil
+}
+
+func (h *ActiveMembershipsHandler) getStripeSecretKey(ctx context.Context, tenantID uuid.UUID) (string, error) {
+	if h.credRepo == nil || h.encryptor == nil {
+		return "", fmt.Errorf("stripe integration unavailable")
+	}
+	creds, err := h.credRepo.GetByProvider(ctx, tenantID, "stripe")
+	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
+		return "", fmt.Errorf("stripe not configured")
+	}
+	secretKey, err := h.encryptor.Decrypt(creds.APIKeyEncrypted)
+	if err != nil || strings.TrimSpace(secretKey) == "" {
+		return "", fmt.Errorf("stripe credentials invalid")
+	}
+	return secretKey, nil
 }
 
 // ActiveMembershipRow is the joined data for the active memberships view.

@@ -429,6 +429,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	membership, err := h.memberRepo.Create(r.Context(), tenant.ID, client.ID, mtID, toID,
 		input.StartDate, input.PaymentMethod, input.PaymentFrequency, membershipCurrency, input.PaymentAmount,
 		input.PaymentIntervalUnit, input.PaymentIntervalCount, input.NumPayments,
+		termForCreate.ContinueAfterTerm,
 		input.MemberSignature, staffID, input.StaffSignature)
 	if err != nil {
 		log.Printf("Error creating membership during signup: %v", err)

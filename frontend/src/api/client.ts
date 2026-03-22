@@ -217,6 +217,11 @@ export const api = {
   // Memberships
   createMembership: (data: unknown) =>
     request("/tenant/memberships", { method: "POST", body: data }),
+  updateMembershipContinueAfterTerm: (membershipId: string, continueAfterTerm: boolean) =>
+    request(`/tenant/memberships/${membershipId}/continue-after-term`, {
+      method: "PUT",
+      body: { continue_after_term: continueAfterTerm },
+    }),
   getSignupLinks: () => request("/tenant/signup-links"),
 
   // Membership Types
