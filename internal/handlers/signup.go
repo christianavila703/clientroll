@@ -499,6 +499,8 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
 			return
 		}
+		// Capture the signed legal agreement at submission time (before redirect to checkout).
+		h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
 		mt := mtForCreate
 		thankyou := buildThankyouResponse(tenant, mt)
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
