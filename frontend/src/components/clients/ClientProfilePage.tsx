@@ -809,9 +809,6 @@ function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, togg
               />
               Continue billing after term
             </label>
-            <p className="mt-1 text-[11px] text-gray-400">
-              Updates this member's Stripe subscription only.
-            </p>
           </div>
         )}
 
@@ -1099,6 +1096,13 @@ function PaymentsTab({
                 </div>
                 {p._type === "service" && p._description && (
                   <p className="text-[11px] text-gray-500">{p._description}</p>
+                )}
+                {p._type !== "service" && (p.membership_type || p.membership_id) && (
+                  <p className="text-[11px] text-gray-500">
+                    {p.membership_type || "Membership"}
+                    {typeof p.term_months === "number" && p.term_months > 0 ? ` · ${p.term_months}-month term` : ""}
+                    {p.membership_id ? ` · MEM-${p.membership_id.slice(0, 4).toUpperCase()}` : ""}
+                  </p>
                 )}
                 {p.paid_date && (p.status === "succeeded" || p.status === "confirmed") && (
                   <p className="text-[11px] text-emerald-600">
