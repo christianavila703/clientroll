@@ -107,3 +107,43 @@ func (r *MembershipSetupInviteRepo) MarkCompleted(ctx context.Context, id uuid.U
 	`, id)
 	return err
 }
+
+func (r *MembershipSetupInviteRepo) FindLatestActiveByClient(ctx context.Context, tenantID, clientID uuid.UUID) (*MembershipSetupInvite, error) {
+	var out MembershipSetupInvite
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT
+			id, tenant_id, token, client_id, membership_type_id, term_option_id, start_date,
+			payment_frequency, payment_method, payment_method_strategy, payment_method_id,
+			gocardless_mandate_id, expires_at, completed_at, created_by_user_id, created_at, updated_at
+		FROM membership_setup_invites
+		WHERE tenant_id = $1
+			AND client_id = $2
+			AND completed_at IS NULL
+			AND expires_at > NOW()
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, tenantID, clientID).Scan(
+		&out.ID, &out.TenantID, &out.Token, &out.ClientID, &out.MembershipTypeID, &out.TermOptionID, &out.StartDate,
+		&out.PaymentFrequency, &out.PaymentMethod, &out.PaymentMethodStrategy, &out.PaymentMethodID,
+		&out.GoCardlessMandateID, &out.ExpiresAt, &out.CompletedAt, &out.CreatedByUserID, &out.CreatedAt, &out.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (r *MembershipSetupInviteRepo) Revoke(ctx context.Context, id, tenantID uuid.UUID) (bool, error) {
+	tag, err := r.db.Pool.Exec(ctx, `
+		UPDATE membership_setup_invites
+		SET completed_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND completed_at IS NULL
+	`, id, tenantID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}

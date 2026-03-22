@@ -98,6 +98,8 @@ func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 func (h *SignupHandler) RegisterTenantRoutes(r chi.Router) {
 	r.Get("/signup-links", h.GetSignupLinks)
 	r.Post("/signup-invites", h.CreateMembershipInvite)
+	r.Get("/signup-invites/clients/{clientID}/active", h.GetActiveMembershipInvite)
+	r.Post("/signup-invites/{inviteID}/revoke", h.RevokeMembershipInvite)
 }
 
 // GetTenantMemberships returns all active memberships for a tenant (public browsing).
@@ -973,6 +975,93 @@ func (h *SignupHandler) CreateMembershipInvite(w http.ResponseWriter, r *http.Re
 		"warning":          warning,
 		"payment_strategy": invite.PaymentMethodStrategy,
 	})
+}
+
+func (h *SignupHandler) GetActiveMembershipInvite(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil || tenantID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	clientID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "clientID")))
+	if err != nil || clientID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid client ID")
+		return
+	}
+	if h.inviteRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Invite repository unavailable")
+		return
+	}
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		writeError(w, http.StatusNotFound, "Client not found")
+		return
+	}
+	invite, err := h.inviteRepo.FindLatestActiveByClient(r.Context(), tenantID, clientID)
+	if err != nil {
+		log.Printf("signup invite active lookup failed tenant=%s client=%s err=%v", tenantID, clientID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to load signup invite")
+		return
+	}
+	if invite == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"invite": nil})
+		return
+	}
+	tenant, _ := h.tenantRepo.FindByID(r.Context(), tenantID)
+	tenantSlug := ""
+	if tenant != nil {
+		tenantSlug = tenant.Slug
+	}
+	invitePath := fmt.Sprintf("/join/%s/invite/%s", tenantSlug, invite.Token.String())
+	inviteURL := strings.TrimSuffix(h.appBaseURL(r), "/") + invitePath
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"invite": map[string]interface{}{
+			"id":                      invite.ID,
+			"token":                   invite.Token.String(),
+			"client_id":               invite.ClientID,
+			"membership_type_id":      invite.MembershipTypeID,
+			"term_option_id":          invite.TermOptionID,
+			"start_date":              invite.StartDate.Format("2006-01-02"),
+			"payment_frequency":       invite.PaymentFrequency,
+			"payment_method":          invite.PaymentMethod,
+			"payment_method_strategy": invite.PaymentMethodStrategy,
+			"payment_method_id":       invite.PaymentMethodID,
+			"gocardless_mandate_id":   invite.GoCardlessMandateID,
+			"expires_at":              invite.ExpiresAt.Format(time.RFC3339),
+			"created_at":              invite.CreatedAt.Format(time.RFC3339),
+			"invite_path":             invitePath,
+			"invite_url":              inviteURL,
+		},
+	})
+}
+
+func (h *SignupHandler) RevokeMembershipInvite(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil || tenantID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	inviteID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "inviteID")))
+	if err != nil || inviteID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Invalid invite ID")
+		return
+	}
+	if h.inviteRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Invite repository unavailable")
+		return
+	}
+	ok, err := h.inviteRepo.Revoke(r.Context(), inviteID, tenantID)
+	if err != nil {
+		log.Printf("signup invite revoke failed tenant=%s invite=%s err=%v", tenantID, inviteID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to revoke invite")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "Invite not found or already inactive")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Invite revoked"})
 }
 
 func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) {

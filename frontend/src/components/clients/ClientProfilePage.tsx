@@ -21,6 +21,15 @@ interface Client {
   created_at: string;
 }
 
+interface ActiveSignupInvite {
+  id: string;
+  token: string;
+  expires_at: string;
+  created_at: string;
+  invite_url: string;
+  invite_path: string;
+}
+
 function membershipFrequencyLabel(m: MembershipRecord): string {
   if (!m.payment_frequency) return "—";
   if (m.payment_frequency !== "custom_schedule") return m.payment_frequency;
@@ -60,6 +69,8 @@ export default function ClientProfilePage() {
     providers: [],
     supportsDirectDebit: false,
   });
+  const [activeSignupInvite, setActiveSignupInvite] = useState<ActiveSignupInvite | null>(null);
+  const [revokingSignupInvite, setRevokingSignupInvite] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
@@ -128,13 +139,14 @@ export default function ClientProfilePage() {
     const token = localStorage.getItem("access_token");
     const h = { Authorization: `Bearer ${token}` };
     try {
-      const [clientRes, memberRes, payRes, chargesRes, mandateRes, tenantRes] = await Promise.all([
+      const [clientRes, memberRes, payRes, chargesRes, mandateRes, tenantRes, inviteRes] = await Promise.all([
         fetch(`/api/tenant/clients/${clientId}`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/clients/${clientId}/memberships`, { headers: h }).then(r => r.json()),
         fetch(`/api/tenant/payments/client/${clientId}`, { headers: h }).then(r => r.json()),
         api.listClientCharges(clientId!).catch(() => ({ charges: [] })) as Promise<any>,
         api.getClientMandateStatus(clientId!).catch(() => ({})) as Promise<any>,
         api.getTenantSettings().catch(() => ({})) as Promise<any>,
+        api.getActiveMembershipInvite(clientId!).catch(() => ({ invite: null })) as Promise<any>,
       ]);
       setClient(clientRes);
       setPaymentInfo({
@@ -151,6 +163,7 @@ export default function ClientProfilePage() {
         askEmergencyContact: tenantRes?.ask_emergency_contact !== false,
         askCompanyInformation: tenantRes?.ask_company_information === true,
       });
+      setActiveSignupInvite((inviteRes?.invite || null) as ActiveSignupInvite | null);
       const membershipsList = memberRes.memberships || [];
       setMemberships(membershipsList);
       const membershipByID = new Map<string, MembershipRecord>(
@@ -184,6 +197,22 @@ export default function ClientProfilePage() {
       setPayments(all);
     } catch { /* handle */ }
     finally { setLoading(false); }
+  };
+
+  const handleRevokeSignupInvite = async () => {
+    if (!activeSignupInvite?.id || revokingSignupInvite) return;
+    const ok = window.confirm("Revoke this signup invite link? The client will not be able to use it.");
+    if (!ok) return;
+    setRevokingSignupInvite(true);
+    try {
+      await api.revokeMembershipInvite(activeSignupInvite.id);
+      setMandateCompleteMessage({ type: "success", text: "Signup invite revoked." });
+      await loadAll();
+    } catch (err) {
+      setMandateCompleteMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to revoke invite." });
+    } finally {
+      setRevokingSignupInvite(false);
+    }
   };
 
   if (loading) {
@@ -221,6 +250,14 @@ export default function ClientProfilePage() {
 
   const streetLine = [client.unit_number ? `Unit ${client.unit_number},` : null, client.address].filter(Boolean).join(" ");
   const fullAddress = [streetLine, client.suburb, [client.state, client.postcode].filter(Boolean).join(" "), client.country].filter(Boolean).join("\n");
+  const hasAnyCompanyInfo = Boolean(
+    client.tax_number ||
+    client.company_name ||
+    client.company_number ||
+    client.company_phone ||
+    client.company_website ||
+    client.company_address
+  );
 
   return (
     <div>
@@ -252,6 +289,33 @@ export default function ClientProfilePage() {
       {mandateCompleteMessage && (
         <div className={`mb-4 rounded-md px-4 py-3 text-[13px] ${mandateCompleteMessage.type === "success" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-700"}`}>
           {mandateCompleteMessage.text}
+        </div>
+      )}
+
+      {activeSignupInvite && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-amber-900">Active signup invite link</p>
+              <p className="text-[12px] text-amber-800">Expires {fmtDate(activeSignupInvite.expires_at)}</p>
+              <p className="text-[12px] text-amber-700 truncate mt-1">{activeSignupInvite.invite_url}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigator.clipboard.writeText(activeSignupInvite.invite_url)}
+                className="btn-secondary text-[12px]"
+              >
+                Copy link
+              </button>
+              <button
+                onClick={handleRevokeSignupInvite}
+                disabled={revokingSignupInvite}
+                className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-[12px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                {revokingSignupInvite ? "Revoking..." : "Revoke link"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -350,10 +414,10 @@ export default function ClientProfilePage() {
                   <span className="text-[13px] text-gray-900">{client.tax_number}</span>
                 </div>
               )}
-              {client.company_name && (
+              {(hasAnyCompanyInfo || clientFieldSettings.askCompanyInformation) && (
                 <div className="flex justify-between gap-4">
-                  <span className="text-[13px] text-gray-500">Company name</span>
-                  <span className="text-[13px] text-gray-900">{client.company_name}</span>
+                  <span className="text-[13px] text-gray-500">Company / business name</span>
+                  <span className="text-[13px] text-gray-900">{client.company_name || "—"}</span>
                 </div>
               )}
               {client.company_number && (
@@ -1440,6 +1504,13 @@ function EditClientModal({
     company_country: client.company_country || "",
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
+  const personalStreetWithUnit = (unit: string, street: string) => {
+    const u = (unit || "").trim();
+    const s = (street || "").trim();
+    if (!u) return s;
+    if (!s) return `Unit ${u}`;
+    return `Unit ${u}, ${s}`;
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -1574,7 +1645,7 @@ function EditClientModal({
                         setForm((prev) => ({
                           ...prev,
                           address: v,
-                          ...(companyAddressSameAsClient ? { company_address: v } : {}),
+                          ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(prev.unit_number, v) } : {}),
                         }))
                       }
                       colSpan
@@ -1582,7 +1653,13 @@ function EditClientModal({
                     <LabeledInput
                       label="Unit / Apt Number"
                       value={form.unit_number}
-                      onChange={(v) => setForm((prev) => ({ ...prev, unit_number: v }))}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          unit_number: v,
+                          ...(companyAddressSameAsClient ? { company_address: personalStreetWithUnit(v, prev.address) } : {}),
+                        }))
+                      }
                     />
                     <LabeledInput
                       label="Suburb"
@@ -1656,7 +1733,7 @@ function EditClientModal({
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
-                    <LabeledInput label="Company name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} />
+                    <LabeledInput label="Company / business name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} />
                     <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
                     <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" />
                     <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" colSpan />
@@ -1675,7 +1752,7 @@ function EditClientModal({
                           if (checked) {
                             setForm((prev) => ({
                               ...prev,
-                              company_address: prev.address,
+                              company_address: personalStreetWithUnit(prev.unit_number, prev.address),
                               company_city: prev.suburb,
                               company_state_region: prev.state,
                               company_postcode: prev.postcode,

@@ -219,6 +219,10 @@ export const api = {
     request("/tenant/memberships", { method: "POST", body: data }),
   createMembershipInvite: (data: unknown) =>
     request("/tenant/signup-invites", { method: "POST", body: data }),
+  getActiveMembershipInvite: (clientId: string) =>
+    request(`/tenant/signup-invites/clients/${clientId}/active`),
+  revokeMembershipInvite: (inviteId: string) =>
+    request(`/tenant/signup-invites/${inviteId}/revoke`, { method: "POST", body: {} }),
   updateMembershipContinueAfterTerm: (membershipId: string, continueAfterTerm: boolean) =>
     request(`/tenant/memberships/${membershipId}/continue-after-term`, {
       method: "PUT",

@@ -591,11 +591,11 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
           <div>
             <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Company Information</h3>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <Field label="Tax Number" required><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" required /></Field>
               <Field label="Company Name" required><input value={data.company_name} onChange={(e) => set("company_name", e.target.value)} className={inputCls} placeholder="Company name" required /></Field>
+              <Field label="Tax Number" required><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" required /></Field>
               <Field label="Company Number" required><input value={data.company_number} onChange={(e) => set("company_number", e.target.value)} className={inputCls} placeholder="Company number" required /></Field>
               <Field label="Phone" required><input type="tel" value={data.company_phone} onChange={(e) => set("company_phone", e.target.value)} className={inputCls} placeholder="03 9000 0000" required /></Field>
-              <Field label="Website"><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" /></Field>
+              <Field label="Website" full><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" /></Field>
             </div>
           </div>
 
