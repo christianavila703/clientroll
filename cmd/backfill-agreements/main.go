@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -11,9 +12,11 @@ import (
 
 	"clientroll/internal/database"
 	"clientroll/internal/handlers"
+	"clientroll/internal/models"
 	"clientroll/internal/repository"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type missingMembershipRow struct {
@@ -75,7 +78,7 @@ func main() {
 			continue
 		}
 
-		if err := backfillOne(ctx, row, agreementRepo, tenantRepo, clientRepo, memberRepo, mtRepo, termsRepo, settingsRepo); err != nil {
+		if err := backfillOne(ctx, pg, row, agreementRepo, tenantRepo, clientRepo, memberRepo, mtRepo, termsRepo, settingsRepo); err != nil {
 			failed++
 			log.Printf("backfill failed membership=%s tenant=%s err=%v", row.MembershipID, row.TenantID, err)
 			continue
@@ -143,6 +146,7 @@ func listMissingMemberships(ctx context.Context, pg *database.Postgres, tenantFi
 
 func backfillOne(
 	ctx context.Context,
+	pg *database.Postgres,
 	row missingMembershipRow,
 	agreementRepo *repository.AgreementSnapshotRepo,
 	tenantRepo *repository.TenantRepo,
@@ -153,24 +157,47 @@ func backfillOne(
 	settingsRepo *repository.SettingsRepo,
 ) error {
 	tenant, err := tenantRepo.FindByID(ctx, row.TenantID)
-	if err != nil || tenant == nil {
+	if err != nil {
 		return fmt.Errorf("tenant lookup: %w", err)
 	}
-	client, err := clientRepo.FindByID(ctx, row.ClientID, row.TenantID)
-	if err != nil || client == nil {
+	if tenant == nil {
+		return errors.New("tenant lookup: not found")
+	}
+	modelClient, err := clientRepo.FindByID(ctx, row.ClientID, row.TenantID)
+	if err != nil {
 		return fmt.Errorf("client lookup: %w", err)
 	}
+	client := toBackfillClient(modelClient)
+	if client == nil {
+		// Fallback for historical rows where client was soft-deleted.
+		client, err = findClientIncludingDeleted(ctx, pg, row.ClientID, row.TenantID)
+		if err != nil {
+			return fmt.Errorf("client lookup (including deleted): %w", err)
+		}
+		if client == nil {
+			return errors.New("client lookup: not found")
+		}
+	}
 	membership, err := memberRepo.FindByID(ctx, row.MembershipID, row.TenantID)
-	if err != nil || membership == nil {
+	if err != nil {
 		return fmt.Errorf("membership lookup: %w", err)
 	}
+	if membership == nil {
+		return errors.New("membership lookup: not found")
+	}
 	mt, err := mtRepo.FindByID(ctx, row.MembershipTypeID, row.TenantID)
-	if err != nil || mt == nil {
+	if err != nil {
 		return fmt.Errorf("membership type lookup: %w", err)
 	}
+	if mt == nil {
+		return errors.New("membership type lookup: not found")
+	}
 	termOption, err := mtRepo.GetTermOption(ctx, row.TermOptionID, row.TenantID)
-	if err != nil || termOption == nil {
+	if err != nil {
 		return fmt.Errorf("term option lookup: %w", err)
+	}
+	if termOption == nil {
+		return errors.New("term option lookup: not found")
 	}
 	agreementSettings, _ := settingsRepo.GetAgreementSettings(ctx, row.TenantID)
 	termsDocs, _ := termsRepo.GetForMembershipType(ctx, row.MembershipTypeID, row.TenantID)
@@ -288,4 +315,65 @@ func backfillOne(
 
 	_, err = agreementRepo.Create(ctx, snap, termsInputs)
 	return err
+}
+
+func findClientIncludingDeleted(ctx context.Context, pg *database.Postgres, clientID, tenantID uuid.UUID) (*backfillClient, error) {
+	row := pg.Pool.QueryRow(ctx, `
+		SELECT
+			id, tenant_id, name, unit_number, address, suburb, state, postcode,
+			email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone
+		FROM clients
+		WHERE id = $1 AND tenant_id = $2
+	`, clientID, tenantID)
+
+	var c backfillClient
+	if err := row.Scan(
+		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State, &c.Postcode,
+		&c.Email, &c.Phone, &c.BirthDate, &c.Gender, &c.EmergencyContactName, &c.EmergencyContactPhone,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+type backfillClient struct {
+	ID                    uuid.UUID
+	TenantID              uuid.UUID
+	Name                  string
+	UnitNumber            *string
+	Address               *string
+	Suburb                *string
+	State                 *string
+	Postcode              *string
+	Email                 *string
+	Phone                 *string
+	BirthDate             *time.Time
+	Gender                *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+}
+
+func toBackfillClient(c *models.Client) *backfillClient {
+	if c == nil {
+		return nil
+	}
+	return &backfillClient{
+		ID:                    c.ID,
+		TenantID:              c.TenantID,
+		Name:                  c.Name,
+		UnitNumber:            c.UnitNumber,
+		Address:               c.Address,
+		Suburb:                c.Suburb,
+		State:                 c.State,
+		Postcode:              c.Postcode,
+		Email:                 c.Email,
+		Phone:                 c.Phone,
+		BirthDate:             c.BirthDate,
+		Gender:                c.Gender,
+		EmergencyContactName:  c.EmergencyContactName,
+		EmergencyContactPhone: c.EmergencyContactPhone,
+	}
 }
