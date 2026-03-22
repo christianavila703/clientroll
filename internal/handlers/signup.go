@@ -29,6 +29,7 @@ import (
 	"github.com/stripe/stripe-go/v82"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/customer"
+	"github.com/stripe/stripe-go/v82/paymentmethod"
 )
 
 // SignupHandler handles the public membership signup flow.
@@ -1372,6 +1373,40 @@ func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID 
 	return providers
 }
 
+// attachStripePaymentMethodToCustomer ensures pmID belongs to stripeCustomerID (attach if detached).
+// Required before setting invoice_settings.default_payment_method and for Checkout with saved cards.
+func attachStripePaymentMethodToCustomer(stripeCustomerID, pmID string) error {
+	stripeCustomerID = strings.TrimSpace(stripeCustomerID)
+	pmID = strings.TrimSpace(pmID)
+	if stripeCustomerID == "" || pmID == "" {
+		return nil
+	}
+	pm, err := paymentmethod.Get(pmID, nil)
+	if err != nil {
+		return fmt.Errorf("get payment method: %w", err)
+	}
+	if pm == nil {
+		return errors.New("payment method not found")
+	}
+	existing := ""
+	if pm.Customer != nil {
+		existing = strings.TrimSpace(pm.Customer.ID)
+	}
+	if existing == stripeCustomerID {
+		return nil
+	}
+	if existing != "" {
+		return fmt.Errorf("payment method is attached to a different Stripe customer")
+	}
+	_, err = paymentmethod.Attach(pmID, &stripe.PaymentMethodAttachParams{
+		Customer: stripe.String(stripeCustomerID),
+	})
+	if err != nil {
+		return fmt.Errorf("attach payment method to customer: %w", err)
+	}
+	return nil
+}
+
 func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	if h.platformCfgRepo == nil || h.encryptor == nil {
 		return ""
@@ -1474,14 +1509,21 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	}
 	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
 		pmID := strings.TrimSpace(paymentMethodID)
-		_, _ = customer.Update(stripeCustomerID, &stripe.CustomerParams{
+		if err := attachStripePaymentMethodToCustomer(stripeCustomerID, pmID); err != nil {
+			return "", err
+		}
+		_, updErr := customer.Update(stripeCustomerID, &stripe.CustomerParams{
 			InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
 				DefaultPaymentMethod: stripe.String(pmID),
 			},
 		})
+		if updErr != nil {
+			return "", fmt.Errorf("set default payment method: %w", updErr)
+		}
 		params.Metadata["requested_payment_method_id"] = pmID
 	}
-	if client.Email != nil && *client.Email != "" {
+	// Stripe rejects Checkout when both customer and customer_email are set.
+	if params.Customer == nil && client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
 	}
 
@@ -1691,11 +1733,17 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	}
 	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
 		pmID := strings.TrimSpace(paymentMethodID)
-		_, _ = customer.Update(stripeCustomerID, &stripe.CustomerParams{
+		if err := attachStripePaymentMethodToCustomer(stripeCustomerID, pmID); err != nil {
+			return "", err
+		}
+		_, updErr := customer.Update(stripeCustomerID, &stripe.CustomerParams{
 			InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
 				DefaultPaymentMethod: stripe.String(pmID),
 			},
 		})
+		if updErr != nil {
+			return "", fmt.Errorf("set default payment method: %w", updErr)
+		}
 		params.Metadata["requested_payment_method_id"] = pmID
 	}
 	if !continueAfterTerm {
@@ -1704,7 +1752,8 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	} else {
 		params.Metadata["continue_after_term"] = "true"
 	}
-	if client.Email != nil && *client.Email != "" {
+	// Stripe rejects Checkout when both customer and customer_email are set.
+	if params.Customer == nil && client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
 	}
 
