@@ -874,7 +874,11 @@ function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinu
                       const res = await fetch(`/api/tenant/memberships/${m.membership_id}/agreement.pdf`, {
                         headers: { Authorization: `Bearer ${token}` },
                       });
-                      if (!res.ok) { alert("No signed agreement was found for this membership."); return; }
+                      if (!res.ok) {
+                        const body = await res.json().catch(() => null);
+                        alert(body?.error || "No signed agreement was found for this membership.");
+                        return;
+                      }
                       const blob = await res.blob();
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");

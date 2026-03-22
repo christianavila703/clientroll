@@ -121,6 +121,7 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "Organisation not found")
 		return
 	}
+	_ = EnsureSignupTenantDBContext(r.Context(), h.clientRepo.DB(), tenant.ID)
 
 	types, err := h.mtRepo.List(r.Context(), tenant.ID)
 	if err != nil {
@@ -174,6 +175,7 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "Organisation not found")
 		return
 	}
+	_ = EnsureSignupTenantDBContext(r.Context(), h.clientRepo.DB(), tenant.ID)
 
 	mt, err := h.mtRepo.FindBySlug(r.Context(), membershipSlug, tenant.ID)
 	if err != nil || mt == nil || !mt.IsActive {
@@ -271,6 +273,7 @@ func (h *SignupHandler) VerifyCheckoutSessionReturn(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusNotFound, "Organisation not found")
 		return
 	}
+	_ = EnsureSignupTenantDBContext(r.Context(), h.clientRepo.DB(), tenant.ID)
 	if h.credRepo == nil || h.encryptor == nil {
 		writeError(w, http.StatusServiceUnavailable, "Payment verification unavailable")
 		return
@@ -337,6 +340,12 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	tenant, err := h.tenantRepo.FindBySlug(r.Context(), tenantSlug)
 	if err != nil || tenant == nil || !tenant.IsActive {
 		writeError(w, http.StatusNotFound, "Organisation not found")
+		return
+	}
+	// RLS: pool connections need per-request tenant so reads (e.g. membership_types) succeed for agreement snapshots.
+	if err := EnsureSignupTenantDBContext(r.Context(), h.clientRepo.DB(), tenant.ID); err != nil {
+		log.Printf("signup EnsureSignupTenantDBContext failed tenant=%s err=%v", tenant.ID, err)
+		writeError(w, http.StatusInternalServerError, "Server error")
 		return
 	}
 
@@ -690,7 +699,11 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID)
+		var signupInviteID *uuid.UUID
+		if invite != nil {
+			signupInviteID = &invite.ID
+		}
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, "Card payment setup failed")
@@ -698,7 +711,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		// Capture the signed legal agreement at submission time (before redirect to checkout).
 		h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
-		markInviteCompleted()
+		// Invite is marked completed from Stripe webhooks once checkout payment succeeds (see signup_invite_id metadata).
 		mt := mtForCreate
 		thankyou := buildThankyouResponse(tenant, mt)
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -755,15 +768,29 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadGateway, "Direct debit subscription setup failed")
 				return
 			}
+			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
+			markInviteCompleted()
+			mt := mtForCreate
+			thankyou := buildThankyouResponse(tenant, mt)
+			writeJSON(w, http.StatusCreated, map[string]interface{}{
+				"membership": membership,
+				"client":     client,
+				"thankyou":   thankyou,
+			})
+			return
 		} else {
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID)
+			var signupInviteID *uuid.UUID
+			if invite != nil {
+				signupInviteID = &invite.ID
+			}
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
 			if err != nil {
 				log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, err.Error())
 				return
 			}
 			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
-			markInviteCompleted()
+			// Invite completed via Stripe webhook when DD/collection succeeds (signup_invite_id on session/subscription).
 			mt := mtForCreate
 			thankyou := buildThankyouResponse(tenant, mt)
 			writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -1198,6 +1225,11 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "Tenant not found")
 		return
 	}
+	if err := EnsureSignupTenantDBContext(r.Context(), h.clientRepo.DB(), tenant.ID); err != nil {
+		log.Printf("GetInviteDetail EnsureSignupTenantDBContext failed tenant=%s err=%v", tenant.ID, err)
+		writeError(w, http.StatusInternalServerError, "Server error")
+		return
+	}
 	invite, err := h.inviteRepo.FindByToken(r.Context(), token)
 	if err != nil || invite == nil || invite.TenantID != tenant.ID {
 		writeError(w, http.StatusNotFound, "Invite not found")
@@ -1604,16 +1636,16 @@ func (h *SignupHandler) signupStripeCardSubscriptionWithSavedPM(
 		cc = "AUD"
 	}
 	subMeta := map[string]string{
-		"tenant_id":               tenant.ID.String(),
-		"tenant_slug":             tenant.Slug,
-		"client_id":               client.ID.String(),
-		"membership_id":           membership.ID.String(),
-		"payment_amount":          strconv.FormatFloat(totalAmount, 'f', 2, 64),
-		"base_amount":             strconv.FormatFloat(baseAmount, 'f', 2, 64),
-		"tax_amount":              strconv.FormatFloat(taxAmount, 'f', 2, 64),
-		"processing_fee_amount":   strconv.FormatFloat(float64(feeCents)/100, 'f', 2, 64),
-		"currency_code":           cc,
-		"payment_freq":            frequency,
+		"tenant_id":             tenant.ID.String(),
+		"tenant_slug":           tenant.Slug,
+		"client_id":             client.ID.String(),
+		"membership_id":         membership.ID.String(),
+		"payment_amount":        strconv.FormatFloat(totalAmount, 'f', 2, 64),
+		"base_amount":           strconv.FormatFloat(baseAmount, 'f', 2, 64),
+		"tax_amount":            strconv.FormatFloat(taxAmount, 'f', 2, 64),
+		"processing_fee_amount": strconv.FormatFloat(float64(feeCents)/100, 'f', 2, 64),
+		"currency_code":         cc,
+		"payment_freq":          frequency,
 	}
 	if !continueAfterTerm {
 		subMeta["continue_after_term"] = "false"
@@ -1771,7 +1803,7 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string) (string, error) {
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string, signupInviteID *uuid.UUID) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -1814,6 +1846,9 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 			"currency_code":  currencyCode,
 			"payment_freq":   frequency,
 		},
+	}
+	if signupInviteID != nil {
+		params.Metadata["signup_invite_id"] = signupInviteID.String()
 	}
 	if !continueAfterTerm {
 		params.Metadata["continue_after_term"] = "false"
@@ -1943,19 +1978,23 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		}
 		lineItem.PriceData.Recurring = recurring
 		feeItem.PriceData.Recurring = recurring
+		subMeta := map[string]string{
+			"tenant_id":             tenant.ID.String(),
+			"tenant_slug":           tenant.Slug,
+			"client_id":             client.ID.String(),
+			"membership_id":         membership.ID.String(),
+			"payment_amount":        params.Metadata["payment_amount"],
+			"base_amount":           params.Metadata["base_amount"],
+			"tax_amount":            params.Metadata["tax_amount"],
+			"processing_fee_amount": params.Metadata["processing_fee_amount"],
+			"currency_code":         currencyCode,
+			"payment_freq":          frequency,
+		}
+		if signupInviteID != nil {
+			subMeta["signup_invite_id"] = signupInviteID.String()
+		}
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
-			Metadata: map[string]string{
-				"tenant_id":             tenant.ID.String(),
-				"tenant_slug":           tenant.Slug,
-				"client_id":             client.ID.String(),
-				"membership_id":         membership.ID.String(),
-				"payment_amount":        params.Metadata["payment_amount"],
-				"base_amount":           params.Metadata["base_amount"],
-				"tax_amount":            params.Metadata["tax_amount"],
-				"processing_fee_amount": params.Metadata["processing_fee_amount"],
-				"currency_code":         currencyCode,
-				"payment_freq":          frequency,
-			},
+			Metadata: subMeta,
 		}
 		// Option A behavior:
 		// - Future start date: defer first recurring invoice to configured start date.
@@ -1991,7 +2030,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 
 // createStripeBECSCheckoutSession creates a Stripe Checkout session for Stripe direct debit.
 // The direct debit rail is selected by client country (AU -> BECS, US -> ACH).
-func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string) (string, error) {
+func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string, signupInviteID *uuid.UUID) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
 	}
@@ -2050,6 +2089,9 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 				"us_bank_account": "US Bank Account (ACH Direct Debit)",
 			}[directDebitType],
 		},
+	}
+	if signupInviteID != nil {
+		params.Metadata["signup_invite_id"] = signupInviteID.String()
 	}
 	stripeCustomerID := ""
 	if client.StripeCustomerID != nil {
@@ -2170,22 +2212,26 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 		}
 		lineItem.PriceData.Recurring = recurring
 		feeItem.PriceData.Recurring = recurring
+		becsSubMeta := map[string]string{
+			"tenant_id":             tenant.ID.String(),
+			"tenant_slug":           tenant.Slug,
+			"client_id":             client.ID.String(),
+			"membership_id":         membership.ID.String(),
+			"payment_method":        "direct_debit",
+			"payment_amount":        params.Metadata["payment_amount"],
+			"base_amount":           params.Metadata["base_amount"],
+			"tax_amount":            params.Metadata["tax_amount"],
+			"processing_fee_amount": params.Metadata["processing_fee_amount"],
+			"currency_code":         strings.ToUpper(strings.TrimSpace(currencyCode)),
+			"payment_freq":          frequency,
+			"payment_method_type":   params.Metadata["payment_method_type"],
+			"payment_method_label":  params.Metadata["payment_method_label"],
+		}
+		if signupInviteID != nil {
+			becsSubMeta["signup_invite_id"] = signupInviteID.String()
+		}
 		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
-			Metadata: map[string]string{
-				"tenant_id":             tenant.ID.String(),
-				"tenant_slug":           tenant.Slug,
-				"client_id":             client.ID.String(),
-				"membership_id":         membership.ID.String(),
-				"payment_method":        "direct_debit",
-				"payment_amount":        params.Metadata["payment_amount"],
-				"base_amount":           params.Metadata["base_amount"],
-				"tax_amount":            params.Metadata["tax_amount"],
-				"processing_fee_amount": params.Metadata["processing_fee_amount"],
-				"currency_code":         strings.ToUpper(strings.TrimSpace(currencyCode)),
-				"payment_freq":          frequency,
-				"payment_method_type":   params.Metadata["payment_method_type"],
-				"payment_method_label":  params.Metadata["payment_method_label"],
-			},
+			Metadata: becsSubMeta,
 		}
 		// Option A behavior:
 		// - Future start date: defer first recurring invoice to configured start date.
@@ -2328,10 +2374,12 @@ func nextRecurringAnchorUTC(startAt time.Time, interval string, count int64, now
 
 func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, input SignupSubmission, mtID, toID uuid.UUID) string {
 	if h.agreementRepo == nil {
+		log.Printf("createAgreementSnapshot: agreementRepo nil membership=%s tenant=%s", membership.ID, tenant.ID)
 		return ""
 	}
 	mt, _ := h.mtRepo.FindByID(r.Context(), mtID, tenant.ID)
 	if mt == nil {
+		log.Printf("createAgreementSnapshot: membership type not visible or missing tenant=%s mt_id=%s membership=%s (check DB RLS / tenant context)", tenant.ID, mtID, membership.ID)
 		return ""
 	}
 	agreementSettings, _ := h.settingsRepo.GetAgreementSettings(r.Context(), tenant.ID)

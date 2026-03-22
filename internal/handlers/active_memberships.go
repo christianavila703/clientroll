@@ -12,6 +12,7 @@ import (
 	"clientroll/internal/database"
 	"clientroll/internal/events"
 	"clientroll/internal/middleware"
+	"clientroll/internal/models"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
@@ -24,19 +25,38 @@ import (
 
 // ActiveMembershipsHandler serves the active memberships view.
 type ActiveMembershipsHandler struct {
-	db          *database.Postgres
-	memberRepo  *repository.MembershipRepo
-	mtRepo      *repository.MembershipTypeRepo
-	clientRepo  *repository.ClientRepo
-	paymentRepo *repository.PaymentRepo
-	credRepo    *repository.TenantCredentialRepo
-	encryptor   *database.Encryptor
-	dispatcher  *events.Dispatcher
+	db            *database.Postgres
+	tenantRepo    *repository.TenantRepo
+	memberRepo    *repository.MembershipRepo
+	mtRepo        *repository.MembershipTypeRepo
+	clientRepo    *repository.ClientRepo
+	paymentRepo   *repository.PaymentRepo
+	credRepo      *repository.TenantCredentialRepo
+	encryptor     *database.Encryptor
+	agreementRepo *repository.AgreementSnapshotRepo
+	settingsRepo  *repository.SettingsRepo
+	termsRepo     *repository.TermsRepo
+	dispatcher    *events.Dispatcher
 }
 
 // NewActiveMembershipsHandler creates a new handler.
-func NewActiveMembershipsHandler(db *database.Postgres, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, cr *repository.ClientRepo, pr *repository.PaymentRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ActiveMembershipsHandler {
-	return &ActiveMembershipsHandler{db: db, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, paymentRepo: pr, credRepo: credR, encryptor: enc}
+func NewActiveMembershipsHandler(
+	db *database.Postgres,
+	tenantR *repository.TenantRepo,
+	mr *repository.MembershipRepo,
+	mtRepo *repository.MembershipTypeRepo,
+	cr *repository.ClientRepo,
+	pr *repository.PaymentRepo,
+	credR *repository.TenantCredentialRepo,
+	enc *database.Encryptor,
+	agreementRepo *repository.AgreementSnapshotRepo,
+	settingsRepo *repository.SettingsRepo,
+	termsRepo *repository.TermsRepo,
+) *ActiveMembershipsHandler {
+	return &ActiveMembershipsHandler{
+		db: db, tenantRepo: tenantR, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, paymentRepo: pr, credRepo: credR, encryptor: enc,
+		agreementRepo: agreementRepo, settingsRepo: settingsRepo, termsRepo: termsRepo,
+	}
 }
 
 // SetDispatcher sets optional outbound webhook event dispatcher.
@@ -318,6 +338,7 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 			if err := h.memberRepo.SetGoCardlessMandateID(r.Context(), m.ID, tenantID, input.GoCardlessMandateID); err != nil {
 				log.Printf("membership.create explicit mandate set failed tenant=%s membership=%s mandate=%s err=%v", tenantID, m.ID, input.GoCardlessMandateID, err)
 			}
+			h.saveStaffAgreementSnapshot(r, tenantID, clientID, m, mt, term)
 			writeJSON(w, http.StatusCreated, m)
 			return
 		}
@@ -349,7 +370,31 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		}
 	}
 
+	h.saveStaffAgreementSnapshot(r, tenantID, clientID, m, mt, term)
 	writeJSON(w, http.StatusCreated, m)
+}
+
+func (h *ActiveMembershipsHandler) saveStaffAgreementSnapshot(
+	r *http.Request,
+	tenantID, clientID uuid.UUID,
+	m *models.Membership,
+	mt *models.MembershipType,
+	term *models.TermOption,
+) {
+	if h.agreementRepo == nil || h.tenantRepo == nil {
+		return
+	}
+	tenant, err := h.tenantRepo.FindByID(r.Context(), tenantID)
+	if err != nil || tenant == nil {
+		log.Printf("saveStaffAgreementSnapshot: tenant load failed tenant=%s err=%v", tenantID, err)
+		return
+	}
+	client, err := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+	if err != nil || client == nil {
+		log.Printf("saveStaffAgreementSnapshot: client load failed client=%s err=%v", clientID, err)
+		return
+	}
+	SaveAgreementSnapshotIfMissing(r.Context(), r, tenant, client, m, mt, term, h.agreementRepo, h.settingsRepo, h.termsRepo)
 }
 
 func (h *ActiveMembershipsHandler) findReusableMandateForClient(ctx context.Context, tenantID, clientID uuid.UUID) string {

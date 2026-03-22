@@ -48,6 +48,7 @@ The script will:
 
 ### Environment on the server
 
+- **Agreement PDF downloads** (`/api/tenant/memberships/{id}/agreement.pdf`) use headless **Chromium** via `chromedp`. Install a Chromium/Chrome build on the server and ensure `google-chrome`, `chromium`, or `chromium-browser` is on `PATH`, or PDF generation returns 500. Signed agreement **HTML** is always stored in `membership_agreement_snapshots`; PDFs are rendered on demand.
 - **`.env`** in the repo root must define at least `DATABASE_URL`. Other vars (e.g. `APP_URL`, `GOCARDLESS_WEBHOOK_SECRET`) go here too.
 - **Frontend deps**: after `package.json` or `package-lock.json` changes, run `cd frontend && npm ci` on the server once so the next `npm run build` uses the right deps.
 - **Systemd**: if your service name is not `clientroll`, set `DEPLOY_SERVICE` before running the script:

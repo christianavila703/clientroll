@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"clientroll/internal/middleware"
@@ -51,14 +52,21 @@ func (h *AgreementHandler) DownloadAgreementPDF(w http.ResponseWriter, r *http.R
 	}
 
 	snap, err := h.agreementRepo.FindByMembership(r.Context(), membershipID, tenantID)
-	if err != nil || snap.AgreementHTML == nil || *snap.AgreementHTML == "" {
-		writeError(w, http.StatusNotFound, "No agreement document found")
+	if err != nil {
+		log.Printf("agreement.pdf: snapshot not found membership=%s tenant=%s err=%v", membershipID, tenantID, err)
+		writeError(w, http.StatusNotFound, "No agreement document found for this membership. The agreement may not have been captured during signup.")
+		return
+	}
+	if snap.AgreementHTML == nil || *snap.AgreementHTML == "" {
+		log.Printf("agreement.pdf: snapshot exists but agreement_html empty membership=%s tenant=%s snapshot=%s", membershipID, tenantID, snap.ID)
+		writeError(w, http.StatusNotFound, "Agreement snapshot exists but the HTML content is empty. Please contact support.")
 		return
 	}
 
 	pdfBytes, err := pdfpkg.HTMLToPDF(*snap.AgreementHTML)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to generate PDF")
+		log.Printf("agreement.pdf: chromedp PDF generation failed membership=%s tenant=%s err=%v", membershipID, tenantID, err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate PDF. This usually means headless Chromium is not installed on the server.")
 		return
 	}
 

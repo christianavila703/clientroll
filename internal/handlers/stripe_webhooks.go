@@ -36,6 +36,7 @@ type StripeWebhookHandler struct {
 	disputeRepo *repository.PaymentDisputeRepo
 	memberRepo  *repository.MembershipRepo
 	serviceRepo *repository.ServiceRepo
+	inviteRepo  *repository.MembershipSetupInviteRepo
 	dispatcher  *events.Dispatcher
 }
 
@@ -50,6 +51,7 @@ func NewStripeWebhookHandler(
 	disputeRepo *repository.PaymentDisputeRepo,
 	memberRepo *repository.MembershipRepo,
 	serviceRepo *repository.ServiceRepo,
+	inviteRepo *repository.MembershipSetupInviteRepo,
 ) *StripeWebhookHandler {
 	return &StripeWebhookHandler{
 		db:          db,
@@ -61,6 +63,7 @@ func NewStripeWebhookHandler(
 		disputeRepo: disputeRepo,
 		memberRepo:  memberRepo,
 		serviceRepo: serviceRepo,
+		inviteRepo:  inviteRepo,
 	}
 }
 
@@ -215,6 +218,25 @@ func checkoutSessionSubscriptionRawIsTrialing(raw []byte) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(subObj.Status), string(stripe.SubscriptionStatusTrialing))
+}
+
+// markSignupInviteCompletedFromMetadata sets completed_at on a membership setup invite when Stripe
+// checkout or invoice metadata includes signup_invite_id (idempotent).
+func (h *StripeWebhookHandler) markSignupInviteCompletedFromMetadata(ctx context.Context, metadata map[string]string) {
+	if h.inviteRepo == nil || len(metadata) == 0 {
+		return
+	}
+	raw := strings.TrimSpace(metadata["signup_invite_id"])
+	if raw == "" {
+		return
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return
+	}
+	if err := h.inviteRepo.MarkCompleted(ctx, id); err != nil {
+		log.Printf("stripe signup_invite mark completed invite=%s err=%v", id, err)
+	}
 }
 
 func invoiceSubscriptionIDFromPayload(inv *stripe.Invoice, raw []byte) string {
@@ -563,6 +585,8 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 				if shouldSyncMembershipAfterSubscriptionCheckout(&sess, event.Data.Raw) {
 					if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, mid, "succeeded", now); err != nil {
 						log.Printf("stripe checkout.subscription membership sync tenant=%s membership=%s err=%v", tenantID, mid, err)
+					} else {
+						h.markSignupInviteCompletedFromMetadata(ctx, metadata)
 					}
 				}
 			}
@@ -594,6 +618,8 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	}
 	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
 		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+	} else {
+		h.markSignupInviteCompletedFromMetadata(ctx, metadata)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
@@ -887,6 +913,8 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 		}
 		if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
 			log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+		} else {
+			h.markSignupInviteCompletedFromMetadata(ctx, metadata)
 		}
 		if h.dispatcher != nil {
 			h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{
