@@ -619,6 +619,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
     return 0;
   };
   const selectedFee = computeFee(selectedAmount);
+  const feeKnown = selectedFee > 0;
   const selectedTotal = selectedAmount + selectedFee;
 
   useEffect(() => {
@@ -705,7 +706,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
                 <span className="text-gray-600">Membership amount</span>
                 <span className="font-medium text-gray-900 tabular-nums">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
-              {selectedFee > 0 ? (
+              {feeKnown ? (
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-600">Processing fee</span>
                   <span className="font-medium text-gray-900 tabular-nums">{currencyCode} ${selectedFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -713,12 +714,16 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
               ) : (
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-600">Processing fee</span>
-                  <span className="font-medium text-gray-900">No processing fee</span>
+                  <span className="font-medium text-gray-900">+ payment processing fees</span>
                 </div>
               )}
               <div className="flex justify-between gap-3 border-t border-gray-200 pt-1.5">
                 <span className="text-gray-700 font-semibold">Total charged</span>
-                <span className="font-semibold text-gray-900 tabular-nums">{currencyCode} ${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                {feeKnown ? (
+                  <span className="font-semibold text-gray-900 tabular-nums">{currencyCode} ${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                ) : (
+                  <span className="font-semibold text-gray-900">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + processing fees</span>
+                )}
               </div>
             </div>
           </div>
