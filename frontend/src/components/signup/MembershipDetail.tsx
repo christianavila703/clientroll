@@ -104,13 +104,6 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
 
   return (
     <div>
-      <button onClick={onBack} className="mb-6 text-[13px] font-medium flex items-center gap-1.5 group" style={{ color: "var(--brandPrimary)" }}>
-        <svg className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to memberships
-      </button>
-
       {/* Hero image - full width, prominent */}
       {membership.top_image_url && (
         <div className="mb-8 rounded-2xl overflow-hidden shadow-md">
