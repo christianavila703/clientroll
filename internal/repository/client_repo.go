@@ -27,7 +27,7 @@ func (r *ClientRepo) DB() *database.Postgres {
 }
 
 const clientFields = `id, tenant_id, name, unit_number, address, suburb, state, postcode,
-	email, phone, birth_date, gender, emergency_contact_name,
+	country, email, phone, birth_date, gender, emergency_contact_name,
 	emergency_contact_phone, tax_number, company_number, company_phone, company_website,
 	company_address, company_city, company_state_region, company_postcode, company_country,
 	gocardless_customer_id, stripe_customer_id, deleted_at, created_at, updated_at`
@@ -94,16 +94,16 @@ func (r *ClientRepo) FindByEmail(ctx context.Context, tenantID uuid.UUID, email 
 // Create inserts a new client.
 func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `
-		INSERT INTO clients (tenant_id, name, unit_number, address, suburb, state, postcode,
+		INSERT INTO clients (tenant_id, name, unit_number, address, suburb, state, postcode, country,
 		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone,
 			tax_number, company_number, company_phone, company_website, company_address, company_city,
 			company_state_region, company_postcode, company_country)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 		RETURNING ` + clientFields
 
 	var out models.Client
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
-		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
+		c.State, c.Postcode, c.Country, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyNumber, c.CompanyPhone,
 		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
@@ -116,16 +116,16 @@ func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.C
 func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `
 		UPDATE clients SET name=$3, unit_number=$4, address=$5, suburb=$6, state=$7, postcode=$8,
-		    email=$9, phone=$10, birth_date=$11, gender=$12,
-		    emergency_contact_name=$13, emergency_contact_phone=$14, tax_number=$15, company_number=$16,
-			company_phone=$17, company_website=$18, company_address=$19, company_city=$20,
-			company_state_region=$21, company_postcode=$22, company_country=$23, updated_at=NOW()
+		    country=$9, email=$10, phone=$11, birth_date=$12, gender=$13,
+		    emergency_contact_name=$14, emergency_contact_phone=$15, tax_number=$16, company_number=$17,
+			company_phone=$18, company_website=$19, company_address=$20, company_city=$21,
+			company_state_region=$22, company_postcode=$23, company_country=$24, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		RETURNING ` + clientFields
 
 	var out models.Client
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
-		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
+		c.State, c.Postcode, c.Country, c.Email, c.Phone, c.BirthDate, c.Gender,
 		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyNumber, c.CompanyPhone,
 		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
@@ -239,7 +239,7 @@ func (r *ClientRepo) SoftDeleteMany(ctx context.Context, tenantID uuid.UUID, cli
 func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
 		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State,
-		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
+		&c.Postcode, &c.Country, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
 		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.TaxNumber, &c.CompanyNumber, &c.CompanyPhone,
 		&c.CompanyWebsite, &c.CompanyAddress, &c.CompanyCity, &c.CompanyStateRegion, &c.CompanyPostcode, &c.CompanyCountry,
 		&c.GoCardlessCustomerID, &c.StripeCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,

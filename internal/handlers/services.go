@@ -656,8 +656,17 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
+	directDebitType := ""
 	if input.PaymentMethod == "direct_debit" {
-		params.PaymentMethodTypes = stripe.StringSlice([]string{"au_becs_debit"})
+		directDebitType = stripeDirectDebitTypeForCountry(client.Country)
+		if directDebitType == "" {
+			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
+			writeError(w, http.StatusBadRequest, "Direct debit requires client country AU or US")
+			return
+		}
+	}
+	if input.PaymentMethod == "direct_debit" {
+		params.PaymentMethodTypes = stripe.StringSlice([]string{directDebitType})
 	}
 	if stripeCustomerID != "" {
 		params.Customer = stripe.String(stripeCustomerID)
@@ -684,8 +693,17 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		"checkout_mode":           string(sess.Mode),
 		"checkout_payment_status": strings.ToLower(string(sess.PaymentStatus)),
 		"currency":                strings.ToLower(string(sess.Currency)),
-		"payment_method_type":     map[string]string{"direct_debit": "au_becs_debit", "card": "card"}[input.PaymentMethod],
-		"payment_method_label":    map[string]string{"direct_debit": "Australia BECS Direct Debit", "card": "Card"}[input.PaymentMethod],
+		"payment_method_type": map[string]string{
+			"direct_debit": directDebitType,
+			"card":         "card",
+		}[input.PaymentMethod],
+		"payment_method_label": map[string]string{
+			"direct_debit": map[string]string{
+				"au_becs_debit":  "Australia BECS Direct Debit",
+				"us_bank_account": "US Bank Account (ACH Direct Debit)",
+			}[directDebitType],
+			"card": "Card",
+		}[input.PaymentMethod],
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -770,6 +788,13 @@ func (h *ServiceHandler) ListStripePaymentMethods(w http.ResponseWriter, r *http
 				} else {
 					label = "AU BECS direct debit"
 				}
+			case "us_bank_account":
+				last4 := pm.USBankAccount.Last4
+				if strings.TrimSpace(last4) != "" {
+					label = fmt.Sprintf("US bank account ending in %s", last4)
+				} else {
+					label = "US bank account (ACH)"
+				}
 			}
 			methods = append(methods, pmRow{
 				ID:        pm.ID,
@@ -781,6 +806,7 @@ func (h *ServiceHandler) ListStripePaymentMethods(w http.ResponseWriter, r *http
 	}
 	appendMethods("card")
 	appendMethods("au_becs_debit")
+	appendMethods("us_bank_account")
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"payment_methods": methods})
 }

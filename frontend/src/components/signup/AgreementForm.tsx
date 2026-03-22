@@ -73,15 +73,14 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
   const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
-  const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
-  const supportsDirectDebit = supportsGoCardless || supportsStripe;
+  const supportsDirectDebit = supportsStripe;
   const defaultMethod = supportsDirectDebit ? "direct_debit" : supportsStripe ? "card" : "direct_debit";
   const [formStep, setFormStep] = useState<FormStep>("member");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const [member, setMember] = useState({
-    name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "",
+    name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "", country: "",
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
     tax_number: "", company_number: "", company_phone: "", company_website: "",
@@ -107,7 +106,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       : (tenant.enabled_payment_frequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
   const effectiveFrequencySet = new Set((effectiveEnabledPaymentFrequencies || []).map((f) => String(f).toLowerCase()));
 
-  const usesBankStep = payment.payment_method === "direct_debit" && supportsGoCardless;
+  const usesBankStep = false;
   const hasTerms = terms.length > 0;
   const steps: { key: FormStep; label: string; icon: string }[] = [
     { key: "member", label: "Your Details", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
@@ -154,7 +153,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           member_signature: memberSignature,
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
-          ...(payment.payment_method === "direct_debit" && supportsGoCardless ? bank : {}),
+          ...(payment.payment_method === "direct_debit" && usesBankStep ? bank : {}),
         }),
       });
       const data = await res.json();
@@ -355,6 +354,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
       if (k === "suburb") next.company_city = v;
       if (k === "state") next.company_state_region = v;
       if (k === "postcode") next.company_postcode = v;
+      if (k === "country") next.company_country = v;
     }
     onChange(next);
   };
@@ -399,6 +399,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         <Field label="Suburb" required><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className={inputCls} placeholder="Melbourne" required /></Field>
         <Field label="State" required><input value={data.state} onChange={(e) => set("state", e.target.value)} className={inputCls} placeholder="VIC" required /></Field>
         <Field label="Postcode" required><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className={inputCls} placeholder="3000" required /></Field>
+        <Field label="Country" required><input value={data.country} onChange={(e) => set("country", e.target.value.toUpperCase())} className={inputCls} placeholder="AU or US" required maxLength={2} /></Field>
         <Field label="Email" required><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className={inputCls} placeholder="john@example.com" required /></Field>
         <Field label="Phone" required><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
         <Field label="Date of Birth" required><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} required /></Field>
@@ -455,6 +456,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
                       company_city: data.suburb,
                       company_state_region: data.state,
                       company_postcode: data.postcode,
+                      company_country: data.country,
                     });
                   }
                 }}
@@ -476,7 +478,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
       <NavButtons onNext={() => {
         const required: [string, string][] = [
           ["name", "Full Name"], ["address", "Street Address"], ["suburb", "Suburb"],
-          ["state", "State"], ["postcode", "Postcode"], ["email", "Email"],
+          ["state", "State"], ["postcode", "Postcode"], ["country", "Country"], ["email", "Email"],
           ["phone", "Phone"], ["birth_date", "Date of Birth"], ["gender", "Gender"],
         ];
         if (askEmergencyContact) {
@@ -511,7 +513,6 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
-  const supportsGoCardless = paymentProviders.includes("gocardless");
 
   const weeklyAmount = positiveNumber(termOption.fee_weekly) || fallbackWeeklyAmount(termOption);
   const fortnightlyAmount = positiveNumber(termOption.fee_fortnightly) || fallbackFortnightlyAmount(termOption);
@@ -546,7 +547,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
     if (data.payment_method === "card" && supportsStripe) {
       return estimateStripeProcessingFeeCents(Math.round(amount * 100), "card") / 100;
     }
-    if (data.payment_method === "direct_debit" && !supportsGoCardless && supportsStripe) {
+    if (data.payment_method === "direct_debit" && supportsStripe) {
       return estimateStripeProcessingFeeCents(Math.round(amount * 100), "direct_debit") / 100;
     }
     return 0;
@@ -572,7 +573,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         <div>
           <label className="block text-[13px] font-semibold text-gray-700 mb-3">Payment Method</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {(supportsGoCardless || supportsStripe) && (
+            {supportsStripe && (
               <label className={`flex items-center gap-3 rounded-xl border-2 px-5 py-4 cursor-pointer transition-all ${
                 data.payment_method === "direct_debit" ? "shadow-sm" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
               }`} style={data.payment_method === "direct_debit" ? { borderColor: "var(--brandPrimary)", backgroundColor: "color-mix(in srgb, var(--brandPrimary) 6%, white)" } : undefined}>
@@ -655,7 +656,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         )}
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel={data.payment_method === "direct_debit" && paymentProviders.includes("gocardless") ? "Bank Details" : "Continue"} />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Continue" />
     </div>
   );
 }

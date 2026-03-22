@@ -13,6 +13,7 @@ interface Client {
   suburb?: string;
   state?: string;
   postcode?: string;
+  country?: string;
   birth_date?: string;
   gender?: string;
   emergency_contact_name?: string;
@@ -38,6 +39,7 @@ const CLIENT_FIELDS = [
   { key: "suburb", label: "Suburb", required: true },
   { key: "state", label: "State", required: true },
   { key: "postcode", label: "Postcode", required: true },
+  { key: "country", label: "Country", required: true },
   { key: "birth_date", label: "Date of Birth", required: true },
   { key: "gender", label: "Gender", required: true },
   { key: "emergency_contact_name", label: "Emergency Contact Name", required: true },
@@ -372,7 +374,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     name: editing?.name || "", email: editing?.email || "", phone: editing?.phone || "",
     unit_number: editing?.unit_number || "",
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
-    postcode: editing?.postcode || "", birth_date: editing?.birth_date?.split("T")[0] || "", gender: editing?.gender || "",
+    postcode: editing?.postcode || "", country: editing?.country || "", birth_date: editing?.birth_date?.split("T")[0] || "", gender: editing?.gender || "",
     emergency_contact_name: editing?.emergency_contact_name || "", emergency_contact_phone: editing?.emergency_contact_phone || "",
     tax_number: editing?.tax_number || "", company_number: editing?.company_number || "",
     company_phone: editing?.company_phone || "", company_website: editing?.company_website || "",
@@ -415,7 +417,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.birth_date.trim() || !form.gender.trim();
+      const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.country.trim() || !form.birth_date.trim() || !form.gender.trim();
       const missingEmergency = askEmergencyContact && (!form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim());
       const missingCompany = askCompanyInformation && (
         !form.tax_number.trim() ||
@@ -442,6 +444,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         suburb: normalizeStringOrNull(form.suburb),
         state: normalizeStringOrNull(form.state),
         postcode: normalizeStringOrNull(form.postcode),
+        country: normalizeStringOrNull(form.country?.toUpperCase() || ""),
         gender: normalizeStringOrNull(form.gender),
         birth_date: toBirthDateISOStringOrNull(form.birth_date),
         emergency_contact_name: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_name) : null,
@@ -553,6 +556,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                             company_city: suburb || prev.suburb,
                             company_state_region: state || prev.state,
                             company_postcode: postcode || prev.postcode,
+                            company_country: prev.country,
                           }
                         : {}),
                     }))
@@ -584,6 +588,12 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 label="Postcode"
                 value={form.postcode}
                 onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
+                required
+              />
+              <LabeledInput
+                label="Country"
+                value={form.country}
+                onChange={(v) => setForm((prev) => ({ ...prev, country: v.toUpperCase() }))}
                 required
               />
             </div>
@@ -637,6 +647,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                             company_city: prev.suburb,
                             company_state_region: prev.state,
                             company_postcode: prev.postcode,
+                            company_country: prev.country,
                           }));
                         }
                       }}

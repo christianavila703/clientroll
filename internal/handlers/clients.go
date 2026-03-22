@@ -45,6 +45,31 @@ func (h *ClientHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
 }
 
+func normalizeClientCountryCode(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	code := strings.ToUpper(strings.TrimSpace(*v))
+	if len(code) != 2 {
+		return nil
+	}
+	return &code
+}
+
+func stripeDirectDebitTypeForCountry(country *string) string {
+	if country == nil {
+		return ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(*country)) {
+	case "AU":
+		return "au_becs_debit"
+	case "US":
+		return "us_bank_account"
+	default:
+		return ""
+	}
+}
+
 // RegisterRoutes registers client routes.
 func (h *ClientHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/clients", h.List)
@@ -86,6 +111,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Suburb                *string `json:"suburb"`
 		State                 *string `json:"state"`
 		Postcode              *string `json:"postcode"`
+		Country               *string `json:"country"`
 		Email                 *string `json:"email"`
 		Phone                 *string `json:"phone"`
 		BirthDate             *string `json:"birth_date"`
@@ -145,6 +171,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Suburb:                normalize(input.Suburb),
 		State:                 normalize(input.State),
 		Postcode:              normalize(input.Postcode),
+		Country:               normalizeClientCountryCode(normalize(input.Country)),
 		Email:                 normalize(input.Email),
 		Phone:                 normalize(input.Phone),
 		BirthDate:             birthDate,
@@ -167,6 +194,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		create.Suburb == nil ||
 		create.State == nil ||
 		create.Postcode == nil ||
+		create.Country == nil ||
 		create.Email == nil ||
 		create.Phone == nil ||
 		create.BirthDate == nil ||
@@ -223,6 +251,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Suburb                *string `json:"suburb"`
 		State                 *string `json:"state"`
 		Postcode              *string `json:"postcode"`
+		Country               *string `json:"country"`
 		Email                 *string `json:"email"`
 		Phone                 *string `json:"phone"`
 		BirthDate             *string `json:"birth_date"`
@@ -281,6 +310,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Suburb:                normalize(input.Suburb),
 		State:                 normalize(input.State),
 		Postcode:              normalize(input.Postcode),
+		Country:               normalizeClientCountryCode(normalize(input.Country)),
 		Email:                 normalize(input.Email),
 		Phone:                 normalize(input.Phone),
 		BirthDate:             birthDate,
@@ -623,12 +653,16 @@ func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.
 	}
 	successURL := origin + "/clients/" + clientID.String() + "?stripe_setup=success"
 	cancelURL := origin + "/clients/" + clientID.String() + "?stripe_setup=cancelled"
+	methodTypes := []string{"card"}
+	if ddType := stripeDirectDebitTypeForCountry(clientModel.Country); ddType != "" {
+		methodTypes = append(methodTypes, ddType)
+	}
 	params := &stripe.CheckoutSessionParams{
 		Mode:               stripe.String(string(stripe.CheckoutSessionModeSetup)),
 		Customer:           stripe.String(stripeCustomerID),
 		SuccessURL:         stripe.String(successURL),
 		CancelURL:          stripe.String(cancelURL),
-		PaymentMethodTypes: stripe.StringSlice([]string{"card", "au_becs_debit"}),
+		PaymentMethodTypes: stripe.StringSlice(methodTypes),
 		Metadata: map[string]string{
 			"type":      "client_payment_method_setup",
 			"tenant_id": tenantID.String(),

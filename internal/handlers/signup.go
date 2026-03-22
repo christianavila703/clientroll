@@ -280,6 +280,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.Suburb)
 	trimStringPtr(&input.Client.State)
 	trimStringPtr(&input.Client.Postcode)
+	trimStringPtr(&input.Client.Country)
 	trimStringPtr(&input.Client.Email)
 	trimStringPtr(&input.Client.Phone)
 	trimStringPtr(&input.Client.Gender)
@@ -294,6 +295,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.CompanyStateRegion)
 	trimStringPtr(&input.Client.CompanyPostcode)
 	trimStringPtr(&input.Client.CompanyCountry)
+	input.Client.Country = normalizeClientCountryCode(input.Client.Country)
 	{
 		var missing []string
 		if input.Client.Name == "" {
@@ -310,6 +312,9 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.Client.Postcode == nil {
 			missing = append(missing, "postcode")
+		}
+		if input.Client.Country == nil {
+			missing = append(missing, "country")
 		}
 		if input.Client.Email == nil {
 			missing = append(missing, "email")
@@ -515,136 +520,22 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// --- Direct debit path ---
 	gcMandateID := ""
 	if input.PaymentMethod == "direct_debit" {
-		// Try GoCardless first (if configured and active)
-		prov, provErr := h.getGoCardlessProvider(r.Context(), tenant.ID)
-		if provErr != nil {
-			prov = nil
-		}
-
-		if prov != nil {
-			// GoCardless path: collect bank details server-side
-			if strings.TrimSpace(input.BSB) == "" || strings.TrimSpace(input.AccountNumber) == "" {
-				writeError(w, http.StatusBadRequest, "BSB and account number are required for direct debit")
-				return
-			}
-
-			gcCustomerID := ""
-			if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
-				gcCustomerID = *client.GoCardlessCustomerID
-			} else {
-				clientEmail := ""
-				if client.Email != nil {
-					clientEmail = *client.Email
-				}
-				clientPhone := ""
-				if client.Phone != nil {
-					clientPhone = *client.Phone
-				}
-				cid, err := prov.CreateCustomer(r.Context(), payment.CreateCustomerInput{
-					Email:     clientEmail,
-					Name:      client.Name,
-					Phone:     clientPhone,
-					Reference: client.ID.String(),
-				})
-				if err != nil {
-					var gce *payment.GCError
-					if errors.As(err, &gce) {
-						log.Printf("GoCardless CreateCustomer during signup: %s (raw: %s)", gce.Message, gce.Raw)
-						writeError(w, http.StatusBadGateway, gce.Message)
-					} else {
-						log.Printf("GoCardless CreateCustomer during signup: %v", err)
-						writeError(w, http.StatusBadGateway, "Direct debit setup failed")
-					}
-					return
-				}
-				gcCustomerID = cid
-				_ = h.clientRepo.SetGoCardlessCustomerID(r.Context(), client.ID, tenant.ID, cid)
-			}
-
-			holderName := input.AccountHolderName
-			if holderName == "" {
-				holderName = client.Name
-			}
-			mandateID, err := prov.SetupDirectDebit(r.Context(), payment.SetupDirectDebitInput{
-				CustomerID:        gcCustomerID,
-				AccountHolderName: holderName,
-				AccountNumber:     input.AccountNumber,
-				BSB:               input.BSB,
-				Reference:         membership.ID.String(),
-			})
-			if err != nil {
-				log.Printf("GoCardless SetupDirectDebit during signup: %v", err)
-				writeError(w, http.StatusBadGateway, "Direct debit setup failed")
-				return
-			}
-			gcMandateID = mandateID
-			_ = h.memberRepo.SetGoCardlessMandateID(r.Context(), membership.ID, tenant.ID, mandateID)
-			log.Printf("GoCardless mandate %s created for membership %s (client %s)", mandateID, membership.ID, client.ID)
-
-			if h.bankDetailsRepo != nil {
-				last4 := input.AccountNumber
-				if len(last4) > 4 {
-					last4 = last4[len(last4)-4:]
-				}
-				_ = h.bankDetailsRepo.Create(r.Context(), tenant.ID, client.ID,
-					input.AccountHolderName, input.BSB, last4, input.InstitutionName, "")
-			}
-
-			mtForSub := mtForCreate
-			subName := "Membership"
-			if mtForSub != nil {
-				subName = mtForSub.Title
-			}
-			numPay := membership.NumPayments
-			continueAfterTerm := false
-			if to, _ := h.mtRepo.GetTermOption(r.Context(), toID, tenant.ID); to != nil {
-				if numPay == nil && to.NumPayments != nil {
-					numPay = to.NumPayments
-				}
-				continueAfterTerm = to.ContinueAfterTerm
-			}
-			if continueAfterTerm {
-				numPay = nil
-			}
-			if _, err := createGoCardlessSubscription(
-				r.Context(),
-				prov,
-				h.memberRepo,
-				mandateID,
-				membership,
-				tenant.ID,
-				input.PaymentFrequency,
-				input.PaymentAmount,
-				membership.PaymentIntervalUnit,
-				membership.PaymentIntervalCount,
-				subName,
-				membership.StartDate,
-				membership.MinTermEndDate,
-				numPay,
-				continueAfterTerm,
-			); err != nil {
-				writeError(w, http.StatusBadGateway, "Direct debit subscription setup failed")
-				return
-			}
-		} else {
-			// Stripe BECS Direct Debit path: redirect to Stripe Checkout with au_becs_debit
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
-			if err != nil {
-				log.Printf("Error creating Stripe BECS checkout session during signup: %v", err)
-				writeError(w, http.StatusBadGateway, "Direct debit setup failed")
-				return
-			}
-			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
-			mt := mtForCreate
-			thankyou := buildThankyouResponse(tenant, mt)
-			writeJSON(w, http.StatusCreated, map[string]interface{}{
-				"membership":   membership,
-				"client":       client,
-				"thankyou":     thankyou,
-				"checkout_url": checkoutURL,
-			})
+		checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate)
+		if err != nil {
+			log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
+			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
+		mt := mtForCreate
+		thankyou := buildThankyouResponse(tenant, mt)
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"membership":   membership,
+			"client":       client,
+			"thankyou":     thankyou,
+			"checkout_url": checkoutURL,
+		})
+		return
 	}
 
 	// Determine thank you page
@@ -1087,9 +978,8 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	return sess.URL, nil
 }
 
-// createStripeBECSCheckoutSession creates a Stripe Checkout session restricted to
-// au_becs_debit (Australian direct debit). Stripe's hosted page collects bank details
-// and the BECS mandate agreement from the customer.
+// createStripeBECSCheckoutSession creates a Stripe Checkout session for Stripe direct debit.
+// The direct debit rail is selected by client country (AU -> BECS, US -> ACH).
 func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
@@ -1123,13 +1013,17 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	if frequency != "upfront" {
 		mode = stripe.CheckoutSessionModeSubscription
 	}
+	directDebitType := stripeDirectDebitTypeForCountry(client.Country)
+	if directDebitType == "" {
+		return "", errors.New("Direct debit is only available when client country is AU or US. Set client country first")
+	}
 
 	params := &stripe.CheckoutSessionParams{
 		Mode:               stripe.String(string(mode)),
 		SuccessURL:         stripe.String(origin + "/join/" + tenant.Slug + "?stripe=success"),
 		CancelURL:          stripe.String(origin + "/join/" + tenant.Slug + "?stripe=cancelled"),
 		ClientReferenceID:  stripe.String(client.ID.String()),
-		PaymentMethodTypes: stripe.StringSlice([]string{"au_becs_debit"}),
+		PaymentMethodTypes: stripe.StringSlice([]string{directDebitType}),
 		Metadata: map[string]string{
 			"tenant_id":      tenant.ID.String(),
 			"tenant_slug":    tenant.Slug,
@@ -1139,6 +1033,11 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 			"currency_code":  strings.ToUpper(cur),
 			"payment_freq":   frequency,
 			"payment_method": "direct_debit",
+			"payment_method_type": directDebitType,
+			"payment_method_label": map[string]string{
+				"au_becs_debit":  "Australia BECS Direct Debit",
+				"us_bank_account": "US Bank Account (ACH Direct Debit)",
+			}[directDebitType],
 		},
 	}
 	if !continueAfterTerm {
@@ -1200,6 +1099,8 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 				"processing_fee_amount": params.Metadata["processing_fee_amount"],
 				"currency_code":         strings.ToUpper(strings.TrimSpace(currencyCode)),
 				"payment_freq":          frequency,
+				"payment_method_type":   params.Metadata["payment_method_type"],
+				"payment_method_label":  params.Metadata["payment_method_label"],
 			},
 		}
 		// When membership starts in the future, defer first invoice/charge until start date.

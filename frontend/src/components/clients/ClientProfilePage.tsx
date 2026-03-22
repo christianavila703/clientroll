@@ -12,7 +12,7 @@ import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../
 /* ─── Types ─── */
 interface Client {
   id: string; name: string; email?: string; phone?: string;
-  unit_number?: string; address?: string; suburb?: string; state?: string; postcode?: string;
+  unit_number?: string; address?: string; suburb?: string; state?: string; postcode?: string; country?: string;
   birth_date?: string; gender?: string;
   emergency_contact_name?: string; emergency_contact_phone?: string;
   tax_number?: string;
@@ -220,7 +220,7 @@ export default function ClientProfilePage() {
   ];
 
   const streetLine = [client.unit_number ? `Unit ${client.unit_number},` : null, client.address].filter(Boolean).join(" ");
-  const fullAddress = [streetLine, client.suburb, [client.state, client.postcode].filter(Boolean).join(" ")].filter(Boolean).join("\n");
+  const fullAddress = [streetLine, client.suburb, [client.state, client.postcode].filter(Boolean).join(" "), client.country].filter(Boolean).join("\n");
 
   return (
     <div>
@@ -1423,7 +1423,7 @@ function EditClientModal({
   const [form, setForm] = useState({
     name: client.name, email: client.email || "", phone: client.phone || "",
     unit_number: client.unit_number || "", address: client.address || "", suburb: client.suburb || "", state: client.state || "",
-    postcode: client.postcode || "", birth_date: client.birth_date?.split("T")[0] || "", gender: client.gender || "",
+    postcode: client.postcode || "", country: client.country || "", birth_date: client.birth_date?.split("T")[0] || "", gender: client.gender || "",
     emergency_contact_name: client.emergency_contact_name || "",
     emergency_contact_phone: client.emergency_contact_phone || "",
     tax_number: client.tax_number || "", company_number: client.company_number || "",
@@ -1461,6 +1461,7 @@ function EditClientModal({
         suburb: form.suburb,
         state: form.state,
         postcode: form.postcode,
+        country: form.country ? form.country.toUpperCase() : null,
         emergency_contact_name: askEmergencyContact ? form.emergency_contact_name : null,
         emergency_contact_phone: askEmergencyContact ? form.emergency_contact_phone : null,
         tax_number: askCompanyInformation ? form.tax_number : null,
@@ -1608,6 +1609,17 @@ function EditClientModal({
                         }))
                       }
                     />
+                    <LabeledInput
+                      label="Country"
+                      value={form.country}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          country: v.toUpperCase(),
+                          ...(companyAddressSameAsClient ? { company_country: v.toUpperCase() } : {}),
+                        }))
+                      }
+                    />
                   </div>
                 </div>
                 {askEmergencyContact && (
@@ -1658,6 +1670,7 @@ function EditClientModal({
                               company_city: prev.suburb,
                               company_state_region: prev.state,
                               company_postcode: prev.postcode,
+                              company_country: prev.country,
                             }));
                           }
                         }}

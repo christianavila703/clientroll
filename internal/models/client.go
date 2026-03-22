@@ -16,6 +16,7 @@ type Client struct {
 	Suburb                *string    `json:"suburb"`
 	State                 *string    `json:"state"`
 	Postcode              *string    `json:"postcode"`
+	Country               *string    `json:"country"`
 	Email                 *string    `json:"email"`
 	Phone                 *string    `json:"phone"`
 	BirthDate             *time.Time `json:"birth_date"`
