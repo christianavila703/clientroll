@@ -324,32 +324,6 @@ function TenantSettings() {
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("success") ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-600"}`}>{message}</div>
       )}
 
-      {/* Client signup fields */}
-      <div className="card">
-        <div className="card-header"><h3>Client Signup Fields</h3></div>
-        <div className="card-body space-y-2">
-          <p className="text-[11px] text-gray-500">Control which sections are requested on signup and client create/edit.</p>
-          <label className="inline-flex items-center gap-2 text-[13px] text-gray-700">
-            <input
-              type="checkbox"
-              checked={!!data.ask_emergency_contact}
-              onChange={(e) => setData({ ...data, ask_emergency_contact: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
-            />
-            Ask for emergency contact
-          </label>
-          <label className="inline-flex items-center gap-2 text-[13px] text-gray-700">
-            <input
-              type="checkbox"
-              checked={!!data.ask_company_information}
-              onChange={(e) => setData({ ...data, ask_company_information: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
-            />
-            Ask for company information (B2B mode)
-          </label>
-        </div>
-      </div>
-
       {/* Sales tax */}
       <div className="card">
         <div className="card-header"><h3>Sales Tax</h3></div>
@@ -488,6 +462,36 @@ function TenantSettings() {
                   {item.label}
                 </label>
               ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Client signup fields</label>
+            <p className="text-[11px] text-gray-400 mb-1.5">Control which sections are requested on signup and client create/edit.</p>
+            <div className="space-y-2">
+              <label className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 cursor-pointer">
+                <span>
+                  <span className="block text-[13px] font-medium text-gray-800">Emergency contact</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5">Show and require emergency contact fields.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!!data.ask_emergency_contact}
+                  onChange={(e) => setData({ ...data, ask_emergency_contact: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600"
+                />
+              </label>
+              <label className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 cursor-pointer">
+                <span>
+                  <span className="block text-[13px] font-medium text-gray-800">Company information</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5">Show and require company fields for B2B signups.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!!data.ask_company_information}
+                  onChange={(e) => setData({ ...data, ask_company_information: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600"
+                />
+              </label>
             </div>
           </div>
           <div>
