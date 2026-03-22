@@ -37,7 +37,8 @@ export default function SignupPage() {
 
   useEffect(() => {
     loadData();
-  }, [tenantSlug, membershipSlug]);
+    // inviteToken must be included: invite finalise URL has no membershipSlug; reloading when token changes matters.
+  }, [tenantSlug, membershipSlug, inviteToken, location.search]);
 
   const loadData = async () => {
     try {

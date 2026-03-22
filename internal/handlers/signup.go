@@ -88,9 +88,10 @@ func (h *SignupHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 // RegisterPublicRoutes registers public signup routes (no auth required).
 func (h *SignupHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Get("/signup/{tenantSlug}", h.GetTenantMemberships)
-	r.Get("/signup/{tenantSlug}/{membershipSlug}", h.GetMembershipDetail)
+	// More specific paths before /{membershipSlug} (chi resolves correctly either way; explicit order for readers).
 	r.Get("/signup/{tenantSlug}/invite/{inviteToken}", h.GetInviteDetail)
 	r.Get("/signup/{tenantSlug}/{membershipSlug}/term/{termOptionID}/bonuses", h.GetTermBonuses)
+	r.Get("/signup/{tenantSlug}/{membershipSlug}", h.GetMembershipDetail)
 	r.Post("/signup/{tenantSlug}/submit", h.SubmitSignup)
 }
 
@@ -181,10 +182,21 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Load attached T&Cs
-	terms, _ := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	if termsErr != nil {
+		log.Printf("signup GetMembershipDetail terms: tenant=%s mt=%s err=%v", tenant.ID, mt.ID, termsErr)
+	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"tenant": map[string]interface{}{
+	// Use a struct (not map) so JSON field order is stable: put `terms` before large `membership`.
+	// map[string]interface{} encodes keys sorted alphabetically, which placed `terms` last and could
+	// lose it under response size limits when combined with invite payloads elsewhere.
+	writeJSON(w, http.StatusOK, struct {
+		Tenant           map[string]interface{}      `json:"tenant"`
+		Terms            []models.TermsAndConditions `json:"terms"`
+		PaymentProviders []string                    `json:"payment_providers"`
+		Membership       *models.MembershipType      `json:"membership"`
+	}{
+		Tenant: map[string]interface{}{
 			"name":                        tenant.Name,
 			"slug":                        tenant.Slug,
 			"logo_url":                    tenant.LogoURL,
@@ -196,9 +208,9 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"ask_company_information":     tenant.AskCompanyInformation,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
-		"membership":        mt,
-		"terms":             terms,
-		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
+		Terms:            terms,
+		PaymentProviders: h.availablePaymentProviders(r.Context(), tenant.ID),
+		Membership:       mt,
 	})
 }
 
@@ -1108,11 +1120,23 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 		bonuses, _ := h.bonusRepo.GetBonusesForTermOption(r.Context(), to.ID, tenant.ID)
 		mt.TermOptions[i].Bonuses = bonuses
 	}
-	terms, _ := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	if termsErr != nil {
+		log.Printf("signup GetInviteDetail terms: tenant=%s mt=%s err=%v", tenant.ID, mt.ID, termsErr)
+	}
 	client, _ := h.clientRepo.FindByID(r.Context(), invite.ClientID, tenant.ID)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"tenant": map[string]interface{}{
+	// Struct encoding preserves field order. `terms` must appear before large `membership` / `invite_client`
+	// — map keys are sorted alphabetically and put `terms` last, which risked truncation on invite payloads.
+	writeJSON(w, http.StatusOK, struct {
+		Tenant           map[string]interface{}      `json:"tenant"`
+		Terms            []models.TermsAndConditions `json:"terms"`
+		Invite           map[string]interface{}      `json:"invite"`
+		PaymentProviders []string                    `json:"payment_providers"`
+		Membership       *models.MembershipType      `json:"membership"`
+		InviteClient     *models.Client              `json:"invite_client"`
+	}{
+		Tenant: map[string]interface{}{
 			"name":                          tenant.Name,
 			"slug":                          tenant.Slug,
 			"logo_url":                      tenant.LogoURL,
@@ -1128,10 +1152,8 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 			"ask_company_information":       tenant.AskCompanyInformation,
 			"google_places_api_key":         h.googlePlacesAPIKey(r.Context()),
 		},
-		"membership":        mt,
-		"terms":             terms,
-		"payment_providers": h.availablePaymentProviders(r.Context(), tenant.ID),
-		"invite": map[string]interface{}{
+		Terms: terms,
+		Invite: map[string]interface{}{
 			"token":                   invite.Token.String(),
 			"membership_type_id":      invite.MembershipTypeID,
 			"term_option_id":          invite.TermOptionID,
@@ -1144,7 +1166,9 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 			"gocardless_mandate_id":   invite.GoCardlessMandateID,
 			"expires_at":              invite.ExpiresAt.Format(time.RFC3339),
 		},
-		"invite_client": client,
+		PaymentProviders: h.availablePaymentProviders(r.Context(), tenant.ID),
+		Membership:       mt,
+		InviteClient:     client,
 	})
 }
 
