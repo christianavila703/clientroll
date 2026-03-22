@@ -79,15 +79,93 @@ function resolveFrequencyAmount(termOption: TermOption, frequency: string): numb
   }
 }
 
+/** 2-letter code for form + API; maps common full names / variants from saved client records. */
+function coerceCountryDisplay(raw: unknown, fallback: string): string {
+  const fb = (fallback || "AU").slice(0, 2).toUpperCase();
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(s)) return s;
+  const map: Record<string, string> = {
+    AUSTRALIA: "AU",
+    AUS: "AU",
+    USA: "US",
+    AMERICA: "US",
+    CANADA: "CA",
+    CAN: "CA",
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    "UNITED KINGDOM": "GB",
+    UK: "GB",
+    GBR: "GB",
+    "NEW ZEALAND": "NZ",
+    NZL: "NZ",
+    IRELAND: "IE",
+    IRL: "IE",
+    SINGAPORE: "SG",
+    SGP: "SG",
+    GERMANY: "DE",
+    DEU: "DE",
+    FRANCE: "FR",
+    FRA: "FR",
+  };
+  if (map[s]) return map[s];
+  return fb;
+}
+
 function inferCountryCodeFromCurrency(currencyCode: string): string {
   const cur = String(currencyCode || "").trim().toUpperCase();
   if (cur === "AUD") return "AU";
   if (cur === "USD") return "US";
-  return "";
+  if (cur === "NZD") return "NZ";
+  if (cur === "GBP") return "GB";
+  if (cur === "CAD") return "CA";
+  if (cur === "EUR") return "DE"; // default EU-ish hint; user can change on the form
+  if (cur === "SGD") return "SG";
+  // Avoid empty default — empty fails server validation and skips member-step checks for "Country"
+  return "AU";
 }
 
 function hasText(value: unknown): boolean {
   return String(value || "").trim().length > 0;
+}
+
+/** Same rules as member-step "Next"; used to block final submit with a clear error on the details step. */
+function collectSignupMemberMissing(
+  data: Record<string, string>,
+  askEmergencyContact: boolean,
+  askCompanyInformation: boolean
+): { key: string; label: string }[] {
+  const required: { key: string; label: string }[] = [
+    { key: "name", label: "Full Name" },
+    { key: "address", label: "Street Address" },
+    { key: "suburb", label: "Suburb" },
+    { key: "state", label: "State" },
+    { key: "postcode", label: "Postcode" },
+    { key: "country", label: "Country" },
+    { key: "email", label: "Email" },
+    { key: "phone", label: "Phone" },
+    { key: "birth_date", label: "Date of Birth" },
+    { key: "gender", label: "Gender" },
+  ];
+  if (askEmergencyContact) {
+    required.push(
+      { key: "emergency_contact_name", label: "Emergency Contact Name" },
+      { key: "emergency_contact_phone", label: "Emergency Contact Phone" }
+    );
+  }
+  if (askCompanyInformation) {
+    required.push(
+      { key: "tax_number", label: "Tax Number" },
+      { key: "company_name", label: "Company Name" },
+      { key: "company_number", label: "Company Number" },
+      { key: "company_phone", label: "Company Phone" },
+      { key: "company_address", label: "Company Address" },
+      { key: "company_city", label: "Company City" },
+      { key: "company_state_region", label: "Company State / Region" },
+      { key: "company_postcode", label: "Company ZIP / Postcode" },
+      { key: "company_country", label: "Company Country" }
+    );
+  }
+  return required.filter(({ key }) => !String(data[key] ?? "").trim());
 }
 
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
@@ -162,7 +240,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       suburb: String(inviteClient.suburb || prev.suburb || ""),
       state: String(inviteClient.state || prev.state || ""),
       postcode: String(inviteClient.postcode || prev.postcode || ""),
-      country: String(inviteClient.country || inviteClient.company_country || prev.country || defaultCountryCode),
+      country: coerceCountryDisplay(
+        inviteClient.country || inviteClient.company_country || prev.country || defaultCountryCode,
+        defaultCountryCode
+      ),
       email: String(inviteClient.email || prev.email || ""),
       phone: String(inviteClient.phone || prev.phone || ""),
       birth_date: String(inviteClient.birth_date || "").split("T")[0] || prev.birth_date,
@@ -179,7 +260,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       company_city: String(inviteClient.company_city || prev.company_city || ""),
       company_state_region: String(inviteClient.company_state_region || prev.company_state_region || ""),
       company_postcode: String(inviteClient.company_postcode || prev.company_postcode || ""),
-      company_country: String(inviteClient.company_country || inviteClient.country || prev.company_country || defaultCountryCode),
+      company_country: coerceCountryDisplay(
+        inviteClient.company_country || inviteClient.country || prev.company_country || defaultCountryCode,
+        defaultCountryCode
+      ),
     }));
   }, [inviteClient, defaultCountryCode]);
 
@@ -219,6 +303,15 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       setTimeout(() => document.getElementById("signup-error")?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
       return;
     }
+    const askEm = tenant.ask_emergency_contact !== false;
+    const askCo = tenant.ask_company_information === true;
+    const missingMember = collectSignupMemberMissing(member as unknown as Record<string, string>, askEm, askCo);
+    if (missingMember.length) {
+      setError(`Please complete your details before signing — missing: ${missingMember.map((m) => m.label).join(", ")}.`);
+      setFormStep("member");
+      setTimeout(() => document.getElementById("signup-error")?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+      return;
+    }
     setSubmitting(true); setError("");
     try {
       const isCustomSchedule = payment.payment_frequency === "custom_schedule";
@@ -232,7 +325,12 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          client: { ...member, birth_date: member.birth_date ? member.birth_date + "T00:00:00Z" : null },
+          client: {
+            ...member,
+            country: coerceCountryDisplay(member.country, defaultCountryCode),
+            company_country: askCo ? coerceCountryDisplay(member.company_country || member.country, defaultCountryCode) : member.company_country,
+            birth_date: member.birth_date ? member.birth_date + "T00:00:00Z" : null,
+          },
           invite_token: inviteContext?.token || undefined,
           membership_type_id: membership.id, term_option_id: termOption.id,
           start_date: payment.start_date ? payment.start_date + "T00:00:00Z" : new Date().toISOString(),

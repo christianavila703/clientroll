@@ -46,12 +46,41 @@ func (h *ClientHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
 }
 
+// normalizeClientCountryCode returns a 2-letter ISO country code or nil if unknown/invalid.
+// Accepts common legacy values (full names, alpha-3) stored on client records.
 func normalizeClientCountryCode(v *string) *string {
 	if v == nil {
 		return nil
 	}
-	code := strings.ToUpper(strings.TrimSpace(*v))
-	if len(code) != 2 {
+	raw := strings.TrimSpace(*v)
+	if raw == "" {
+		return nil
+	}
+	code := strings.ToUpper(raw)
+	if len(code) == 2 {
+		return &code
+	}
+	// Alpha-3 and free-text (signup / imports / older data)
+	switch code {
+	case "AUS", "AUSTRALIA":
+		code = "AU"
+	case "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "U.S.A.", "U.S.A":
+		code = "US"
+	case "GBR", "UK", "UNITED KINGDOM", "GREAT BRITAIN":
+		code = "GB"
+	case "NZL", "NEW ZEALAND":
+		code = "NZ"
+	case "CAN", "CANADA":
+		code = "CA"
+	case "IRL", "IRELAND", "EIRE":
+		code = "IE"
+	case "SGP", "SINGAPORE":
+		code = "SG"
+	case "DEU", "GERMANY":
+		code = "DE"
+	case "FRA", "FRANCE":
+		code = "FR"
+	default:
 		return nil
 	}
 	return &code
