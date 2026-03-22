@@ -1740,11 +1740,14 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [selectedTerm, setSelectedTerm] = useState<any>(null);
   const [frequency, setFrequency] = useState("monthly");
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [billingMethod, setBillingMethod] = useState<"direct_debit" | "card">("direct_debit");
   const [bsb, setBsb] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolderName, setAccountHolderName] = useState("");
   const [hasStoredMandate, setHasStoredMandate] = useState(false);
   const [directDebitMode, setDirectDebitMode] = useState<"existing" | "new">("new");
+  const [stripePaymentMethods, setStripePaymentMethods] = useState<Array<{ id: string; type: string; label: string; is_default?: boolean }>>([]);
+  const [selectedStripePaymentMethodId, setSelectedStripePaymentMethodId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1752,7 +1755,8 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
     Promise.all([
       api.listMembershipTypes(),
       api.getClientMandateStatus(clientId).catch(() => ({})),
-    ]).then(([d, mandate]) => {
+      api.listClientStripePaymentMethods(clientId).catch(() => ({ payment_methods: [] })),
+    ]).then(([d, mandate, stripeMethodsData]) => {
       const membershipData = d as any;
       const active = (membershipData.membership_types || []).filter((mt: any) => mt.is_active);
       setTypes(active);
@@ -1765,15 +1769,25 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
           });
       });
       const hasMandate = !!(mandate as any)?.has_mandate;
+      const methods = Array.isArray((stripeMethodsData as any)?.payment_methods) ? (stripeMethodsData as any).payment_methods : [];
+      const cardMethods = methods.filter((m: any) => m?.type === "card");
+      const defaultCard = cardMethods.find((m: any) => m?.is_default) || cardMethods[0];
+      setStripePaymentMethods(cardMethods);
+      setSelectedStripePaymentMethodId(defaultCard?.id || "");
       setHasStoredMandate(hasMandate);
       setDirectDebitMode(hasMandate ? "existing" : "new");
+      setBillingMethod(hasMandate ? "direct_debit" : (defaultCard ? "card" : "direct_debit"));
     });
   }, []);
 
   const handleSubmit = async () => {
     if (!selectedType || !selectedTerm) return;
-    if (frequency !== "upfront" && directDebitMode === "new" && (!bsb.trim() || !accountNumber.trim())) {
+    if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && (!bsb.trim() || !accountNumber.trim())) {
       setError("BSB and account number are required when adding a new payment method.");
+      return;
+    }
+    if (frequency !== "upfront" && billingMethod === "card" && !selectedStripePaymentMethodId) {
+      setError("Select a saved Stripe card or switch to direct debit.");
       return;
     }
     setSaving(true); setError("");
@@ -1787,14 +1801,15 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
         membership_type_id: selectedType.id,
         term_option_id: selectedTerm.id,
         start_date: startDate,
-        payment_method: "direct_debit",
+        payment_method: billingMethod,
         payment_frequency: frequency,
         payment_amount: paymentAmount,
         payment_interval_unit: isCustomSchedule ? selectedTerm.custom_schedule_interval_unit : undefined,
         payment_interval_count: isCustomSchedule ? selectedTerm.custom_schedule_interval_count : undefined,
         num_payments: isCustomSchedule ? selectedTerm.custom_schedule_num_payments : selectedTerm.num_payments,
+        payment_method_id: billingMethod === "card" ? selectedStripePaymentMethodId : undefined,
       };
-      if (frequency !== "upfront" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
+      if (frequency !== "upfront" && billingMethod === "direct_debit" && directDebitMode === "new" && bsb.trim() && accountNumber.trim()) {
         body.bsb = bsb.trim();
         body.account_number = accountNumber.trim();
         if (accountHolderName.trim()) body.account_holder_name = accountHolderName.trim();
@@ -1931,6 +1946,28 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                     </div>
                   </div>
 
+                  {frequency !== "upfront" && (
+                    <div>
+                      <label className="block text-[13px] font-semibold text-gray-700 mb-2">Billing method</label>
+                      <div className="grid grid-cols-2 gap-2 max-w-md">
+                        <button
+                          type="button"
+                          onClick={() => setBillingMethod("direct_debit")}
+                          className={`rounded-md border px-3 py-2 text-[12px] font-medium ${billingMethod === "direct_debit" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                        >
+                          Direct debit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBillingMethod("card")}
+                          className={`rounded-md border px-3 py-2 text-[12px] font-medium ${billingMethod === "card" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:border-gray-300"}`}
+                        >
+                          Stripe card
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {selectedTerm.bonuses && selectedTerm.bonuses.length > 0 && (
                     <div>
                       <label className="block text-[13px] font-semibold text-gray-700 mb-2">Included Bonuses</label>
@@ -1945,7 +1982,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                     </div>
                   )}
 
-                  {frequency !== "upfront" && (
+                  {frequency !== "upfront" && billingMethod === "direct_debit" && (
                     <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
                       <p className="text-[13px] font-semibold text-gray-700 mb-2">Direct debit (optional)</p>
                       {hasStoredMandate && (
@@ -1986,6 +2023,36 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
                             </div>
                           </div>
                         </>
+                      )}
+                    </div>
+                  )}
+
+                  {frequency !== "upfront" && billingMethod === "card" && (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-4">
+                      <p className="text-[13px] font-semibold text-gray-700 mb-2">Saved Stripe card</p>
+                      {stripePaymentMethods.length > 0 ? (
+                        <div className="space-y-2">
+                          {stripePaymentMethods.map((m) => (
+                            <label key={m.id} className="flex items-center gap-2 text-[12px] text-gray-700">
+                              <input
+                                type="radio"
+                                name="membership_stripe_card"
+                                checked={selectedStripePaymentMethodId === m.id}
+                                onChange={() => setSelectedStripePaymentMethodId(m.id)}
+                                className="h-4 w-4 text-indigo-600"
+                              />
+                              <span>{m.label}</span>
+                              {m.is_default && <span className="badge badge-gray">Default</span>}
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-[12px] text-gray-500">No saved Stripe card found for this client.</p>
+                          <button type="button" onClick={() => setBillingMethod("direct_debit")} className="text-[12px] text-indigo-600 hover:text-indigo-700">
+                            Switch to direct debit
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
