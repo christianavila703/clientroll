@@ -149,12 +149,12 @@ export default function ActiveMembershipsPage() {
                           <p className="text-gray-900 tabular-nums">${m.payment_amount?.toFixed(2) || "—"}</p>
                           <p className="text-[11px] text-gray-400">{fmtFreq(m.payment_frequency)}</p>
                           {m.mandate_id ? (
-                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-green-700 bg-green-50 rounded px-1.5 py-0.5">
+                            <span className="badge badge-purple mt-0.5">
                               <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>
                               Direct Debit
                             </span>
                           ) : m.payment_method === "direct_debit" ? (
-                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-gray-600 bg-gray-100 rounded px-1.5 py-0.5">
+                            <span className="badge badge-purple mt-0.5">
                               Direct Debit
                             </span>
                           ) : null}

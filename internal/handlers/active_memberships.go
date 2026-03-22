@@ -333,7 +333,6 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusNotFound, "Membership not found")
 		return
 	}
-
 	prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
 	if provErr != nil {
 		log.Printf("membership.cancel provider_error tenant=%s membership=%s err=%v", tenantID, membershipID, provErr)
@@ -405,6 +404,10 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 	m, err := h.memberRepo.FindByID(r.Context(), membershipID, tenantID)
 	if err != nil || m == nil {
 		writeError(w, http.StatusNotFound, "Membership not found")
+		return
+	}
+	if input.ContinueAfterTerm && m.PaymentFrequency != nil && strings.EqualFold(strings.TrimSpace(*m.PaymentFrequency), "custom_schedule") {
+		writeError(w, http.StatusBadRequest, "Custom schedule memberships cannot continue billing after term")
 		return
 	}
 

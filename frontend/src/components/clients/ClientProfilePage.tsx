@@ -13,9 +13,9 @@ interface Client {
   unit_number?: string; address?: string; suburb?: string; state?: string; postcode?: string;
   birth_date?: string; gender?: string;
   emergency_contact_name?: string; emergency_contact_phone?: string;
-  business_structure?: string; gst_registered?: string; tax_number?: string;
+  tax_number?: string;
   company_number?: string; company_phone?: string; company_website?: string;
-  company_address?: string; company_suburb?: string; company_state?: string; company_postcode?: string;
+  company_address?: string; company_city?: string; company_state_region?: string; company_postcode?: string; company_country?: string;
   created_at: string;
 }
 
@@ -47,6 +47,10 @@ export default function ClientProfilePage() {
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
   const [tenantTax, setTenantTax] = useState<{ percent: number; name: string }>({ percent: 0, name: "GST" });
+  const [clientFieldSettings, setClientFieldSettings] = useState<{ askEmergencyContact: boolean; askCompanyInformation: boolean }>({
+    askEmergencyContact: true,
+    askCompanyInformation: false,
+  });
   const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean }>({
     hasMandate: false,
     providers: [],
@@ -139,6 +143,10 @@ export default function ClientProfilePage() {
         percent: Number.isFinite(txPct) ? txPct : 0,
         name: String(tenantRes?.sales_tax_name || "GST"),
       });
+      setClientFieldSettings({
+        askEmergencyContact: tenantRes?.ask_emergency_contact !== false,
+        askCompanyInformation: tenantRes?.ask_company_information === true,
+      });
       const membershipsList = memberRes.memberships || [];
       setMemberships(membershipsList);
       const membershipByID = new Map(
@@ -218,7 +226,7 @@ export default function ClientProfilePage() {
           <Link to="/clients" className="text-indigo-600 hover:text-indigo-700 font-semibold">Clients</Link>
           <span className="text-gray-300">›</span>
           <span className="font-bold text-gray-900 text-lg">{client.name.toUpperCase()}</span>
-          <span className={`badge text-[11px] ${hasActive ? "badge-green" : "badge-gray"}`}>
+          <span className={`badge ${hasActive ? "badge-green" : "badge-gray"}`}>
             {hasActive ? "Active" : "Inactive"}
           </span>
         </div>
@@ -331,10 +339,10 @@ export default function ClientProfilePage() {
                   <span className="text-[13px] text-gray-900">{fmtDate(client.birth_date)}</span>
                 </div>
               )}
-              {client.gst_registered && (
+              {client.tax_number && (
                 <div className="flex justify-between gap-4">
-                  <span className="text-[13px] text-gray-500">GST registered</span>
-                  <span className="text-[13px] text-gray-900">{client.gst_registered}</span>
+                  <span className="text-[13px] text-gray-500">Tax number</span>
+                  <span className="text-[13px] text-gray-900">{client.tax_number}</span>
                 </div>
               )}
               {client.company_number && (
@@ -343,10 +351,32 @@ export default function ClientProfilePage() {
                   <span className="text-[13px] text-gray-900">{client.company_number}</span>
                 </div>
               )}
+              {client.company_phone && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[13px] text-gray-500">Company phone</span>
+                  <span className="text-[13px] text-gray-900">{client.company_phone}</span>
+                </div>
+              )}
+              {client.company_website && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[13px] text-gray-500">Company website</span>
+                  <span className="text-[13px] text-gray-900 truncate">{client.company_website}</span>
+                </div>
+              )}
+              {client.company_address && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-[13px] text-gray-500">Company address</span>
+                  <span className="text-[13px] text-gray-900 text-right whitespace-pre-line">
+                    {[client.company_address, [client.company_city, client.company_state_region].filter(Boolean).join(", "), client.company_postcode, client.company_country]
+                      .filter(Boolean)
+                      .join("\n")}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Emergency contact */}
-            {client.emergency_contact_name && (
+            {clientFieldSettings.askEmergencyContact && client.emergency_contact_name && (
               <div className="border-t border-gray-100 px-5 py-3">
                 <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-2">Emergency Contact</p>
                 <div className="flex items-center gap-2">
@@ -459,6 +489,8 @@ export default function ClientProfilePage() {
       {showEdit && (
         <EditClientModal
           client={client}
+          askEmergencyContact={clientFieldSettings.askEmergencyContact}
+          askCompanyInformation={clientFieldSettings.askCompanyInformation}
           onClose={() => setShowEdit(false)}
           onSaved={() => { setShowEdit(false); loadAll(); }}
         />
@@ -715,13 +747,13 @@ function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, togg
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-[13px] text-gray-500">{m.term_months}-month term</p>
               {m.subscription_id && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 rounded px-1.5 py-0.5">
+                <span className="badge badge-purple">
                   <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>
                   Auto DD
                 </span>
               )}
               {m.mandate_id && !m.subscription_id && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-700 bg-indigo-50 rounded px-1.5 py-0.5">
+                <span className="badge badge-purple">
                   Mandate active
                 </span>
               )}
@@ -811,7 +843,7 @@ function MembershipCard({ m, fmtShort, onCancel, onToggleContinueAfterTerm, togg
           </div>
         </div>
 
-        {m.status === "active" && !!m.stripe_subscription_id && onToggleContinueAfterTerm && (
+        {m.status === "active" && !!m.stripe_subscription_id && m.payment_frequency !== "custom_schedule" && onToggleContinueAfterTerm && (
           <div className="mt-2 border-t border-gray-100 pt-3">
             <label className="inline-flex items-center gap-2 text-[12px] text-gray-700">
               <input
@@ -1033,24 +1065,24 @@ function PaymentsTab({
   const methodBadge = (p: PaymentRecord): { label: string; className: string } | null => {
     const explicitMethod = String(p.payment_method || "").toLowerCase();
     if (explicitMethod === "direct_debit") {
-      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      return { label: "Direct Debit", className: "badge-purple" };
     }
     if (explicitMethod === "card") {
-      return { label: "Card", className: "text-sky-700 bg-sky-50" };
+      return { label: "Card", className: "badge-blue" };
     }
     if (hasStripeDetails(p.stripe_details)) {
       const stripe = p.stripe_details as Record<string, unknown>;
       const pmType = String(stripe.payment_method_type || "").toLowerCase();
       const pmLabel = String(stripe.payment_method_label || "").toLowerCase();
       if (pmType === "card" || pmLabel.includes("card")) {
-        return { label: "Card", className: "text-sky-700 bg-sky-50" };
+        return { label: "Card", className: "badge-blue" };
       }
       if (pmType.includes("debit") || pmType.includes("becs") || pmLabel.includes("direct debit")) {
-        return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+        return { label: "Direct Debit", className: "badge-purple" };
       }
     }
     if (p.provider_reference) {
-      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      return { label: "Direct Debit", className: "badge-purple" };
     }
     return null;
   };
@@ -1087,13 +1119,14 @@ function PaymentsTab({
                     }`}>
                       {p.status === "succeeded" ? "Paid" : p.status === "confirmed" ? "Confirmed" : p.status}
                     </span>
-                    {p._type === "service" ? (
-                      <span className="text-[10px] font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">Service</span>
-                    ) : paymentMethodBadge ? (
-                      <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${paymentMethodBadge.className}`}>
+                    {p._type === "service" && (
+                      <span className="badge badge-purple">Service</span>
+                    )}
+                    {paymentMethodBadge && (
+                      <span className={`badge ${paymentMethodBadge.className}`}>
                         {paymentMethodBadge.label}
                       </span>
-                    ) : null}
+                    )}
                   </div>
                   <div className="text-right shrink-0 min-w-[10rem]">
                     <AdminPaymentAmounts p={p} layout="stacked" />
@@ -1369,7 +1402,19 @@ function MoreActionsMenu({
 }
 
 /* ─── Edit Client Modal ─── */
-function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose: () => void; onSaved: () => void }) {
+function EditClientModal({
+  client,
+  askEmergencyContact,
+  askCompanyInformation,
+  onClose,
+  onSaved,
+}: {
+  client: Client;
+  askEmergencyContact: boolean;
+  askCompanyInformation: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [tab, setTab] = useState<"details" | "company">("details");
   const [form, setForm] = useState({
     name: client.name, email: client.email || "", phone: client.phone || "",
@@ -1377,12 +1422,13 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
     postcode: client.postcode || "", birth_date: client.birth_date?.split("T")[0] || "", gender: client.gender || "",
     emergency_contact_name: client.emergency_contact_name || "",
     emergency_contact_phone: client.emergency_contact_phone || "",
-    business_structure: client.business_structure || "", gst_registered: client.gst_registered || "",
     tax_number: client.tax_number || "", company_number: client.company_number || "",
     company_phone: client.company_phone || "", company_website: client.company_website || "",
-    company_address: client.company_address || "", company_suburb: client.company_suburb || "",
-    company_state: client.company_state || "", company_postcode: client.company_postcode || "",
+    company_address: client.company_address || "", company_city: client.company_city || "",
+    company_state_region: client.company_state_region || "", company_postcode: client.company_postcode || "",
+    company_country: client.company_country || "",
   });
+  const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -1401,7 +1447,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
     try {
       // Keep payload aligned with backend Client model.
       // Unknown fields are rejected server-side (DisallowUnknownFields).
-      const payload: Record<string, string> = {
+      const payload: Record<string, string | null> = {
         name: form.name,
         email: form.email,
         phone: form.phone,
@@ -1411,8 +1457,17 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
         suburb: form.suburb,
         state: form.state,
         postcode: form.postcode,
-        emergency_contact_name: form.emergency_contact_name,
-        emergency_contact_phone: form.emergency_contact_phone,
+        emergency_contact_name: askEmergencyContact ? form.emergency_contact_name : null,
+        emergency_contact_phone: askEmergencyContact ? form.emergency_contact_phone : null,
+        tax_number: askCompanyInformation ? form.tax_number : null,
+        company_number: askCompanyInformation ? form.company_number : null,
+        company_phone: askCompanyInformation ? form.company_phone : null,
+        company_website: askCompanyInformation ? form.company_website : null,
+        company_address: askCompanyInformation ? form.company_address : null,
+        company_city: askCompanyInformation ? form.company_city : null,
+        company_state_region: askCompanyInformation ? form.company_state_region : null,
+        company_postcode: askCompanyInformation ? form.company_postcode : null,
+        company_country: askCompanyInformation ? form.company_country : null,
       };
       const birthDateISO = toBirthDateISOString(form.birth_date);
       if (birthDateISO) payload.birth_date = birthDateISO;
@@ -1447,7 +1502,7 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
 
           {/* Tabs */}
           <div className="flex border-b border-gray-200 px-6">
-            {(["details", "company"] as const).map((t) => (
+            {(askCompanyInformation ? (["details", "company"] as const) : (["details"] as const)).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-3 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
                   tab === t ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"
@@ -1502,7 +1557,13 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                     <LabeledInput
                       label="Street address"
                       value={form.address}
-                      onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          address: v,
+                          ...(companyAddressSameAsClient ? { company_address: v } : {}),
+                        }))
+                      }
                       colSpan
                     />
                     <LabeledInput
@@ -1513,45 +1574,63 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                     <LabeledInput
                       label="Suburb"
                       value={form.suburb}
-                      onChange={(v) => setForm((prev) => ({ ...prev, suburb: v }))}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          suburb: v,
+                          ...(companyAddressSameAsClient ? { company_city: v } : {}),
+                        }))
+                      }
                     />
                     <LabeledInput
                       label="State"
                       value={form.state}
-                      onChange={(v) => setForm((prev) => ({ ...prev, state: v }))}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          state: v,
+                          ...(companyAddressSameAsClient ? { company_state_region: v } : {}),
+                        }))
+                      }
                     />
                     <LabeledInput
                       label="Postcode"
                       value={form.postcode}
-                      onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
+                      onChange={(v) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          postcode: v,
+                          ...(companyAddressSameAsClient ? { company_postcode: v } : {}),
+                        }))
+                      }
                     />
                   </div>
                 </div>
-                <div>
-                  <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <LabeledInput
-                      label="Contact name"
-                      value={form.emergency_contact_name}
-                      onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
-                    />
-                    <LabeledInput
-                      label="Contact phone"
-                      value={form.emergency_contact_phone}
-                      onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
-                      type="tel"
-                    />
+                {askEmergencyContact && (
+                  <div>
+                    <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <LabeledInput
+                        label="Contact name"
+                        value={form.emergency_contact_name}
+                        onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
+                      />
+                      <LabeledInput
+                        label="Contact phone"
+                        value={form.emergency_contact_phone}
+                        onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
+                        type="tel"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
-            {tab === "company" && (
+            {tab === "company" && askCompanyInformation && (
               <div className="space-y-5">
                 <div>
                   <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <LabeledInput label="Business structure" value={form.business_structure} onChange={(v) => setForm((prev) => ({ ...prev, business_structure: v }))} placeholder="e.g. Sole Trader" />
-                    <LabeledInput label="GST registered" value={form.gst_registered} onChange={(v) => setForm((prev) => ({ ...prev, gst_registered: v }))} placeholder="Yes / No" />
                     <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
                     <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
                     <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" />
@@ -1559,12 +1638,36 @@ function EditClientModal({ client, onClose, onSaved }: { client: Client; onClose
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company address</h4>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h4 className="text-[13px] font-semibold text-gray-900">Client address</h4>
+                    <label className="inline-flex items-center gap-2 text-[12px] text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={companyAddressSameAsClient}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setCompanyAddressSameAsClient(checked);
+                          if (checked) {
+                            setForm((prev) => ({
+                              ...prev,
+                              company_address: prev.address,
+                              company_city: prev.suburb,
+                              company_state_region: prev.state,
+                              company_postcode: prev.postcode,
+                            }));
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                      />
+                      Same as personal address
+                    </label>
+                  </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <LabeledInput label="Street address" value={form.company_address} onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))} colSpan />
-                    <LabeledInput label="Suburb" value={form.company_suburb} onChange={(v) => setForm((prev) => ({ ...prev, company_suburb: v }))} />
-                    <LabeledInput label="State" value={form.company_state} onChange={(v) => setForm((prev) => ({ ...prev, company_state: v }))} />
-                    <LabeledInput label="Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} />
+                    <LabeledInput label="City" value={form.company_city} onChange={(v) => setForm((prev) => ({ ...prev, company_city: v }))} />
+                    <LabeledInput label="State / region" value={form.company_state_region} onChange={(v) => setForm((prev) => ({ ...prev, company_state_region: v }))} />
+                    <LabeledInput label="ZIP / Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} />
+                    <LabeledInput label="Country" value={form.company_country} onChange={(v) => setForm((prev) => ({ ...prev, company_country: v }))} colSpan />
                   </div>
                 </div>
               </div>

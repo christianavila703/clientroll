@@ -655,9 +655,9 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
           <p className="text-[11px] text-gray-500">{desc}</p>
         </div>
         {existing?.has_key ? (
-          <span className="badge badge-green text-[11px]">Connected</span>
+          <span className="badge badge-green">Connected</span>
         ) : (
-          <span className="badge badge-gray text-[11px]">Not configured</span>
+          <span className="badge badge-gray">Not configured</span>
         )}
       </div>
 
@@ -693,10 +693,10 @@ function IntegrationForm({ name, desc, keyLabel, secretLabel, existing, hasSecre
                 </ul>
               </div>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
-                <span className={`rounded px-1.5 py-0.5 ${existing?.has_key ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
-                <span className={`rounded px-1.5 py-0.5 ${existing?.has_secret ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
-                <span className={`rounded px-1.5 py-0.5 ${existing?.is_active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
-                <span className={`rounded px-1.5 py-0.5 ${stripeReady ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
+                <span className={`badge ${existing?.has_key ? "badge-green" : "badge-gray"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
+                <span className={`badge ${existing?.has_secret ? "badge-green" : "badge-gray"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
+                <span className={`badge ${existing?.is_active ? "badge-green" : "badge-yellow"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
+                <span className={`badge ${stripeReady ? "badge-green" : "badge-red"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
               </div>
             </>
           ) : (

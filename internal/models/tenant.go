@@ -16,6 +16,8 @@ type Tenant struct {
 	SalesTaxPercent            float64    `json:"sales_tax_percent"`
 	EnabledCurrencies          []string   `json:"enabled_currencies"`
 	EnabledPaymentFrequencies  []string   `json:"enabled_payment_frequencies"`
+	AskEmergencyContact        bool       `json:"ask_emergency_contact"`
+	AskCompanyInformation      bool       `json:"ask_company_information"`
 	IsActive                   bool       `json:"is_active"`
 	LogoURL                    *string    `json:"logo_url"`
 	PrimaryColour              string     `json:"primary_colour"`
@@ -46,6 +48,8 @@ type UpdateTenantInput struct {
 	SalesTaxPercent            *float64 `json:"sales_tax_percent,omitempty"`
 	EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
 	EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
+	AskEmergencyContact        *bool    `json:"ask_emergency_contact,omitempty"`
+	AskCompanyInformation      *bool    `json:"ask_company_information,omitempty"`
 	IsActive                   *bool    `json:"is_active,omitempty"`
 	PrimaryColour              *string  `json:"primary_colour,omitempty"`
 	SecondaryColour            *string  `json:"secondary_colour,omitempty"`

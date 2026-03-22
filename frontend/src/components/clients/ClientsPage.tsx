@@ -13,6 +13,19 @@ interface Client {
   suburb?: string;
   state?: string;
   postcode?: string;
+  birth_date?: string;
+  gender?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  tax_number?: string;
+  company_number?: string;
+  company_phone?: string;
+  company_website?: string;
+  company_address?: string;
+  company_city?: string;
+  company_state_region?: string;
+  company_postcode?: string;
+  company_country?: string;
   created_at: string;
 }
 
@@ -359,25 +372,39 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     name: editing?.name || "", email: editing?.email || "", phone: editing?.phone || "",
     unit_number: editing?.unit_number || "",
     address: editing?.address || "", suburb: editing?.suburb || "", state: editing?.state || "",
-    postcode: editing?.postcode || "", birth_date: "", gender: "",
-    emergency_contact_name: "", emergency_contact_phone: "",
+    postcode: editing?.postcode || "", birth_date: editing?.birth_date?.split("T")[0] || "", gender: editing?.gender || "",
+    emergency_contact_name: editing?.emergency_contact_name || "", emergency_contact_phone: editing?.emergency_contact_phone || "",
+    tax_number: editing?.tax_number || "", company_number: editing?.company_number || "",
+    company_phone: editing?.company_phone || "", company_website: editing?.company_website || "",
+    company_address: editing?.company_address || "", company_city: editing?.company_city || "",
+    company_state_region: editing?.company_state_region || "", company_postcode: editing?.company_postcode || "",
+    company_country: editing?.company_country || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [googlePlacesKey, setGooglePlacesKey] = useState("");
+  const [askEmergencyContact, setAskEmergencyContact] = useState(true);
+  const [askCompanyInformation, setAskCompanyInformation] = useState(false);
+  const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .listIntegrations()
-      .then((res) => {
+    Promise.all([api.listIntegrations(), api.getTenantSettings().catch(() => ({}))])
+      .then(([res, tenantRes]) => {
         if (cancelled) return;
         const integrations = (res as { integrations?: Array<{ provider?: string; public_api_key?: string; is_active?: boolean }> }).integrations || [];
         const googlePlaces = integrations.find((i) => i.provider === "google_places" && i.is_active);
         setGooglePlacesKey(googlePlaces?.public_api_key || "");
+        const tenant = tenantRes as { ask_emergency_contact?: boolean; ask_company_information?: boolean };
+        setAskEmergencyContact(tenant.ask_emergency_contact !== false);
+        setAskCompanyInformation(tenant.ask_company_information === true);
       })
       .catch(() => {
-        if (!cancelled) setGooglePlacesKey("");
+        if (!cancelled) {
+          setGooglePlacesKey("");
+          setAskEmergencyContact(true);
+          setAskCompanyInformation(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -388,7 +415,20 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.birth_date.trim() || !form.gender.trim() || !form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim()) {
+      const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.birth_date.trim() || !form.gender.trim();
+      const missingEmergency = askEmergencyContact && (!form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim());
+      const missingCompany = askCompanyInformation && (
+        !form.tax_number.trim() ||
+        !form.company_number.trim() ||
+        !form.company_phone.trim() ||
+        !form.company_website.trim() ||
+        !form.company_address.trim() ||
+        !form.company_city.trim() ||
+        !form.company_state_region.trim() ||
+        !form.company_postcode.trim() ||
+        !form.company_country.trim()
+      );
+      if (missingCore || missingEmergency || missingCompany) {
         throw new Error("Please complete all required fields");
       }
       // Backend rejects unknown fields (DisallowUnknownFields) for clients create/update.
@@ -404,8 +444,17 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         postcode: normalizeStringOrNull(form.postcode),
         gender: normalizeStringOrNull(form.gender),
         birth_date: toBirthDateISOStringOrNull(form.birth_date),
-        emergency_contact_name: normalizeStringOrNull(form.emergency_contact_name),
-        emergency_contact_phone: normalizeStringOrNull(form.emergency_contact_phone),
+        emergency_contact_name: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_name) : null,
+        emergency_contact_phone: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_phone) : null,
+        tax_number: askCompanyInformation ? normalizeStringOrNull(form.tax_number) : null,
+        company_number: askCompanyInformation ? normalizeStringOrNull(form.company_number) : null,
+        company_phone: askCompanyInformation ? normalizeStringOrNull(form.company_phone) : null,
+        company_website: askCompanyInformation ? normalizeStringOrNull(form.company_website) : null,
+        company_address: askCompanyInformation ? normalizeStringOrNull(form.company_address) : null,
+        company_city: askCompanyInformation ? normalizeStringOrNull(form.company_city) : null,
+        company_state_region: askCompanyInformation ? normalizeStringOrNull(form.company_state_region) : null,
+        company_postcode: askCompanyInformation ? normalizeStringOrNull(form.company_postcode) : null,
+        company_country: askCompanyInformation ? normalizeStringOrNull(form.company_country) : null,
       };
 
       if (editing) await api.updateClient(editing.id, payload);
@@ -483,7 +532,13 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 <label className="block text-[13px] font-medium text-gray-700 mb-1">Street address</label>
                 <AddressAutocompleteInput
                   value={form.address}
-                  onChange={(v) => setForm((prev) => ({ ...prev, address: v }))}
+                  onChange={(v) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      address: v,
+                      ...(companyAddressSameAsClient ? { company_address: v } : {}),
+                    }))
+                  }
                   onAddressSelect={({ unit_number, address, suburb, state, postcode }) =>
                     setForm((prev) => ({
                       ...prev,
@@ -492,6 +547,14 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                       suburb: suburb || prev.suburb,
                       state: state || prev.state,
                       postcode: postcode || prev.postcode,
+                      ...(companyAddressSameAsClient
+                        ? {
+                            company_address: address || prev.address,
+                            company_city: suburb || prev.suburb,
+                            company_state_region: state || prev.state,
+                            company_postcode: postcode || prev.postcode,
+                          }
+                        : {}),
                     }))
                   }
                   apiKey={googlePlacesKey}
@@ -525,24 +588,73 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
               />
             </div>
           </div>
-          <div>
-            <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <LabeledInput
-                label="Contact name"
-                value={form.emergency_contact_name}
-                onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
-                required
-              />
-              <LabeledInput
-                label="Contact phone"
-                value={form.emergency_contact_phone}
-                onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
-                type="tel"
-                required
-              />
+          {askEmergencyContact && (
+            <div>
+              <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Emergency contact</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <LabeledInput
+                  label="Contact name"
+                  value={form.emergency_contact_name}
+                  onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_name: v }))}
+                  required
+                />
+                <LabeledInput
+                  label="Contact phone"
+                  value={form.emergency_contact_phone}
+                  onChange={(v) => setForm((prev) => ({ ...prev, emergency_contact_phone: v }))}
+                  type="tel"
+                  required
+                />
+              </div>
             </div>
-          </div>
+          )}
+
+          {askCompanyInformation && (
+            <div className="space-y-5">
+              <div>
+                <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} required />
+                  <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} required />
+                  <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" required />
+                  <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" required />
+                </div>
+              </div>
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="text-[13px] font-semibold text-gray-900">Client address</h4>
+                  <label className="inline-flex items-center gap-2 text-[12px] text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={companyAddressSameAsClient}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setCompanyAddressSameAsClient(checked);
+                        if (checked) {
+                          setForm((prev) => ({
+                            ...prev,
+                            company_address: prev.address,
+                            company_city: prev.suburb,
+                            company_state_region: prev.state,
+                            company_postcode: prev.postcode,
+                          }));
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                    />
+                    Same as personal address
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <LabeledInput label="Address" value={form.company_address} onChange={(v) => setForm((prev) => ({ ...prev, company_address: v }))} required colSpan />
+                  <LabeledInput label="City" value={form.company_city} onChange={(v) => setForm((prev) => ({ ...prev, company_city: v }))} required />
+                  <LabeledInput label="State / region" value={form.company_state_region} onChange={(v) => setForm((prev) => ({ ...prev, company_state_region: v }))} required />
+                  <LabeledInput label="ZIP / Postcode" value={form.company_postcode} onChange={(v) => setForm((prev) => ({ ...prev, company_postcode: v }))} required />
+                  <LabeledInput label="Country" value={form.company_country} onChange={(v) => setForm((prev) => ({ ...prev, company_country: v }))} required colSpan />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </form>
     </div>

@@ -172,7 +172,7 @@ export default function PlatformBillingPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${form.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+            <span className={`badge ${form.is_active ? "badge-green" : "badge-gray"}`}>
               {form.is_active ? "Active" : "Inactive"}
             </span>
           </div>

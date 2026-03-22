@@ -28,7 +28,9 @@ func (r *ClientRepo) DB() *database.Postgres {
 
 const clientFields = `id, tenant_id, name, unit_number, address, suburb, state, postcode,
 	email, phone, birth_date, gender, emergency_contact_name,
-	emergency_contact_phone, gocardless_customer_id, stripe_customer_id, deleted_at, created_at, updated_at`
+	emergency_contact_phone, tax_number, company_number, company_phone, company_website,
+	company_address, company_city, company_state_region, company_postcode, company_country,
+	gocardless_customer_id, stripe_customer_id, deleted_at, created_at, updated_at`
 
 // List returns all clients for a tenant with optional search and status filter.
 // status: "active" = has active membership, "inactive" = no active membership, "" = all
@@ -93,14 +95,17 @@ func (r *ClientRepo) FindByEmail(ctx context.Context, tenantID uuid.UUID, email 
 func (r *ClientRepo) Create(ctx context.Context, tenantID uuid.UUID, c *models.Client) (*models.Client, error) {
 	query := `
 		INSERT INTO clients (tenant_id, name, unit_number, address, suburb, state, postcode,
-		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		    email, phone, birth_date, gender, emergency_contact_name, emergency_contact_phone,
+			tax_number, company_number, company_phone, company_website, company_address, company_city,
+			company_state_region, company_postcode, company_country)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		RETURNING ` + clientFields
 
 	var out models.Client
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
-		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
+		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyNumber, c.CompanyPhone,
+		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client: %w", err)
 	}
@@ -112,14 +117,17 @@ func (r *ClientRepo) Update(ctx context.Context, id, tenantID uuid.UUID, c *mode
 	query := `
 		UPDATE clients SET name=$3, unit_number=$4, address=$5, suburb=$6, state=$7, postcode=$8,
 		    email=$9, phone=$10, birth_date=$11, gender=$12,
-		    emergency_contact_name=$13, emergency_contact_phone=$14, updated_at=NOW()
+		    emergency_contact_name=$13, emergency_contact_phone=$14, tax_number=$15, company_number=$16,
+			company_phone=$17, company_website=$18, company_address=$19, company_city=$20,
+			company_state_region=$21, company_postcode=$22, company_country=$23, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL
 		RETURNING ` + clientFields
 
 	var out models.Client
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, c.Name, c.UnitNumber, c.Address, c.Suburb,
 		c.State, c.Postcode, c.Email, c.Phone, c.BirthDate, c.Gender,
-		c.EmergencyContactName, c.EmergencyContactPhone).Scan(r.scanFields(&out)...)
+		c.EmergencyContactName, c.EmergencyContactPhone, c.TaxNumber, c.CompanyNumber, c.CompanyPhone,
+		c.CompanyWebsite, c.CompanyAddress, c.CompanyCity, c.CompanyStateRegion, c.CompanyPostcode, c.CompanyCountry).Scan(r.scanFields(&out)...)
 	if err != nil {
 		return nil, fmt.Errorf("updating client: %w", err)
 	}
@@ -232,7 +240,9 @@ func (r *ClientRepo) scanFields(c *models.Client) []interface{} {
 	return []interface{}{
 		&c.ID, &c.TenantID, &c.Name, &c.UnitNumber, &c.Address, &c.Suburb, &c.State,
 		&c.Postcode, &c.Email, &c.Phone, &c.BirthDate, &c.Gender,
-		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.GoCardlessCustomerID, &c.StripeCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
+		&c.EmergencyContactName, &c.EmergencyContactPhone, &c.TaxNumber, &c.CompanyNumber, &c.CompanyPhone,
+		&c.CompanyWebsite, &c.CompanyAddress, &c.CompanyCity, &c.CompanyStateRegion, &c.CompanyPostcode, &c.CompanyCountry,
+		&c.GoCardlessCustomerID, &c.StripeCustomerID, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 	}
 }
 

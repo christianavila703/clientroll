@@ -137,6 +137,8 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 			"secondary_colour":            tenant.SecondaryColour,
 			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
+			"ask_emergency_contact":       tenant.AskEmergencyContact,
+			"ask_company_information":     tenant.AskCompanyInformation,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		"memberships":       active,
@@ -183,6 +185,8 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"secondary_colour":            tenant.SecondaryColour,
 			"signup_price_display_mode":   tenant.SignupPriceDisplayMode,
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
+			"ask_emergency_contact":       tenant.AskEmergencyContact,
+			"ask_company_information":     tenant.AskCompanyInformation,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		"membership":        mt,
@@ -281,6 +285,15 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	trimStringPtr(&input.Client.Gender)
 	trimStringPtr(&input.Client.EmergencyContactName)
 	trimStringPtr(&input.Client.EmergencyContactPhone)
+	trimStringPtr(&input.Client.TaxNumber)
+	trimStringPtr(&input.Client.CompanyNumber)
+	trimStringPtr(&input.Client.CompanyPhone)
+	trimStringPtr(&input.Client.CompanyWebsite)
+	trimStringPtr(&input.Client.CompanyAddress)
+	trimStringPtr(&input.Client.CompanyCity)
+	trimStringPtr(&input.Client.CompanyStateRegion)
+	trimStringPtr(&input.Client.CompanyPostcode)
+	trimStringPtr(&input.Client.CompanyCountry)
 	{
 		var missing []string
 		if input.Client.Name == "" {
@@ -310,11 +323,42 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		if input.Client.Gender == nil {
 			missing = append(missing, "gender")
 		}
-		if input.Client.EmergencyContactName == nil {
-			missing = append(missing, "emergency_contact_name")
+		if tenant.AskEmergencyContact {
+			if input.Client.EmergencyContactName == nil {
+				missing = append(missing, "emergency_contact_name")
+			}
+			if input.Client.EmergencyContactPhone == nil {
+				missing = append(missing, "emergency_contact_phone")
+			}
 		}
-		if input.Client.EmergencyContactPhone == nil {
-			missing = append(missing, "emergency_contact_phone")
+		if tenant.AskCompanyInformation {
+			if input.Client.TaxNumber == nil {
+				missing = append(missing, "tax_number")
+			}
+			if input.Client.CompanyNumber == nil {
+				missing = append(missing, "company_number")
+			}
+			if input.Client.CompanyPhone == nil {
+				missing = append(missing, "company_phone")
+			}
+			if input.Client.CompanyWebsite == nil {
+				missing = append(missing, "company_website")
+			}
+			if input.Client.CompanyAddress == nil {
+				missing = append(missing, "company_address")
+			}
+			if input.Client.CompanyCity == nil {
+				missing = append(missing, "company_city")
+			}
+			if input.Client.CompanyStateRegion == nil {
+				missing = append(missing, "company_state_region")
+			}
+			if input.Client.CompanyPostcode == nil {
+				missing = append(missing, "company_postcode")
+			}
+			if input.Client.CompanyCountry == nil {
+				missing = append(missing, "company_country")
+			}
 		}
 		if len(missing) > 0 {
 			log.Printf("Signup validation: missing client fields: %v", missing)

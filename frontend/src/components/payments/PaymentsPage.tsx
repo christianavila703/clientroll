@@ -40,24 +40,24 @@ export default function PaymentsPage() {
   const methodBadge = (p: AdminPaymentRecord): { label: string; className: string } | null => {
     const explicitMethod = String(p.payment_method || "").toLowerCase();
     if (explicitMethod === "direct_debit") {
-      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      return { label: "Direct Debit", className: "badge-purple" };
     }
     if (explicitMethod === "card") {
-      return { label: "Card", className: "text-sky-700 bg-sky-50" };
+      return { label: "Card", className: "badge-blue" };
     }
     if (hasStripeDetails(p.stripe_details)) {
       const stripe = p.stripe_details as Record<string, unknown>;
       const pmType = String(stripe.payment_method_type || "").toLowerCase();
       const pmLabel = String(stripe.payment_method_label || "").toLowerCase();
       if (pmType === "card" || pmLabel.includes("card")) {
-        return { label: "Card", className: "text-sky-700 bg-sky-50" };
+        return { label: "Card", className: "badge-blue" };
       }
       if (pmType.includes("debit") || pmType.includes("becs") || pmLabel.includes("direct debit")) {
-        return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+        return { label: "Direct Debit", className: "badge-purple" };
       }
     }
     if (p.provider_reference) {
-      return { label: "Direct Debit", className: "text-indigo-700 bg-indigo-50" };
+      return { label: "Direct Debit", className: "badge-purple" };
     }
     return null;
   };
@@ -255,7 +255,7 @@ export default function PaymentsPage() {
                               {p.status === "succeeded" ? "Paid" : p.status}
                             </span>
                             {paymentMethodBadge && (
-                              <span className={`inline-flex items-center whitespace-nowrap text-[10px] font-medium rounded px-1.5 py-0.5 ${paymentMethodBadge.className}`}>
+                              <span className={`badge whitespace-nowrap ${paymentMethodBadge.className}`}>
                                 {paymentMethodBadge.label}
                               </span>
                             )}

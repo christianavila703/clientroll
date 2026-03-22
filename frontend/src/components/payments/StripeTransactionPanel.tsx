@@ -110,12 +110,12 @@ export default function StripeTransactionPanel({
           )}
         </div>
         <span
-          className={`text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${
+          className={`badge uppercase tracking-wide ${
             status === "succeeded" || status === "confirmed"
-              ? "bg-emerald-100 text-emerald-800"
+              ? "badge-green"
               : status === "failed"
-                ? "bg-red-100 text-red-800"
-                : "bg-amber-100 text-amber-800"
+                ? "badge-red"
+                : "badge-yellow"
           }`}
         >
           {displayStatus}

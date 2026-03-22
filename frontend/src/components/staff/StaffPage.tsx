@@ -80,19 +80,19 @@ export default function StaffPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600">{s.email}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      <span className={`badge ${
                         s.role === "tenant_admin"
-                          ? "bg-purple-100 text-purple-700"
-                          : "bg-gray-100 text-gray-700"
+                          ? "badge-purple"
+                          : "badge-gray"
                       }`}>
                         {s.role === "tenant_admin" ? "Admin" : "Staff"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      <span className={`badge ${
                         s.is_active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-700"
+                          ? "badge-green"
+                          : "badge-red"
                       }`}>
                         {s.is_active ? "Active" : "Inactive"}
                       </span>
@@ -111,8 +111,8 @@ export default function StaffPage() {
                   <p className="font-medium text-gray-900">
                     {s.first_name} {s.last_name}
                   </p>
-                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    s.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                  <span className={`badge ${
+                    s.is_active ? "badge-green" : "badge-red"
                   }`}>
                     {s.is_active ? "Active" : "Inactive"}
                   </span>

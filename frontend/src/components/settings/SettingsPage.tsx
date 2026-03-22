@@ -42,7 +42,7 @@ export default function SettingsPage() {
       <div className="flex border-b border-gray-200 mb-4">
         {([
           { key: "agreement" as const, label: "Agreement Details" },
-          { key: "tenant" as const, label: "Organisation" },
+          { key: "tenant" as const, label: "Organisation & Signup" },
           { key: "integrations" as const, label: "Integrations" },
         ]).map((t) => (
           <button
@@ -193,6 +193,8 @@ function TenantSettings() {
     default_thankyou_redirect_url: string;
     enabled_currencies: string[];
     enabled_payment_frequencies: string[];
+    ask_emergency_contact: boolean;
+    ask_company_information: boolean;
   }>({
     slug: "",
     timezone: "Australia/Brisbane",
@@ -208,6 +210,8 @@ function TenantSettings() {
     default_thankyou_redirect_url: "",
     enabled_currencies: ["AUD"],
     enabled_payment_frequencies: ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
+    ask_emergency_contact: true,
+    ask_company_information: false,
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -237,6 +241,8 @@ function TenantSettings() {
         enabled_payment_frequencies: Array.isArray(t.enabled_payment_frequencies)
           ? Array.from(new Set((t.enabled_payment_frequencies as unknown[]).map((f) => String(f).toLowerCase()))).filter(Boolean)
           : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
+        ask_emergency_contact: t.ask_emergency_contact !== false,
+        ask_company_information: t.ask_company_information === true,
       });
       const linkData = links as { browse_path?: string } | null;
       if (linkData?.browse_path) {
@@ -317,6 +323,32 @@ function TenantSettings() {
       {message && (
         <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("success") ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-600"}`}>{message}</div>
       )}
+
+      {/* Client signup fields */}
+      <div className="card">
+        <div className="card-header"><h3>Client Signup Fields</h3></div>
+        <div className="card-body space-y-2">
+          <p className="text-[11px] text-gray-500">Control which sections are requested on signup and client create/edit.</p>
+          <label className="inline-flex items-center gap-2 text-[13px] text-gray-700">
+            <input
+              type="checkbox"
+              checked={!!data.ask_emergency_contact}
+              onChange={(e) => setData({ ...data, ask_emergency_contact: e.target.checked })}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+            />
+            Ask for emergency contact
+          </label>
+          <label className="inline-flex items-center gap-2 text-[13px] text-gray-700">
+            <input
+              type="checkbox"
+              checked={!!data.ask_company_information}
+              onChange={(e) => setData({ ...data, ask_company_information: e.target.checked })}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+            />
+            Ask for company information (B2B mode)
+          </label>
+        </div>
+      </div>
 
       {/* Sales tax */}
       <div className="card">
@@ -660,10 +692,10 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
               </ul>
             </div>
             <div className="mt-2 flex items-center gap-2 text-[11px]">
-              <span className={`rounded px-1.5 py-0.5 ${existing?.has_key ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
-              <span className={`rounded px-1.5 py-0.5 ${existing?.has_secret ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
-              <span className={`rounded px-1.5 py-0.5 ${existing?.is_active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
-              <span className={`rounded px-1.5 py-0.5 ${stripeReady ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
+              <span className={`badge ${existing?.has_key ? "badge-green" : "badge-gray"}`}>Key {existing?.has_key ? "saved" : "missing"}</span>
+              <span className={`badge ${existing?.has_secret ? "badge-green" : "badge-gray"}`}>Webhook secret {existing?.has_secret ? "saved" : "missing"}</span>
+              <span className={`badge ${existing?.is_active ? "badge-green" : "badge-yellow"}`}>Integration {existing?.is_active ? "active" : "inactive"}</span>
+              <span className={`badge ${stripeReady ? "badge-green" : "badge-red"}`}>{stripeReady ? "Ready" : "Not ready"}</span>
             </div>
           </div>
         )}

@@ -92,6 +92,15 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Gender                *string `json:"gender"`
 		EmergencyContactName  *string `json:"emergency_contact_name"`
 		EmergencyContactPhone *string `json:"emergency_contact_phone"`
+		TaxNumber             *string `json:"tax_number"`
+		CompanyNumber         *string `json:"company_number"`
+		CompanyPhone          *string `json:"company_phone"`
+		CompanyWebsite        *string `json:"company_website"`
+		CompanyAddress        *string `json:"company_address"`
+		CompanyCity           *string `json:"company_city"`
+		CompanyStateRegion    *string `json:"company_state_region"`
+		CompanyPostcode       *string `json:"company_postcode"`
+		CompanyCountry        *string `json:"company_country"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -142,6 +151,15 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Gender:                normalize(input.Gender),
 		EmergencyContactName:  normalize(input.EmergencyContactName),
 		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
+		TaxNumber:             normalize(input.TaxNumber),
+		CompanyNumber:         normalize(input.CompanyNumber),
+		CompanyPhone:          normalize(input.CompanyPhone),
+		CompanyWebsite:        normalize(input.CompanyWebsite),
+		CompanyAddress:        normalize(input.CompanyAddress),
+		CompanyCity:           normalize(input.CompanyCity),
+		CompanyStateRegion:    normalize(input.CompanyStateRegion),
+		CompanyPostcode:       normalize(input.CompanyPostcode),
+		CompanyCountry:        normalize(input.CompanyCountry),
 	}
 
 	if create.Name == "" ||
@@ -152,10 +170,8 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		create.Email == nil ||
 		create.Phone == nil ||
 		create.BirthDate == nil ||
-		create.Gender == nil ||
-		create.EmergencyContactName == nil ||
-		create.EmergencyContactPhone == nil {
-		writeError(w, http.StatusBadRequest, "All client fields are required")
+		create.Gender == nil {
+		writeError(w, http.StatusBadRequest, "Please complete all required client details")
 		return
 	}
 	client, err := h.clientRepo.Create(r.Context(), tenantID, create)
@@ -213,6 +229,15 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Gender                *string `json:"gender"`
 		EmergencyContactName  *string `json:"emergency_contact_name"`
 		EmergencyContactPhone *string `json:"emergency_contact_phone"`
+		TaxNumber             *string `json:"tax_number"`
+		CompanyNumber         *string `json:"company_number"`
+		CompanyPhone          *string `json:"company_phone"`
+		CompanyWebsite        *string `json:"company_website"`
+		CompanyAddress        *string `json:"company_address"`
+		CompanyCity           *string `json:"company_city"`
+		CompanyStateRegion    *string `json:"company_state_region"`
+		CompanyPostcode       *string `json:"company_postcode"`
+		CompanyCountry        *string `json:"company_country"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -262,6 +287,15 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Gender:                normalize(input.Gender),
 		EmergencyContactName:  normalize(input.EmergencyContactName),
 		EmergencyContactPhone: normalize(input.EmergencyContactPhone),
+		TaxNumber:             normalize(input.TaxNumber),
+		CompanyNumber:         normalize(input.CompanyNumber),
+		CompanyPhone:          normalize(input.CompanyPhone),
+		CompanyWebsite:        normalize(input.CompanyWebsite),
+		CompanyAddress:        normalize(input.CompanyAddress),
+		CompanyCity:           normalize(input.CompanyCity),
+		CompanyStateRegion:    normalize(input.CompanyStateRegion),
+		CompanyPostcode:       normalize(input.CompanyPostcode),
+		CompanyCountry:        normalize(input.CompanyCountry),
 	}
 	if update.Name == "" {
 		writeError(w, http.StatusBadRequest, "Name is required")

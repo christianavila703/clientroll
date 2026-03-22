@@ -43,7 +43,6 @@ export default function MembershipTypeDetail() {
   const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(["AUD"]);
   const [tenantEnabledPaymentFrequencies, setTenantEnabledPaymentFrequencies] = useState<string[]>(DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
   const [salesTaxName, setSalesTaxName] = useState("GST");
-  const [salesTaxPercent, setSalesTaxPercent] = useState(10);
   const [savingContent, setSavingContent] = useState(false);
   const [contentForm, setContentForm] = useState({ summary: "", description: "", inclusions: "", benefits: "" });
   const [tab, setTab] = useState<"terms" | "bonuses" | "tcs">("terms");
@@ -101,7 +100,6 @@ export default function MembershipTypeDetail() {
           enabled_currencies?: string[];
           enabled_payment_frequencies?: string[];
           sales_tax_name?: string;
-          sales_tax_percent?: number;
         };
         const list = tenant.enabled_currencies || ["AUD"];
         const normalized = Array.from(new Set(list.map((c) => String(c).toUpperCase()))).filter(Boolean);
@@ -112,13 +110,11 @@ export default function MembershipTypeDetail() {
           : DEFAULT_ENABLED_PAYMENT_FREQUENCIES;
         setTenantEnabledPaymentFrequencies(enabledFreqs.length > 0 ? enabledFreqs : ["weekly"]);
         setSalesTaxName(String(tenant.sales_tax_name || "GST"));
-        setSalesTaxPercent(Number.isFinite(Number(tenant.sales_tax_percent)) ? Number(tenant.sales_tax_percent) : 10);
       })
       .catch(() => {
         setEnabledCurrencies(["AUD"]);
         setTenantEnabledPaymentFrequencies(DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
         setSalesTaxName("GST");
-        setSalesTaxPercent(10);
       });
   }, [mtId]);
 
@@ -386,7 +382,7 @@ export default function MembershipTypeDetail() {
         <TermOptionsTab
           mt={mt}
           salesTaxName={salesTaxName}
-          salesTaxPercent={salesTaxPercent}
+          applySalesTax={identityForm.apply_sales_tax}
           enabledPaymentFrequencies={
             identityForm.use_tenant_default_payment_frequencies
               ? tenantEnabledPaymentFrequencies
@@ -510,6 +506,26 @@ function recalcCustomScheduleFromNumPayments<T extends {
   };
 }
 
+function recalcCustomScheduleFromAmount<T extends {
+  duration_unit: "month" | "week";
+  duration_value: number;
+  fee_total: number | "";
+  custom_schedule_enabled: boolean;
+  custom_schedule_label: string;
+  custom_schedule_amount: unknown;
+  custom_schedule_interval_unit: "week" | "month";
+  custom_schedule_interval_count: unknown;
+  custom_schedule_num_payments: unknown;
+}>(values: T, showCustomSchedule: boolean): T {
+  if (!showCustomSchedule || !values.custom_schedule_enabled) return values;
+  const totalFee = Number(values.fee_total) || 0;
+  const amount = Number(values.custom_schedule_amount);
+  if (!Number.isFinite(amount) || amount <= 0 || totalFee <= 0) return values;
+  const numPayments = Math.max(1, Math.round(totalFee / amount));
+  const next = { ...values, custom_schedule_num_payments: String(numPayments) };
+  return recalcCustomScheduleFromNumPayments(next, showCustomSchedule);
+}
+
 function weeksToMonths(weeks: number): number {
   // DB stores integer months; round up so short weekly plans remain valid.
   return Math.max(1, Math.ceil(weeks / 4.345));
@@ -524,13 +540,13 @@ function toWholeNumber(value: string): number {
 function TermOptionsTab({
   mt,
   salesTaxName,
-  salesTaxPercent,
+  applySalesTax,
   enabledPaymentFrequencies,
   onReload,
 }: {
   mt: MembershipType;
   salesTaxName: string;
-  salesTaxPercent: number;
+  applySalesTax: boolean;
   enabledPaymentFrequencies: string[];
   onReload: () => void;
 }) {
@@ -611,6 +627,7 @@ function TermOptionsTab({
         ...form,
         duration_unit: "week",
         duration_value: 10,
+        continue_after_term: false,
         custom_schedule_enabled: true,
         custom_schedule_label: "10 weekly payments",
         custom_schedule_interval_unit: "week",
@@ -625,6 +642,7 @@ function TermOptionsTab({
         ...form,
         duration_unit: "week",
         duration_value: 20,
+        continue_after_term: false,
         custom_schedule_enabled: true,
         custom_schedule_label: "20 weekly payments",
         custom_schedule_interval_unit: "week",
@@ -639,6 +657,7 @@ function TermOptionsTab({
         ...form,
         duration_unit: "month",
         duration_value: 12,
+        continue_after_term: false,
         custom_schedule_enabled: true,
         custom_schedule_label: "2 payments, 6 months apart",
         custom_schedule_interval_unit: "month",
@@ -652,6 +671,7 @@ function TermOptionsTab({
       ...form,
       duration_unit: "month",
       duration_value: 3,
+      continue_after_term: false,
       custom_schedule_enabled: true,
       custom_schedule_label: "3 monthly payments",
       custom_schedule_interval_unit: "month",
@@ -692,7 +712,7 @@ function TermOptionsTab({
         fee_fortnightly: showFortnightly && form.fee_fortnightly ? Number(form.fee_fortnightly) : null,
         fee_monthly: showMonthly && form.fee_monthly ? Number(form.fee_monthly) : null,
         fee_quarterly: showQuarterly && form.fee_quarterly ? Number(form.fee_quarterly) : null,
-        continue_after_term: form.continue_after_term,
+        continue_after_term: form.custom_schedule_enabled ? false : form.continue_after_term,
         custom_schedule_label: showCustomSchedule ? (form.custom_schedule_label || null) : null,
         custom_schedule_amount: showCustomSchedule && form.custom_schedule_amount ? Number(form.custom_schedule_amount) : null,
         custom_schedule_interval_unit: showCustomSchedule && form.custom_schedule_enabled ? form.custom_schedule_interval_unit : null,
@@ -712,7 +732,7 @@ function TermOptionsTab({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-[13px] text-gray-500">Define pricing options for different contract lengths. Prices are tax-inclusive ({salesTaxName} {salesTaxPercent.toFixed(2)}%).</p>
+        <p className="text-[13px] text-gray-500">Define pricing options for different contract lengths.</p>
         <button onClick={() => setShowAdd(!showAdd)} className="btn-primary">Add term option</button>
       </div>
 
@@ -741,16 +761,16 @@ function TermOptionsTab({
               <p className="text-[10px] text-gray-400 mt-0.5">Stored as {durationMonths()} month{durationMonths() === 1 ? "" : "s"} for term-end rules.</p>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ({currencyCode}, incl {salesTaxName}) *</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">Total fee ({currencyCode}) *</label>
               <input type="number" value={form.fee_total} onChange={(e) => updateWithCalc("fee_total", parseNumericInput(e.target.value))} className="input-field" min="0" step="0.01" required />
             </div>
-            {showWeekly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_weekly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
-            {showFortnightly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_fortnightly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
-            {showMonthly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_monthly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
-            {showQuarterly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_quarterly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
+            {showWeekly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_weekly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
+            {showFortnightly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_fortnightly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
+            {showMonthly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_monthly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
+            {showQuarterly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_quarterly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
             <div className="flex flex-col gap-2 pb-1 justify-end">
               {showUpfront && <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>}
-              <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.continue_after_term} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Continue billing after term</label>
+              <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.custom_schedule_enabled ? false : form.continue_after_term} disabled={showCustomSchedule && form.custom_schedule_enabled} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600 disabled:opacity-50" />Continue billing after term</label>
             </div>
             <div className="sm:col-span-2">
               <div className="mb-2">
@@ -767,7 +787,7 @@ function TermOptionsTab({
                   type="checkbox"
                   checked={form.custom_schedule_enabled}
                   onChange={(e) => {
-                    const next = { ...form, custom_schedule_enabled: e.target.checked };
+                    const next = { ...form, custom_schedule_enabled: e.target.checked, ...(e.target.checked ? { continue_after_term: false } : {}) };
                     setForm(fillMissingCustomSchedule(next, showCustomSchedule));
                   }}
                   className="h-4 w-4 rounded border-gray-300 text-indigo-600"
@@ -782,7 +802,17 @@ function TermOptionsTab({
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ({currencyCode})</label>
-                    <input type="number" value={form.custom_schedule_amount} onChange={(e) => setForm({ ...form, custom_schedule_amount: e.target.value })} className="input-field" min="0" step="0.01" />
+                    <input
+                      type="number"
+                      value={form.custom_schedule_amount}
+                      onChange={(e) => {
+                        const next = { ...form, custom_schedule_amount: e.target.value };
+                        setForm(recalcCustomScheduleFromAmount(next, showCustomSchedule));
+                      }}
+                      className="input-field"
+                      min="0"
+                      step="0.01"
+                    />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1"># payments</label>
@@ -825,7 +855,7 @@ function TermOptionsTab({
       ) : (
         <div className="space-y-3">
           {mt.term_options.map((to) => (
-            <TermOptionCard key={to.id} termOption={to} enabledPaymentFrequencies={enabledPaymentFrequencies} currencyCode={currencyCode} salesTaxName={salesTaxName} mtId={mt.id} onReload={onReload} onDelete={() => handleDelete(to.id)} />
+            <TermOptionCard key={to.id} termOption={to} enabledPaymentFrequencies={enabledPaymentFrequencies} currencyCode={currencyCode} salesTaxName={salesTaxName} applySalesTax={applySalesTax} mtId={mt.id} onReload={onReload} onDelete={() => handleDelete(to.id)} />
           ))}
         </div>
       )}
@@ -834,8 +864,8 @@ function TermOptionsTab({
 }
 
 // === Editable Term Option Card ===
-function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCode, salesTaxName, mtId, onReload, onDelete }: {
-  termOption: TermOption; enabledPaymentFrequencies: string[]; currencyCode: string; salesTaxName: string; mtId: string; onReload: () => void; onDelete: () => void;
+function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCode, salesTaxName, applySalesTax, mtId, onReload, onDelete }: {
+  termOption: TermOption; enabledPaymentFrequencies: string[]; currencyCode: string; salesTaxName: string; applySalesTax: boolean; mtId: string; onReload: () => void; onDelete: () => void;
 }) {
   type NumericField = number | "";
   const parseNumericInput = (value: string): NumericField => (value === "" ? "" : Number(value));
@@ -935,7 +965,7 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
         fee_fortnightly: showFortnightly && form.fee_fortnightly !== "" ? Number(form.fee_fortnightly) : null,
         fee_monthly: showMonthly && form.fee_monthly !== "" ? Number(form.fee_monthly) : null,
         fee_quarterly: showQuarterly && form.fee_quarterly !== "" ? Number(form.fee_quarterly) : null,
-        continue_after_term: form.continue_after_term,
+        continue_after_term: form.custom_schedule_enabled ? false : form.continue_after_term,
         custom_schedule_label: showCustomSchedule ? (form.custom_schedule_label || null) : null,
         custom_schedule_amount: showCustomSchedule && form.custom_schedule_amount !== "" ? Number(form.custom_schedule_amount) : null,
         custom_schedule_interval_unit: showCustomSchedule && form.custom_schedule_enabled ? form.custom_schedule_interval_unit : null,
@@ -1013,30 +1043,30 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
             <p className="text-[10px] text-gray-400 mt-0.5">Stored as {editDurationMonths()} month{editDurationMonths() === 1 ? "" : "s"} for term-end rules.</p>
           </div>
           <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ({currencyCode}, incl {salesTaxName})</label>
+            <label className="block text-[12px] font-medium text-gray-700 mb-1">Total fee ({currencyCode})</label>
             <input type="number" value={form.fee_total} onChange={(e) => updateEditCalc("fee_total", parseNumericInput(e.target.value))} className="input-field" min="0" step="0.01" />
           </div>
           {showWeekly && (
             <div>
-              <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}, incl {salesTaxName})</label>
+              <label className="block text-[12px] font-medium text-gray-700 mb-1">Weekly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""})</label>
               <input type="number" value={form.fee_weekly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="—" />
             </div>
           )}
           {showFortnightly && (
             <div>
-              <label className="block text-[12px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}, incl {salesTaxName})</label>
+              <label className="block text-[12px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""})</label>
               <input type="number" value={form.fee_fortnightly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="—" />
             </div>
           )}
           {showMonthly && (
             <div>
-              <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName})</label>
+              <label className="block text-[12px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""})</label>
               <input type="number" value={form.fee_monthly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="—" />
             </div>
           )}
           {showQuarterly && (
             <div>
-              <label className="block text-[12px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName})</label>
+              <label className="block text-[12px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}{applySalesTax ? `, incl ${salesTaxName}` : ""})</label>
               <input type="number" value={form.fee_quarterly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="—" />
             </div>
           )}
@@ -1048,7 +1078,7 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
               </label>
             )}
             <label className="flex items-center gap-2 text-[12px] text-gray-700">
-              <input type="checkbox" checked={form.continue_after_term} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />
+              <input type="checkbox" checked={form.custom_schedule_enabled ? false : form.continue_after_term} disabled={showCustomSchedule && form.custom_schedule_enabled} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600 disabled:opacity-50" />
               Continue billing after term
             </label>
           </div>
@@ -1059,7 +1089,7 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
                   type="checkbox"
                   checked={form.custom_schedule_enabled}
                   onChange={(e) => {
-                    const next = { ...form, custom_schedule_enabled: e.target.checked };
+                    const next = { ...form, custom_schedule_enabled: e.target.checked, ...(e.target.checked ? { continue_after_term: false } : {}) };
                     setForm(fillMissingCustomSchedule(next, showCustomSchedule));
                   }}
                   className="h-4 w-4 rounded border-gray-300 text-indigo-600"
@@ -1075,7 +1105,17 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
                 </div>
                 <div>
                   <label className="block text-[12px] font-medium text-gray-700 mb-1">Payment amount ({currencyCode})</label>
-                  <input type="number" value={form.custom_schedule_amount} onChange={(e) => setForm({ ...form, custom_schedule_amount: e.target.value })} className="input-field" min="0" step="0.01" />
+                  <input
+                    type="number"
+                    value={form.custom_schedule_amount}
+                    onChange={(e) => {
+                      const next = { ...form, custom_schedule_amount: e.target.value };
+                      setForm(recalcCustomScheduleFromAmount(next, showCustomSchedule));
+                    }}
+                    className="input-field"
+                    min="0"
+                    step="0.01"
+                  />
                 </div>
                 <div>
                   <label className="block text-[12px] font-medium text-gray-700 mb-1"># payments</label>

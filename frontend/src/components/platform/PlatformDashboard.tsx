@@ -96,8 +96,8 @@ export default function PlatformDashboard() {
                     <td className="px-4 py-3 text-gray-600 font-mono text-xs">{t.slug}</td>
                     <td className="px-4 py-3 text-gray-600">{t.timezone}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        t.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                      <span className={`badge ${
+                        t.is_active ? "badge-green" : "badge-red"
                       }`}>
                         {t.is_active ? "Active" : "Inactive"}
                       </span>

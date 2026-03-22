@@ -84,7 +84,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     name: "", unit_number: "", address: "", suburb: "", state: "", postcode: "",
     email: "", phone: "", birth_date: "", gender: "",
     emergency_contact_name: "", emergency_contact_phone: "",
+    tax_number: "", company_number: "", company_phone: "", company_website: "",
+    company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: "",
   });
+  const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
   const [payment, setPayment] = useState({
     payment_method: defaultMethod,
     payment_frequency: "monthly",
@@ -284,6 +287,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               data={member}
               onChange={(next) => setMember(next as typeof member)}
               googlePlacesApiKey={tenant.google_places_api_key}
+              askEmergencyContact={tenant.ask_emergency_contact !== false}
+              askCompanyInformation={tenant.ask_company_information === true}
+              companyAddressSameAsClient={companyAddressSameAsClient}
+              onCompanyAddressSameAsClientChange={setCompanyAddressSameAsClient}
               onNext={() => setFormStep("payment")}
             />
           )}
@@ -331,13 +338,26 @@ function NavButtons({ onBack, onNext, nextLabel, isSubmit, disabled }: { onBack?
 }
 
 /* ─── Section A: Member Details ─── */
-function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
+function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergencyContact, askCompanyInformation, companyAddressSameAsClient, onCompanyAddressSameAsClientChange }: {
   data: Record<string, string>;
   onChange: (d: Record<string, string>) => void;
   onNext: () => void;
   googlePlacesApiKey?: string;
+  askEmergencyContact: boolean;
+  askCompanyInformation: boolean;
+  companyAddressSameAsClient: boolean;
+  onCompanyAddressSameAsClientChange: (next: boolean) => void;
 }) {
-  const set = (k: string, v: string) => onChange({ ...data, [k]: v });
+  const set = (k: string, v: string) => {
+    const next = { ...data, [k]: v };
+    if (companyAddressSameAsClient) {
+      if (k === "address") next.company_address = v;
+      if (k === "suburb") next.company_city = v;
+      if (k === "state") next.company_state_region = v;
+      if (k === "postcode") next.company_postcode = v;
+    }
+    onChange(next);
+  };
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
 
   return (
@@ -354,14 +374,21 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
             value={data.address}
             onChange={(v) => set("address", v)}
             onAddressSelect={({ unit_number, address, suburb, state, postcode }) => {
-              onChange({
+              const next = {
                 ...data,
                 unit_number: unit_number || data.unit_number,
                 address: address || data.address,
                 suburb: suburb || data.suburb,
                 state: state || data.state,
                 postcode: postcode || data.postcode,
-              });
+              };
+              if (companyAddressSameAsClient) {
+                next.company_address = address || data.address;
+                next.company_city = suburb || data.suburb;
+                next.company_state_region = state || data.state;
+                next.company_postcode = postcode || data.postcode;
+              }
+              onChange(next);
             }}
             apiKey={googlePlacesApiKey}
             className={inputCls}
@@ -390,21 +417,84 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey }: {
       </div>
 
       {/* Emergency contact section */}
-      <div className="mt-10 pt-8 border-t border-gray-100">
-        <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Emergency Contact</h3>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-          <Field label="Contact Name" required><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className={inputCls} placeholder="Jane Smith" required /></Field>
-          <Field label="Contact Phone" required><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
+      {askEmergencyContact && (
+        <div className="mt-10 pt-8 border-t border-gray-100">
+          <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Emergency Contact</h3>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <Field label="Contact Name" required><input value={data.emergency_contact_name} onChange={(e) => set("emergency_contact_name", e.target.value)} className={inputCls} placeholder="Jane Smith" required /></Field>
+            <Field label="Contact Phone" required><input type="tel" value={data.emergency_contact_phone} onChange={(e) => set("emergency_contact_phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
+          </div>
         </div>
-      </div>
+      )}
+
+      {askCompanyInformation && (
+        <div className="mt-10 pt-8 border-t border-gray-100 space-y-6">
+          <div>
+            <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Company Information</h3>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Field label="Tax Number" required><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" required /></Field>
+              <Field label="Company Number" required><input value={data.company_number} onChange={(e) => set("company_number", e.target.value)} className={inputCls} placeholder="Company number" required /></Field>
+              <Field label="Phone" required><input type="tel" value={data.company_phone} onChange={(e) => set("company_phone", e.target.value)} className={inputCls} placeholder="03 9000 0000" required /></Field>
+              <Field label="Website" required><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" required /></Field>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-[14px] font-semibold text-gray-900 mb-3">Client Address</h4>
+            <label className="inline-flex items-center gap-2 text-[13px] text-gray-700 mb-4">
+              <input
+                type="checkbox"
+                checked={companyAddressSameAsClient}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  onCompanyAddressSameAsClientChange(checked);
+                  if (checked) {
+                    onChange({
+                      ...data,
+                      company_address: data.address,
+                      company_city: data.suburb,
+                      company_state_region: data.state,
+                      company_postcode: data.postcode,
+                    });
+                  }
+                }}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+              />
+              Same as personal address
+            </label>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Field label="Address" required full><input value={data.company_address} onChange={(e) => set("company_address", e.target.value)} className={inputCls} placeholder="Company street address" required /></Field>
+              <Field label="City" required><input value={data.company_city} onChange={(e) => set("company_city", e.target.value)} className={inputCls} placeholder="City" required /></Field>
+              <Field label="State / Region" required><input value={data.company_state_region} onChange={(e) => set("company_state_region", e.target.value)} className={inputCls} placeholder="State or region" required /></Field>
+              <Field label="ZIP / Postcode" required><input value={data.company_postcode} onChange={(e) => set("company_postcode", e.target.value)} className={inputCls} placeholder="Postcode" required /></Field>
+              <Field label="Country" required full><input value={data.company_country} onChange={(e) => set("company_country", e.target.value)} className={inputCls} placeholder="Country" required /></Field>
+            </div>
+          </div>
+        </div>
+      )}
 
       <NavButtons onNext={() => {
         const required: [string, string][] = [
           ["name", "Full Name"], ["address", "Street Address"], ["suburb", "Suburb"],
           ["state", "State"], ["postcode", "Postcode"], ["email", "Email"],
           ["phone", "Phone"], ["birth_date", "Date of Birth"], ["gender", "Gender"],
-          ["emergency_contact_name", "Emergency Contact Name"], ["emergency_contact_phone", "Emergency Contact Phone"],
         ];
+        if (askEmergencyContact) {
+          required.push(["emergency_contact_name", "Emergency Contact Name"], ["emergency_contact_phone", "Emergency Contact Phone"]);
+        }
+        if (askCompanyInformation) {
+          required.push(
+            ["tax_number", "Tax Number"],
+            ["company_number", "Company Number"],
+            ["company_phone", "Company Phone"],
+            ["company_website", "Company Website"],
+            ["company_address", "Company Address"],
+            ["company_city", "Company City"],
+            ["company_state_region", "Company State / Region"],
+            ["company_postcode", "Company ZIP / Postcode"],
+            ["company_country", "Company Country"],
+          );
+        }
         const missing = required.filter(([k]) => !data[k]?.trim());
         if (missing.length) {
           alert("Please complete: " + missing.map(([, l]) => l).join(", "));

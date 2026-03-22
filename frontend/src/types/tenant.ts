@@ -6,6 +6,8 @@ export interface TenantBranding {
   secondary_colour?: string;
   signup_price_display_mode?: "total" | "weekly" | "monthly";
   enabled_payment_frequencies?: string[];
+  ask_emergency_contact?: boolean;
+  ask_company_information?: boolean;
   google_places_api_key?: string;
   payment_providers?: string[];
 }

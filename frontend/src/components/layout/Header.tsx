@@ -157,11 +157,11 @@ function NotificationBell() {
 
   const alertCount = (data?.failed_payments || 0) + (data?.open_disputes || 0);
 
-  const items: { label: string; count: number; colour: string; url: string }[] = [];
+  const items: { label: string; count: number; badgeClass: string; url: string }[] = [];
   if (data) {
-    if (data.failed_payments > 0) items.push({ label: "Failed payments", count: data.failed_payments, colour: "text-red-600 bg-red-50", url: "/payments" });
-    if (data.open_disputes > 0) items.push({ label: "Open disputes", count: data.open_disputes, colour: "text-amber-600 bg-amber-50", url: "/payments" });
-    if (data.new_signups > 0) items.push({ label: "New signups this month", count: data.new_signups, colour: "text-indigo-600 bg-indigo-50", url: "/clients" });
+    if (data.failed_payments > 0) items.push({ label: "Failed payments", count: data.failed_payments, badgeClass: "badge-red", url: "/payments" });
+    if (data.open_disputes > 0) items.push({ label: "Open disputes", count: data.open_disputes, badgeClass: "badge-yellow", url: "/payments" });
+    if (data.new_signups > 0) items.push({ label: "New signups this month", count: data.new_signups, badgeClass: "badge-purple", url: "/clients" });
   }
 
   return (
@@ -193,7 +193,7 @@ function NotificationBell() {
                   className="flex w-full items-center justify-between px-3 py-2.5 hover:bg-gray-50 transition-colors"
                 >
                   <span className="text-[13px] text-gray-700">{item.label}</span>
-                  <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${item.colour}`}>{item.count}</span>
+                  <span className={`badge ${item.badgeClass}`}>{item.count}</span>
                 </button>
               ))}
             </div>

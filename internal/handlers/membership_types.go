@@ -476,6 +476,10 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		return
 	}
 	if input.CustomScheduleEnabled {
+		if input.ContinueAfterTerm {
+			writeError(w, http.StatusBadRequest, "continue_after_term cannot be enabled for custom schedule plans")
+			return
+		}
 		if input.CustomScheduleAmount == nil || *input.CustomScheduleAmount <= 0 {
 			writeError(w, http.StatusBadRequest, "custom_schedule_amount must be greater than 0")
 			return
@@ -557,6 +561,10 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		return
 	}
 	if input.CustomScheduleEnabled {
+		if input.ContinueAfterTerm {
+			writeError(w, http.StatusBadRequest, "continue_after_term cannot be enabled for custom schedule plans")
+			return
+		}
 		if input.CustomScheduleAmount == nil || *input.CustomScheduleAmount <= 0 {
 			writeError(w, http.StatusBadRequest, "custom_schedule_amount must be greater than 0")
 			return

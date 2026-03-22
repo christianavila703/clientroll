@@ -307,6 +307,8 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		SalesTaxPercent            *float64 `json:"sales_tax_percent,omitempty"`
 		EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
 		EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
+		AskEmergencyContact        *bool    `json:"ask_emergency_contact,omitempty"`
+		AskCompanyInformation      *bool    `json:"ask_company_information,omitempty"`
 		PrimaryColour              *string  `json:"primary_colour,omitempty"`
 		SecondaryColour            *string  `json:"secondary_colour,omitempty"`
 		SignupPriceDisplayMode     *string  `json:"signup_price_display_mode,omitempty"`
@@ -427,6 +429,8 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		SalesTaxPercent:            nextSalesTaxPercent,
 		EnabledCurrencies:          nextEnabledCurrencies,
 		EnabledPaymentFrequencies:  nextEnabledPaymentFrequencies,
+		AskEmergencyContact:        input.AskEmergencyContact,
+		AskCompanyInformation:      input.AskCompanyInformation,
 		PrimaryColour:              input.PrimaryColour,
 		SecondaryColour:            input.SecondaryColour,
 		SignupPriceDisplayMode:     nextDisplayMode,

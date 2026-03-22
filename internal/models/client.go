@@ -22,6 +22,15 @@ type Client struct {
 	Gender                *string    `json:"gender"`
 	EmergencyContactName  *string    `json:"emergency_contact_name"`
 	EmergencyContactPhone *string    `json:"emergency_contact_phone"`
+	TaxNumber             *string    `json:"tax_number"`
+	CompanyNumber         *string    `json:"company_number"`
+	CompanyPhone          *string    `json:"company_phone"`
+	CompanyWebsite        *string    `json:"company_website"`
+	CompanyAddress        *string    `json:"company_address"`
+	CompanyCity           *string    `json:"company_city"`
+	CompanyStateRegion    *string    `json:"company_state_region"`
+	CompanyPostcode       *string    `json:"company_postcode"`
+	CompanyCountry        *string    `json:"company_country"`
 	GoCardlessCustomerID  *string    `json:"gocardless_customer_id,omitempty"`
 	StripeCustomerID      *string    `json:"stripe_customer_id,omitempty"`
 	DeletedAt             *time.Time `json:"deleted_at,omitempty"`

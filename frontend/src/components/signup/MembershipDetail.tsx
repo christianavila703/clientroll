@@ -84,11 +84,8 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
     }
     const positiveFees = fees.filter((v) => v > 0.004);
     if (positiveFees.length === 0) return null;
-    if (positiveFees.length === 1) {
-      return `+ processing fee ${currencyCode} $${formatMoney(positiveFees[0])}`;
-    }
     const minFee = Math.min(...positiveFees);
-    return `+ processing fee from ${currencyCode} $${formatMoney(minFee)}`;
+    return `+ payment processing fee of ${currencyCode} $${formatMoney(minFee)}`;
   };
 
   useEffect(() => {
@@ -230,10 +227,10 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                         {term.duration_months} Months
                       </span>
                       {term.bonuses && term.bonuses.length > 0 && (
-                        <span className={`text-xs font-semibold rounded-full px-3 py-1 ${
+                        <span className={`badge ${
                           idx === selectedTermIdx 
-                            ? "bg-primary-200 text-primary-800" 
-                            : "bg-gray-100 text-gray-600"
+                            ? "badge-purple" 
+                            : "badge-gray"
                         }`}>
                           {term.bonuses.length} bonus{term.bonuses.length !== 1 ? "es" : ""}
                         </span>

@@ -340,7 +340,7 @@ function KpiCard({ label, value, colour, delta, alert, sub }: { label: string; v
       <div className="flex items-end gap-2 mt-1">
         <p className={`text-2xl font-bold tabular-nums ${alert ? "text-red-600" : "text-gray-900"}`}>{value}</p>
         {delta !== undefined && delta !== 0 && (
-          <span className={`text-[11px] font-semibold rounded-full px-1.5 py-0.5 mb-0.5 ${delta > 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+          <span className={`badge mb-0.5 ${delta > 0 ? "badge-green" : "badge-red"}`}>
             {delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%
           </span>
         )}
