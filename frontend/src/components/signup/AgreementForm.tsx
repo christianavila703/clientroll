@@ -327,24 +327,50 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           <div className="text-right">
             {(() => {
               const mode = tenant.signup_price_display_mode || "total";
+              const lockedFrequency = paymentFrequencyLocked ? String(payment.payment_frequency || "").toLowerCase() : "";
               const toWeekly = (total: number, months: number) => months ? total / ((months * 52) / 12) : null;
+              const toFortnightly = (total: number, months: number) => {
+                const weekly = toWeekly(total, months);
+                return weekly ? weekly * 2 : null;
+              };
               const toMonthly = (total: number, months: number) => months ? total / months : null;
+              const toQuarterly = (total: number, months: number) => months >= 3 ? total / (months / 3) : null;
               const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const weeklyValue = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
+              const fortnightlyValue = termOption.fee_fortnightly || toFortnightly(termOption.fee_total, termOption.duration_months);
               const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
-              const resolvedMode =
-                mode === "weekly"
-                  ? (weeklyValue ? "weekly" : "total")
-                  : mode === "monthly"
-                  ? (monthlyValue ? "monthly" : "total")
-                  : "total";
+              const quarterlyValue = (termOption as any).fee_quarterly || toQuarterly(termOption.fee_total, termOption.duration_months);
+              const resolvedMode = (() => {
+                // In invite finalisation with locked frequency, the summary must mirror the selected/locked cadence.
+                if (lockedFrequency === "weekly") return weeklyValue ? "weekly" : "total";
+                if (lockedFrequency === "fortnightly") return fortnightlyValue ? "fortnightly" : "total";
+                if (lockedFrequency === "monthly") return monthlyValue ? "monthly" : "total";
+                if (lockedFrequency === "quarterly") return quarterlyValue ? "quarterly" : "total";
+                if (lockedFrequency === "upfront") return "total";
+                if (lockedFrequency === "custom_schedule") return "custom_schedule";
+                if (mode === "weekly") return weeklyValue ? "weekly" : "total";
+                if (mode === "monthly") return monthlyValue ? "monthly" : "total";
+                return "total";
+              })();
               if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
                 if (w) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
               }
+              if (resolvedMode === "fortnightly") {
+                const f = termOption.fee_fortnightly || toFortnightly(termOption.fee_total, termOption.duration_months);
+                if (f) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(f)}</p><p className="text-[11px] text-gray-400">per fortnight</p></>);
+              }
               if (resolvedMode === "monthly") {
                 const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
                 if (m) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
+              }
+              if (resolvedMode === "quarterly") {
+                const q = (termOption as any).fee_quarterly || toQuarterly(termOption.fee_total, termOption.duration_months);
+                if (q) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(q)}</p><p className="text-[11px] text-gray-400">per quarter</p></>);
+              }
+              if (resolvedMode === "custom_schedule" && termOption.custom_schedule_enabled && termOption.custom_schedule_amount) {
+                const label = termOption.custom_schedule_label || "custom schedule";
+                return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(termOption.custom_schedule_amount)}</p><p className="text-[11px] text-gray-400">{label}</p></>);
               }
               return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
             })()}
