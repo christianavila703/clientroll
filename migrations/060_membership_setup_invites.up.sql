@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS membership_setup_invites (
     token UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     membership_type_id UUID NOT NULL REFERENCES membership_types(id) ON DELETE CASCADE,
-    term_option_id UUID NOT NULL REFERENCES term_options(id) ON DELETE CASCADE,
+    term_option_id UUID NOT NULL REFERENCES membership_term_options(id) ON DELETE CASCADE,
     start_date DATE NOT NULL,
     payment_frequency VARCHAR(32) NOT NULL,
     payment_method VARCHAR(32),
