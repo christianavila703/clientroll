@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
 import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
-import type { Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
+import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
 interface Props {
   tenant: Tenant;
@@ -86,6 +86,10 @@ function inferCountryCodeFromCurrency(currencyCode: string): string {
   return "";
 }
 
+function hasText(value: unknown): boolean {
+  return String(value || "").trim().length > 0;
+}
+
 export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
@@ -114,6 +118,9 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     institution_name: "", branch_location: "",
     account_holder_name: "", account_number: "", bsb: "",
   });
+  const [termBonuses, setTermBonuses] = useState<Bonus[]>(
+    Array.isArray(termOption.bonuses) ? termOption.bonuses : []
+  );
   const [memberSignature, setMemberSignature] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState<Set<string>>(new Set());
   const [sendAgreementEmail, setSendAgreementEmail] = useState(true);
@@ -174,6 +181,36 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       company_country: String(inviteClient.company_country || inviteClient.country || prev.company_country || defaultCountryCode),
     }));
   }, [inviteClient, defaultCountryCode]);
+
+  useEffect(() => {
+    let active = true;
+    const embedded = Array.isArray(termOption.bonuses) ? termOption.bonuses : [];
+    if (embedded.length > 0) {
+      setTermBonuses(embedded);
+      return () => {
+        active = false;
+      };
+    }
+    if (!termOption?.id) {
+      setTermBonuses([]);
+      return () => {
+        active = false;
+      };
+    }
+    fetch(`/api/signup/${tenantSlug}/${membership.slug}/term/${termOption.id}/bonuses${window.location.search || ""}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active) return;
+        setTermBonuses(Array.isArray(data?.bonuses) ? data.bonuses : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTermBonuses([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [termOption, tenantSlug, membership.slug]);
 
   const handleSubmit = async () => {
     if (!memberSignature) {
@@ -329,6 +366,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
         )}
       </div>
 
+      {formStep === "member" && (
+        <MembershipOverview membership={membership} termOption={termOption} bonuses={termBonuses} currencyCode={currencyCode} />
+      )}
+
       {error && (
         <div id="signup-error" className="mb-6 rounded-xl bg-red-50 border border-red-200 px-5 py-4 flex items-start gap-3">
           <svg className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
@@ -357,6 +398,58 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MembershipOverview({ membership, termOption, bonuses, currencyCode }: { membership: MembershipType; termOption: TermOption; bonuses: Bonus[]; currencyCode: string }) {
+  const sections = [
+    { label: "Summary", value: membership.summary },
+    { label: "Description", value: membership.description },
+    { label: "Inclusions", value: membership.inclusions },
+    { label: "Benefits", value: membership.benefits },
+  ].filter((s) => hasText(s.value));
+
+  if (sections.length === 0 && bonuses.length === 0) return null;
+
+  return (
+    <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <h3 className="text-[16px] font-semibold text-gray-900">What&apos;s Included In This Membership</h3>
+      <p className="mt-1 text-[13px] text-gray-500">
+        Review these details before continuing with your signup.
+      </p>
+
+      <div className="mt-5 space-y-5">
+        {sections.map((section) => (
+          <div key={section.label}>
+            <h4 className="text-[12px] font-semibold uppercase tracking-wide text-gray-500">{section.label}</h4>
+            <div className="mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-relaxed text-gray-800">
+              {String(section.value || "")}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {bonuses.length > 0 && (
+        <div className="mt-6 border-t border-gray-200 pt-5">
+          <h4 className="text-[12px] font-semibold uppercase tracking-wide text-gray-500">
+            Bonuses ({termOption.duration_months}-Month Term)
+          </h4>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {bonuses.map((bonus) => (
+              <div key={bonus.id} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <p className="text-[14px] font-semibold text-gray-900">{bonus.title}</p>
+                {hasText(bonus.description) && (
+                  <p className="mt-1 text-[13px] leading-relaxed text-gray-700">{bonus.description}</p>
+                )}
+                <p className="mt-2 text-[12px] font-medium text-emerald-700">
+                  Value: {currencyCode} ${Number(bonus.value || 0).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -439,7 +532,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
             value={data.address}
             onChange={(v) => set("address", v)}
             onAddressSelect={({ unit_number, address, suburb, state, postcode }) => {
-              const next = {
+              const next: Record<string, string> = {
                 ...data,
                 unit_number: unit_number || data.unit_number,
                 address: address || data.address,
@@ -714,7 +807,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
               ) : (
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-600">Processing fee</span>
-                  <span className="font-medium text-gray-900">+ payment processing fees</span>
+                  <span className="font-medium text-gray-900">+ payment processing fee</span>
                 </div>
               )}
               <div className="flex justify-between gap-3 border-t border-gray-200 pt-1.5">
@@ -722,7 +815,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
                 {feeKnown ? (
                   <span className="font-semibold text-gray-900 tabular-nums">{currencyCode} ${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 ) : (
-                  <span className="font-semibold text-gray-900">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + processing fees</span>
+                  <span className="font-semibold text-gray-900">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + processing fee</span>
                 )}
               </div>
             </div>
