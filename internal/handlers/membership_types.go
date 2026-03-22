@@ -459,7 +459,6 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		FeeMonthly                  *float64 `json:"fee_monthly"`
 		FeeQuarterly                *float64 `json:"fee_quarterly"`
 		AllowUpfront                bool     `json:"allow_upfront"`
-		NumPayments                 *int     `json:"num_payments"`
 		ContinueAfterTerm           bool     `json:"continue_after_term"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
@@ -474,10 +473,6 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	}
 	if input.DurationMonths <= 0 {
 		writeError(w, http.StatusBadRequest, "Duration must be a whole number of months")
-		return
-	}
-	if input.NumPayments != nil && *input.NumPayments <= 0 {
-		writeError(w, http.StatusBadRequest, "num_payments must be a whole number greater than 0")
 		return
 	}
 	if input.CustomScheduleEnabled {
@@ -512,7 +507,7 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly := deriveTermFrequencyFees(input.DurationMonths, input.FeeTotal)
 	to, err := h.mtRepo.CreateTermOption(r.Context(), tenantID, mtID,
 		input.DurationMonths, input.FeeTotal, feeWeekly,
-		feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, input.NumPayments,
+		feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, nil,
 		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)
@@ -540,7 +535,6 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 		FeeMonthly                  *float64 `json:"fee_monthly"`
 		FeeQuarterly                *float64 `json:"fee_quarterly"`
 		AllowUpfront                bool     `json:"allow_upfront"`
-		NumPayments                 *int     `json:"num_payments"`
 		ContinueAfterTerm           bool     `json:"continue_after_term"`
 		CustomScheduleEnabled       bool     `json:"custom_schedule_enabled"`
 		CustomScheduleLabel         *string  `json:"custom_schedule_label"`
@@ -555,10 +549,6 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 	}
 	if input.DurationMonths <= 0 {
 		writeError(w, http.StatusBadRequest, "Duration must be a whole number of months")
-		return
-	}
-	if input.NumPayments != nil && *input.NumPayments <= 0 {
-		writeError(w, http.StatusBadRequest, "num_payments must be a whole number greater than 0")
 		return
 	}
 	if input.CustomScheduleEnabled {
@@ -592,7 +582,7 @@ func (h *MembershipTypeHandler) UpdateTermOption(w http.ResponseWriter, r *http.
 
 	feeWeekly, feeFortnightly, feeMonthly, feeQuarterly := deriveTermFrequencyFees(input.DurationMonths, input.FeeTotal)
 	to, err := h.mtRepo.UpdateTermOption(r.Context(), toID, tenantID, input.DurationMonths,
-		input.FeeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, input.NumPayments,
+		input.FeeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, input.AllowUpfront, nil,
 		input.ContinueAfterTerm,
 		input.CustomScheduleEnabled, input.CustomScheduleLabel, input.CustomScheduleAmount,
 		input.CustomScheduleIntervalUnit, input.CustomScheduleIntervalCount, input.CustomScheduleNumPayments)

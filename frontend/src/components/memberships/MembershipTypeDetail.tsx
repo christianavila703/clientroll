@@ -549,7 +549,6 @@ function TermOptionsTab({
     fee_monthly: "",
     fee_quarterly: "",
     allow_upfront: true,
-    num_payments: "",
     continue_after_term: false,
     custom_schedule_enabled: false,
     custom_schedule_label: "",
@@ -669,10 +668,6 @@ function TermOptionsTab({
       setError(`Duration must be a whole number of ${form.duration_unit === "week" ? "weeks" : "months"}.`);
       return;
     }
-    if (form.num_payments !== "" && (!Number.isInteger(Number(form.num_payments)) || Number(form.num_payments) <= 0)) {
-      setError("Number of payments must be a whole number.");
-      return;
-    }
     if (showCustomSchedule && form.custom_schedule_enabled) {
       if (!form.custom_schedule_amount || Number(form.custom_schedule_amount) <= 0) {
         setError("Custom schedule amount must be greater than 0.");
@@ -697,7 +692,6 @@ function TermOptionsTab({
         fee_fortnightly: showFortnightly && form.fee_fortnightly ? Number(form.fee_fortnightly) : null,
         fee_monthly: showMonthly && form.fee_monthly ? Number(form.fee_monthly) : null,
         fee_quarterly: showQuarterly && form.fee_quarterly ? Number(form.fee_quarterly) : null,
-        num_payments: form.num_payments ? Number(form.num_payments) : null,
         continue_after_term: form.continue_after_term,
         custom_schedule_label: showCustomSchedule ? (form.custom_schedule_label || null) : null,
         custom_schedule_amount: showCustomSchedule && form.custom_schedule_amount ? Number(form.custom_schedule_amount) : null,
@@ -754,7 +748,6 @@ function TermOptionsTab({
             {showFortnightly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fortnightly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_fortnightly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
             {showMonthly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Monthly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_monthly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
             {showQuarterly && <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Quarterly ({currencyCode}, incl {salesTaxName}) <span className="text-[10px] text-gray-400 font-normal">computed from total + term</span></label><input type="number" value={form.fee_quarterly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="Auto" /></div>}
-            <div><label className="block text-[13px] font-medium text-gray-700 mb-1">Fixed # payments</label><input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" step="1" placeholder="Leave blank = continuous" /><p className="text-[10px] text-gray-400 mt-0.5">Use whole numbers only (especially for weekly/fortnightly plans).</p></div>
             <div className="flex flex-col gap-2 pb-1 justify-end">
               {showUpfront && <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.allow_upfront} onChange={(e) => setForm({ ...form, allow_upfront: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Payment in advance</label>}
               <label className="flex items-center gap-2 text-[13px] text-gray-700"><input type="checkbox" checked={form.continue_after_term} onChange={(e) => setForm({ ...form, continue_after_term: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-indigo-600" />Continue billing after term</label>
@@ -858,7 +851,6 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
     fee_monthly: to.fee_monthly ?? "",
     fee_quarterly: to.fee_quarterly ?? "",
     allow_upfront: to.allow_upfront,
-    num_payments: to.num_payments ?? "",
     continue_after_term: !!to.continue_after_term,
     custom_schedule_enabled: !!to.custom_schedule_enabled,
     custom_schedule_label: to.custom_schedule_label ?? "",
@@ -919,10 +911,6 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
       setError(`Duration must be a whole number of ${form.duration_unit === "week" ? "weeks" : "months"}.`);
       return;
     }
-    if (form.num_payments !== "" && (!Number.isInteger(Number(form.num_payments)) || Number(form.num_payments) <= 0)) {
-      setError("Number of payments must be a whole number.");
-      return;
-    }
     if (showCustomSchedule && form.custom_schedule_enabled) {
       if (!form.custom_schedule_amount || Number(form.custom_schedule_amount) <= 0) {
         setError("Custom schedule amount must be greater than 0.");
@@ -947,7 +935,6 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
         fee_fortnightly: showFortnightly && form.fee_fortnightly !== "" ? Number(form.fee_fortnightly) : null,
         fee_monthly: showMonthly && form.fee_monthly !== "" ? Number(form.fee_monthly) : null,
         fee_quarterly: showQuarterly && form.fee_quarterly !== "" ? Number(form.fee_quarterly) : null,
-        num_payments: form.num_payments !== "" ? Number(form.num_payments) : null,
         continue_after_term: form.continue_after_term,
         custom_schedule_label: showCustomSchedule ? (form.custom_schedule_label || null) : null,
         custom_schedule_amount: showCustomSchedule && form.custom_schedule_amount !== "" ? Number(form.custom_schedule_amount) : null,
@@ -985,7 +972,6 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
             {showMonthly && <div><span className="text-gray-400 block mb-0.5">Monthly</span><span className="tabular-nums text-gray-900">{to.fee_monthly ? `${currencyCode} $${to.fee_monthly}` : "—"}</span></div>}
             {showQuarterly && <div><span className="text-gray-400 block mb-0.5">Quarterly</span><span className="tabular-nums text-gray-900">{to.fee_quarterly ? `${currencyCode} $${to.fee_quarterly}` : "—"}</span></div>}
             {showUpfront && <div><span className="text-gray-400 block mb-0.5">In Advance</span><span>{to.allow_upfront ? "Yes" : "Post-payment"}</span></div>}
-            <div><span className="text-gray-400 block mb-0.5"># Payments</span><span className="tabular-nums text-gray-900">{to.num_payments ? `${to.num_payments} then stops` : "Continuous"}</span></div>
             <div><span className="text-gray-400 block mb-0.5">After Term</span><span>{to.continue_after_term ? "Continue billing" : "Stops"}</span></div>
             {showCustomSchedule && <div className="sm:col-span-3 lg:col-span-2"><span className="text-gray-400 block mb-0.5">Custom Plan</span><span className="text-gray-900">{to.custom_schedule_enabled ? (to.custom_schedule_label || `${to.custom_schedule_num_payments || 0} payments every ${to.custom_schedule_interval_count || 1} ${to.custom_schedule_interval_unit || "month"}${(to.custom_schedule_interval_count || 1) === 1 ? "" : "s"} @ ${currencyCode} $${to.custom_schedule_amount || 0}`) : "—"}</span></div>}
           </div>
@@ -1054,11 +1040,6 @@ function TermOptionCard({ termOption: to, enabledPaymentFrequencies, currencyCod
               <input type="number" value={form.fee_quarterly} readOnly className="input-field bg-gray-50 text-gray-500" step="0.01" placeholder="—" />
             </div>
           )}
-          <div>
-            <label className="block text-[12px] font-medium text-gray-700 mb-1"># Payments</label>
-            <input type="number" value={form.num_payments} onChange={(e) => setForm({ ...form, num_payments: e.target.value })} className="input-field" min="1" step="1" placeholder="Continuous" />
-            <p className="text-[10px] text-gray-400 mt-0.5">Blank = pay until end of term</p>
-          </div>
           <div className="flex flex-col gap-2 pb-1 justify-end">
             {showUpfront && (
               <label className="flex items-center gap-2 text-[12px] text-gray-700">
