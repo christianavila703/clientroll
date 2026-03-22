@@ -333,14 +333,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               const weeklyValue = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
               const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
               const resolvedMode =
-                mode === "weekly" && effectiveFrequencySet.has("weekly") && weeklyValue
-                  ? "weekly"
-                  : mode === "monthly" && effectiveFrequencySet.has("monthly") && monthlyValue
-                  ? "monthly"
-                  : effectiveFrequencySet.has("monthly") && monthlyValue
-                  ? "monthly"
-                  : effectiveFrequencySet.has("weekly") && weeklyValue
-                  ? "weekly"
+                mode === "weekly"
+                  ? (effectiveFrequencySet.has("weekly") && weeklyValue ? "weekly" : "total")
+                  : mode === "monthly"
+                  ? (effectiveFrequencySet.has("monthly") && monthlyValue ? "monthly" : "total")
                   : "total";
               if (resolvedMode === "weekly") {
                 const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
