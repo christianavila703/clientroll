@@ -1,6 +1,38 @@
 package xero
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// XeroTime handles Xero's non-standard timestamp format (no timezone suffix).
+type XeroTime struct {
+	time.Time
+}
+
+func (xt *XeroTime) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.9999999",
+		"2006-01-02T15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			xt.Time = t.UTC()
+			return nil
+		}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return err
+	}
+	xt.Time = t.UTC()
+	return nil
+}
 
 const (
 	AuthBaseURL       = "https://login.xero.com/identity/connect/authorize"
@@ -26,12 +58,12 @@ func (t TokenResponse) Expiry(now time.Time) time.Time {
 }
 
 type Connection struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenantId"`
-	TenantType     string    `json:"tenantType"`
-	TenantName     string    `json:"tenantName"`
-	CreatedDateUTC time.Time `json:"createdDateUtc"`
-	UpdatedDateUTC time.Time `json:"updatedDateUtc"`
+	ID             string   `json:"id"`
+	TenantID       string   `json:"tenantId"`
+	TenantType     string   `json:"tenantType"`
+	TenantName     string   `json:"tenantName"`
+	CreatedDateUTC XeroTime `json:"createdDateUtc"`
+	UpdatedDateUTC XeroTime `json:"updatedDateUtc"`
 }
 
 type ContactInput struct {
