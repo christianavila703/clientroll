@@ -27,7 +27,12 @@ const AVAILABLE_PAYMENT_FREQUENCIES = [
 ];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">("agreement");
+  const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">(() => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("tab");
+    if (t === "integrations" || t === "tenant") return t;
+    return "agreement";
+  });
 
   return (
     <div>
@@ -569,22 +574,61 @@ function TenantSettings() {
 
 function IntegrationsSettings() {
   const [integrations, setIntegrations] = useState<{ provider: string; environment: string; is_active: boolean; has_key: boolean; has_secret: boolean; key_hint: string }[]>([]);
+  const [xero, setXero] = useState<{
+    connected: boolean;
+    is_active?: boolean;
+    needs_reauth?: boolean;
+    xero_tenant_id?: string;
+    xero_tenant_name?: string;
+    default_revenue_account_code?: string;
+    default_payment_account_code?: string;
+  }>({ connected: false });
+  const [xeroRevenueCode, setXeroRevenueCode] = useState("200");
+  const [xeroPaymentCode, setXeroPaymentCode] = useState("090");
+  const [xeroSelectionToken, setXeroSelectionToken] = useState("");
+  const [xeroSelections, setXeroSelections] = useState<Array<{ tenant_id: string; tenant_name: string }>>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"success" | "error">("success");
   const [tenantSlug, setTenantSlug] = useState("");
+
+  const showMessage = (msg: string, type: "success" | "error" = "success") => {
+    setMessage(msg);
+    setMessageType(type);
+  };
 
   const refreshIntegrations = () => {
     api.listIntegrations().then((data) => {
       setIntegrations((data as { integrations: typeof integrations }).integrations || []);
-    }).catch((e) => { console.error(e); setMessage("Unable to load integrations."); });
+    }).catch((e) => { console.error(e); showMessage("Unable to load integrations.", "error"); });
+    api.getXeroStatus().then((status) => {
+      setXero(status);
+      setXeroRevenueCode(status.default_revenue_account_code || "200");
+      setXeroPaymentCode(status.default_payment_account_code || "090");
+    }).catch(() => {
+      setXero({ connected: false });
+    });
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const x = params.get("xero");
+    const selectionToken = params.get("selection_token");
+    if (x === "connected") showMessage("Xero connected successfully.");
+    if (x && x.startsWith("error")) showMessage("Unable to connect Xero. Please try again.", "error");
+    if (x === "select_org" && selectionToken) {
+      setXeroSelectionToken(selectionToken);
+      api.getXeroPendingSelection(selectionToken).then((res) => {
+        setXeroSelections(res.items || []);
+      }).catch(() => {
+        showMessage("Xero organisation selection expired. Please reconnect.", "error");
+      });
+    }
     refreshIntegrations();
     api.getTenantSettings().then((res) => {
       const t = res as { slug?: string };
       setTenantSlug(t.slug || "");
-    }).catch((e) => { console.error(e); setMessage("Unable to load tenant settings."); });
+    }).catch((e) => { console.error(e); showMessage("Unable to load tenant settings.", "error"); });
   }, []);
 
   const providers = [
@@ -596,16 +640,76 @@ function IntegrationsSettings() {
     setSaving(providerId); setMessage("");
     try {
       await api.saveIntegration(providerId, data);
-      setMessage(`${providerId} saved`);
+      showMessage(`${providerId} saved`);
       refreshIntegrations();
-    } catch { setMessage("Unable to save changes."); }
+    } catch { showMessage("Unable to save changes.", "error"); }
     finally { setSaving(null); }
+  };
+
+  const connectXero = async () => {
+    setSaving("xero-connect");
+    setMessage("");
+    try {
+      const { redirect_url } = await api.getXeroConnectUrl();
+      window.location.href = redirect_url;
+    } catch {
+      showMessage("Unable to start Xero connection.", "error");
+      setSaving(null);
+    }
+  };
+
+  const saveXeroConfig = async () => {
+    setSaving("xero-config");
+    setMessage("");
+    try {
+      await api.updateXeroConfig({
+        default_revenue_account_code: xeroRevenueCode.trim(),
+        default_payment_account_code: xeroPaymentCode.trim(),
+      });
+      showMessage("Xero config updated.");
+      refreshIntegrations();
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : "Unable to save Xero config.", "error");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const disconnectXero = async () => {
+    setSaving("xero-disconnect");
+    setMessage("");
+    try {
+      await api.disconnectXero();
+      showMessage("Xero disconnected.");
+      refreshIntegrations();
+    } catch {
+      showMessage("Unable to disconnect Xero.", "error");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const selectXeroOrg = async (orgId: string) => {
+    if (!xeroSelectionToken) return;
+    setSaving("xero-select");
+    setMessage("");
+    try {
+      await api.selectXeroOrg({ selection_token: xeroSelectionToken, xero_tenant_id: orgId });
+      showMessage("Xero connected successfully.");
+      setXeroSelectionToken("");
+      setXeroSelections([]);
+      refreshIntegrations();
+    } catch {
+      showMessage("Unable to complete Xero org selection.", "error");
+    } finally {
+      setSaving(null);
+    }
   };
 
   return (
     <div className="space-y-5">
       {message && (
-        <div className={`rounded-md px-3 py-2 text-[13px] ${message.includes("Failed") ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
+        <div className={`rounded-md px-3 py-2 text-[13px] ${messageType === "error" ? "bg-red-50 border border-red-200 text-red-600" : "bg-emerald-50 border border-emerald-200 text-emerald-700"}`}>{message}</div>
       )}
 
       {providers.map((provider) => {
@@ -621,6 +725,74 @@ function IntegrationsSettings() {
           />
         );
       })}
+
+      <div className="card overflow-hidden">
+        <div className="card-header">
+          <div className="flex items-center gap-2">
+            <h3>Xero</h3>
+            {xero.connected ? (
+              <span className="badge badge-green">Connected</span>
+            ) : (
+              <span className="badge badge-gray">Not connected</span>
+            )}
+            {xero.needs_reauth ? <span className="badge badge-red">Reconnect required</span> : null}
+          </div>
+        </div>
+        <div className="card-body space-y-3">
+          <p className="text-[12px] text-gray-500">Connect Xero to create invoices when charges are created and mark them paid when settlements succeed.</p>
+          {xero.connected ? (
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
+              Connected org: <span className="font-medium">{xero.xero_tenant_name || xero.xero_tenant_id}</span>
+            </div>
+          ) : null}
+          {xeroSelectionToken && xeroSelections.length > 0 ? (
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-[12px] font-medium text-indigo-800 mb-2">Select a Xero organisation</p>
+              <div className="space-y-2">
+                {xeroSelections.map((org) => (
+                  <button
+                    key={org.tenant_id}
+                    type="button"
+                    onClick={() => selectXeroOrg(org.tenant_id)}
+                    className="w-full text-left rounded border border-indigo-200 bg-white px-3 py-2 text-[12px] hover:bg-indigo-50"
+                    disabled={saving === "xero-select"}
+                  >
+                    {org.tenant_name || org.tenant_id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {xero.connected ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Revenue account code</label>
+                <input className="input-field" value={xeroRevenueCode} onChange={(e) => setXeroRevenueCode(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-gray-700 mb-1">Payment account code</label>
+                <input className="input-field" value={xeroPaymentCode} onChange={(e) => setXeroPaymentCode(e.target.value)} />
+              </div>
+            </div>
+          ) : null}
+          <div className="flex gap-2 justify-end">
+            {xero.connected ? (
+              <>
+                <button className="btn-secondary" onClick={saveXeroConfig} disabled={saving === "xero-config"}>
+                  {saving === "xero-config" ? "Saving..." : "Save config"}
+                </button>
+                <button className="btn-secondary" onClick={disconnectXero} disabled={saving === "xero-disconnect"}>
+                  {saving === "xero-disconnect" ? "Disconnecting..." : "Disconnect"}
+                </button>
+              </>
+            ) : (
+              <button className="btn-primary" onClick={connectXero} disabled={saving === "xero-connect"}>
+                {saving === "xero-connect" ? "Connecting..." : "Connect Xero"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

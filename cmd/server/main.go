@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/auth"
 	"clientroll/internal/config"
 	"clientroll/internal/database"
@@ -137,6 +138,8 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	tenantUsageRepo := repository.NewTenantUsageRepo(db)
 	tenantInvoiceRepo := repository.NewTenantInvoiceRepo(db)
 	tenantEmailTemplateRepo := repository.NewTenantEmailTemplateRepo(db)
+	xeroConnectionRepo := repository.NewXeroConnectionRepo(db)
+	xeroSyncRepo := repository.NewXeroSyncRepo(db)
 
 	// Email service
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
@@ -168,11 +171,13 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	inboundWebhookKeyHandler := handlers.NewInboundWebhookKeyHandler(inboundWebhookKeyRepo, enc)
 	integrationsHandler := handlers.NewIntegrationsHandler(credRepo, platformBillingConfigRepo, enc)
 	serviceRepo := repository.NewServiceRepo(db)
-	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, tenantRepo, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, mtRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc)
-	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo, serviceRepo, membershipSetupInviteRepo)
+	xeroSyncService := xerosync.NewService(cfg, enc, xeroConnectionRepo, xeroSyncRepo, clientRepo)
+	gocardlessHandler := handlers.NewGoCardlessHandler(cfg, tenantRepo, credRepo, inboundWebhookEventRepo, paymentRepo, paymentDisputeRepo, memberRepo, mtRepo, clientRepo, tenantEmailTemplateRepo, enc, emailSvc, xeroSyncService)
+	stripeWebhookHandler := handlers.NewStripeWebhookHandler(db, tenantRepo, credRepo, inboundWebhookEventRepo, enc, paymentRepo, paymentDisputeRepo, memberRepo, serviceRepo, membershipSetupInviteRepo, xeroSyncService)
+	xeroHandler := handlers.NewXeroHandler(cfg, enc, xeroConnectionRepo, xeroSyncRepo, paymentRepo, serviceRepo, xeroSyncService)
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
-	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, tenantRepo, memberRepo, mtRepo, clientRepo, paymentRepo, credRepo, enc, agreementRepo, settingsRepo, termsRepo)
-	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc)
+	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, tenantRepo, memberRepo, mtRepo, clientRepo, paymentRepo, credRepo, enc, agreementRepo, settingsRepo, termsRepo, xeroSyncService)
+	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc, xeroSyncService)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)
 	dispatcher := events.NewDispatcher(db, rdb, enc)
@@ -181,6 +186,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	activeMembershipsHandler.SetDispatcher(dispatcher)
 	gocardlessHandler.SetDispatcher(dispatcher)
 	stripeWebhookHandler.SetDispatcher(dispatcher)
+	serviceHandler.SetDispatcher(dispatcher)
 
 	// Health check
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +224,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 		// GoCardless OAuth callback and webhook (no auth)
 		gocardlessHandler.RegisterPublicRoutes(r)
+		xeroHandler.RegisterPublicRoutes(r)
 		stripeWebhookHandler.RegisterPublicRoutes(r)
 		platformBillingWebhookHandler.RegisterPublicRoutes(r)
 		inboundWebhookHandler.RegisterPublicRoutes(r)
@@ -341,6 +348,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				integrationsHandler.RegisterRoutes(r)
 				// GoCardless Connect (OAuth start URL)
 				gocardlessHandler.RegisterTenantRoutes(r)
+				xeroHandler.RegisterTenantRoutes(r)
 
 				// Webhook management (Phase 7)
 				webhookHandler.RegisterRoutes(r)
@@ -357,6 +365,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				platformBillingHandler.RegisterRoutes(r)
 				stripeWebhookHandler.RegisterPlatformRoutes(r)
 				gocardlessHandler.RegisterPlatformRoutes(r)
+				xeroHandler.RegisterPlatformRoutes(r)
 				inboundWebhookHandler.RegisterPlatformRoutes(r)
 				// Phase 8: Platform billing
 			})

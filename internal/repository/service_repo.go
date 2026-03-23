@@ -35,6 +35,7 @@ type ServiceCharge struct {
 	Amount              float64         `json:"amount"`
 	TaxAmount           float64         `json:"tax_amount"`
 	ProcessingFeeAmount float64         `json:"processing_fee_amount"`
+	CurrencyCode        string          `json:"currency_code"`
 	Status              string          `json:"status"`
 	PaidDate            *time.Time      `json:"paid_date"`
 	Notes               *string         `json:"notes"`
@@ -126,14 +127,21 @@ func (r *ServiceRepo) CreatePendingCharge(ctx context.Context, tenantID, clientI
 }
 
 func (r *ServiceRepo) createChargeWithState(ctx context.Context, tenantID, clientID uuid.UUID, serviceID *uuid.UUID, description string, amount, taxAmount, processingFeeAmount float64, status string, paidDate *time.Time, notes *string, createdBy *uuid.UUID) (*ServiceCharge, error) {
+	currencyCode := "AUD"
+	if serviceID != nil {
+		if err := r.db.Pool.QueryRow(ctx, `SELECT currency_code FROM services WHERE id=$1 AND tenant_id=$2`, *serviceID, tenantID).Scan(&currencyCode); err != nil {
+			// Fallback to AUD so ad-hoc service charges remain chargeable even if the linked service was deleted.
+			currencyCode = "AUD"
+		}
+	}
 	var sc ServiceCharge
 	err := r.db.Pool.QueryRow(ctx,
-		`INSERT INTO service_charges (tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at`,
-		tenantID, clientID, serviceID, description, amount, taxAmount, processingFeeAmount, status, paidDate, notes, createdBy).Scan(
+		`INSERT INTO service_charges (tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, currency_code, status, paid_date, notes, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 RETURNING id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, currency_code, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at`,
+		tenantID, clientID, serviceID, description, amount, taxAmount, processingFeeAmount, currencyCode, status, paidDate, notes, createdBy).Scan(
 		&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-		&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt)
+		&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.CurrencyCode, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating service charge: %w", err)
 	}
@@ -170,7 +178,7 @@ func (r *ServiceRepo) UpdateChargeProcessingFee(ctx context.Context, tenantID, c
 // ListChargesByClient returns service charges for a client.
 func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantID uuid.UUID) ([]ServiceCharge, error) {
 	rows, err := r.db.Pool.Query(ctx,
-		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at
+		`SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, currency_code, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at
 		 FROM service_charges WHERE client_id=$1 AND tenant_id=$2 ORDER BY created_at DESC`, clientID, tenantID)
 	if err != nil {
 		return nil, err
@@ -180,12 +188,26 @@ func (r *ServiceRepo) ListChargesByClient(ctx context.Context, clientID, tenantI
 	for rows.Next() {
 		var sc ServiceCharge
 		if err := rows.Scan(&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description,
-			&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt); err != nil {
+			&sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.CurrencyCode, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, sc)
 	}
 	return items, rows.Err()
+}
+
+func (r *ServiceRepo) FindChargeByID(ctx context.Context, tenantID, chargeID uuid.UUID) (*ServiceCharge, error) {
+	query := `SELECT id, tenant_id, client_id, service_id, description, amount, tax_amount, processing_fee_amount, currency_code, status, paid_date, notes, created_by, provider_reference, payment_method, COALESCE(stripe_details, '{}'::jsonb), created_at
+	          FROM service_charges
+	          WHERE tenant_id=$1 AND id=$2`
+	var sc ServiceCharge
+	err := r.db.Pool.QueryRow(ctx, query, tenantID, chargeID).Scan(
+		&sc.ID, &sc.TenantID, &sc.ClientID, &sc.ServiceID, &sc.Description, &sc.Amount, &sc.TaxAmount, &sc.ProcessingFeeAmount, &sc.CurrencyCode, &sc.Status, &sc.PaidDate, &sc.Notes, &sc.CreatedBy, &sc.ProviderReference, &sc.PaymentMethod, &sc.StripeDetails, &sc.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &sc, nil
 }
 
 // UpdateChargeProviderContext stores provider reference/method hints for a service charge.

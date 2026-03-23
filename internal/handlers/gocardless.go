@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/config"
 	"clientroll/internal/database"
 	"clientroll/internal/email"
@@ -74,10 +75,11 @@ type GoCardlessHandler struct {
 	encryptor         *database.Encryptor
 	emailSvc          email.Provider
 	dispatcher        *events.Dispatcher
+	xeroSync          *xerosync.Service
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
-func NewGoCardlessHandler(cfg *config.Config, tenantRepo *repository.TenantRepo, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, clientRepo *repository.ClientRepo, etr *repository.TenantEmailTemplateRepo, enc *database.Encryptor, es email.Provider) *GoCardlessHandler {
+func NewGoCardlessHandler(cfg *config.Config, tenantRepo *repository.TenantRepo, cr *repository.TenantCredentialRepo, eventRepo *repository.InboundWebhookEventRepo, paymentRepo *repository.PaymentRepo, disputeRepo *repository.PaymentDisputeRepo, memberRepo *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, clientRepo *repository.ClientRepo, etr *repository.TenantEmailTemplateRepo, enc *database.Encryptor, es email.Provider, xeroSync *xerosync.Service) *GoCardlessHandler {
 	return &GoCardlessHandler{
 		cfg:               cfg,
 		tenantRepo:        tenantRepo,
@@ -91,6 +93,7 @@ func NewGoCardlessHandler(cfg *config.Config, tenantRepo *repository.TenantRepo,
 		emailTemplateRepo: etr,
 		encryptor:         enc,
 		emailSvc:          es,
+		xeroSync:          xeroSync,
 	}
 }
 
@@ -382,7 +385,7 @@ func (h *GoCardlessHandler) OAuthCallback(w http.ResponseWriter, r *http.Request
 
 func redirectToIntegrations(appURL string, q string) string {
 	base := strings.TrimSuffix(appURL, "/")
-	return base + "/settings/integrations?" + q
+	return base + "/settings?tab=integrations&" + q
 }
 
 // Webhook handles incoming GoCardless webhooks.
@@ -674,7 +677,6 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 
 	switch action {
 	case "cancelled", "finished":
-		// When subscription ends, update the linked membership status
 		if h.memberRepo != nil && subscriptionID != "" {
 			m, _ := h.memberRepo.FindBySubscriptionID(ctx, tenantID, subscriptionID)
 			if m != nil {
@@ -684,6 +686,11 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 				}
 				_ = h.memberRepo.UpdateStatus(ctx, m.ID, tenantID, newStatus)
 				log.Printf("Membership %s set to %s (subscription %s %s)", m.ID, newStatus, subscriptionID, action)
+				if h.xeroSync != nil && h.paymentRepo != nil {
+					if openPayment, pErr := h.paymentRepo.FindLatestOpenByMembership(ctx, tenantID, m.ID); pErr == nil && openPayment != nil {
+						_ = h.xeroSync.VoidInvoiceForPaymentIfUnpaid(ctx, openPayment, "Subscription "+action)
+					}
+				}
 				if h.dispatcher != nil {
 					eventType := events.MembershipExpired
 					if newStatus == "cancelled" {
@@ -740,6 +747,15 @@ func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid
 	}
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
 		return err
+	}
+	p.Status = "refunded"
+	p.PaidDate = nil
+	if h.xeroSync != nil {
+		refundAmount := float64(refundInfo.Amount) / 100.0
+		if refundAmount <= 0 {
+			refundAmount = p.Amount
+		}
+		_ = h.xeroSync.CreateCreditNoteForMembershipPayment(ctx, p, refundAmount, "Payment refunded")
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentRefunded, tenantID, map[string]interface{}{
@@ -821,6 +837,21 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
 		return err
+	}
+	p.Status = status
+	p.PaidDate = paidDate
+	if h.xeroSync != nil {
+		switch status {
+		case "pending":
+			_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
+		case "succeeded":
+			_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
+			_ = h.xeroSync.ApplyPaymentForPayment(ctx, p)
+		case "disputed":
+			_ = h.xeroSync.CreateCreditNoteForMembershipPayment(ctx, p, p.Amount, "Payment disputed")
+		case "cancelled", "failed":
+			_ = h.xeroSync.VoidInvoiceForPaymentIfUnpaid(ctx, p, "Payment "+status)
+		}
 	}
 	if p.MembershipID != uuid.Nil {
 		if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, p.MembershipID, status, time.Now().UTC()); err != nil {

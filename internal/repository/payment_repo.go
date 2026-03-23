@@ -267,6 +267,24 @@ func (r *PaymentRepo) FindLatestStripeSubscriptionIDByMembership(ctx context.Con
 	return strings.TrimSpace(subscriptionID), nil
 }
 
+// FindLatestOpenByMembership returns the most recent unpaid payment for a membership.
+func (r *PaymentRepo) FindLatestOpenByMembership(ctx context.Context, tenantID, membershipID uuid.UUID) (*Payment, error) {
+	query := `SELECT ` + paymentFields + ` FROM payments
+	          WHERE tenant_id = $1
+	            AND membership_id = $2
+	            AND status IN ('pending','failed')
+	          ORDER BY due_date DESC, created_at DESC
+	          LIMIT 1`
+	p, err := r.scanPaymentRow(r.db.Pool.QueryRow(ctx, query, tenantID, membershipID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find latest open payment by membership: %w", err)
+	}
+	return p, nil
+}
+
 // MergeStripeDetails deep-merges a JSON patch into payments.stripe_details for the row
 // matched by tenant + provider_reference (Stripe invoice id for subscription flows).
 func (r *PaymentRepo) MergeStripeDetails(ctx context.Context, tenantID uuid.UUID, providerRef string, patch map[string]interface{}) error {

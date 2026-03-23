@@ -315,6 +315,36 @@ export const api = {
     request(`/tenant/integrations/${provider}`, { method: "DELETE" }),
   getGoCardlessConnectUrl: (environment: "sandbox" | "live") =>
     request(`/tenant/gocardless/connect?environment=${environment}`) as Promise<{ redirect_url: string }>,
+  getXeroConnectUrl: () =>
+    request("/tenant/xero/connect") as Promise<{ redirect_url: string }>,
+  getXeroStatus: () =>
+    request("/tenant/xero/status") as Promise<{
+      connected: boolean;
+      is_active?: boolean;
+      feature_enabled?: boolean;
+      credit_notes_enabled?: boolean;
+      needs_reauth?: boolean;
+      xero_tenant_id?: string;
+      xero_tenant_name?: string;
+      default_revenue_account_code?: string;
+      default_payment_account_code?: string;
+      token_expiry?: string;
+    }>,
+  getXeroPendingSelection: (token: string) =>
+    request(`/tenant/xero/pending-selection?token=${encodeURIComponent(token)}`) as Promise<{
+      items: Array<{ tenant_id: string; tenant_name: string }>;
+      expires_at: string;
+    }>,
+  updateXeroConfig: (data: { default_revenue_account_code: string; default_payment_account_code: string }) =>
+    request("/tenant/xero/config", { method: "PUT", body: data }),
+  disconnectXero: () =>
+    request("/tenant/xero/disconnect", { method: "POST", body: {} }),
+  selectXeroOrg: (data: { selection_token: string; xero_tenant_id: string }) =>
+    request("/tenant/xero/select-org", { method: "POST", body: data }),
+  listXeroSyncFailures: () =>
+    request("/tenant/xero/sync-failures") as Promise<{ items: unknown[] }>,
+  retryXeroSyncEvent: (eventId: string) =>
+    request("/tenant/xero/sync/retry", { method: "POST", body: { event_id: eventId } }),
 
   // Platform admin
   listTenants: () => request("/platform/tenants"),

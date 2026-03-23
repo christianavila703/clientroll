@@ -8,18 +8,20 @@ import (
 
 // Event types for outbound webhooks.
 const (
-	ClientCreated       = "client.created"
-	ClientUpdated       = "client.updated"
-	MembershipCreated   = "membership.created"
-	MembershipActivated = "membership.activated"
-	MembershipCancelled = "membership.cancelled"
-	MembershipExpired   = "membership.expired"
-	PaymentSucceeded    = "payment.succeeded"
-	PaymentFailed       = "payment.failed"
-	PaymentDisputed     = "payment.disputed"
-	PaymentRefunded     = "payment.refunded"
-	SignupStarted       = "signup.started"
-	SignupCompleted     = "signup.completed"
+	ClientCreated          = "client.created"
+	ClientUpdated          = "client.updated"
+	MembershipCreated      = "membership.created"
+	MembershipActivated    = "membership.activated"
+	MembershipCancelled    = "membership.cancelled"
+	MembershipExpired      = "membership.expired"
+	PaymentSucceeded       = "payment.succeeded"
+	PaymentFailed          = "payment.failed"
+	PaymentDisputed        = "payment.disputed"
+	PaymentRefunded        = "payment.refunded"
+	ServiceChargeCreated   = "service_charge.created"
+	ServiceChargeSucceeded = "service_charge.succeeded"
+	SignupStarted          = "signup.started"
+	SignupCompleted        = "signup.completed"
 )
 
 // AllEventTypes returns all valid event types.
@@ -28,6 +30,7 @@ func AllEventTypes() []string {
 		ClientCreated, ClientUpdated,
 		MembershipCreated, MembershipActivated, MembershipCancelled, MembershipExpired,
 		PaymentSucceeded, PaymentFailed, PaymentDisputed, PaymentRefunded,
+		ServiceChargeCreated, ServiceChargeSucceeded,
 		SignupStarted, SignupCompleted,
 	}
 }

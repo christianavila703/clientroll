@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/database"
 	"clientroll/internal/events"
 	"clientroll/internal/observability"
@@ -38,6 +39,7 @@ type StripeWebhookHandler struct {
 	serviceRepo *repository.ServiceRepo
 	inviteRepo  *repository.MembershipSetupInviteRepo
 	dispatcher  *events.Dispatcher
+	xeroSync    *xerosync.Service
 }
 
 // NewStripeWebhookHandler creates a Stripe webhook handler.
@@ -52,6 +54,7 @@ func NewStripeWebhookHandler(
 	memberRepo *repository.MembershipRepo,
 	serviceRepo *repository.ServiceRepo,
 	inviteRepo *repository.MembershipSetupInviteRepo,
+	xeroSync *xerosync.Service,
 ) *StripeWebhookHandler {
 	return &StripeWebhookHandler{
 		db:          db,
@@ -64,6 +67,7 @@ func NewStripeWebhookHandler(
 		memberRepo:  memberRepo,
 		serviceRepo: serviceRepo,
 		inviteRepo:  inviteRepo,
+		xeroSync:    xeroSync,
 	}
 }
 
@@ -556,9 +560,27 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
 				return fmt.Errorf("update service charge succeeded: %w", err)
 			}
+			if h.dispatcher != nil {
+				h.dispatcher.Dispatch(ctx, events.NewEvent(events.ServiceChargeSucceeded, tenantID, map[string]interface{}{
+					"charge_id": chargeID.String(),
+					"status":    "succeeded",
+					"source":    "stripe_webhook",
+				}))
+			}
+			if h.xeroSync != nil {
+				if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
+					_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
+					_ = h.xeroSync.ApplyPaymentForServiceCharge(ctx, charge)
+				}
+			}
 		} else {
 			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil); err != nil {
 				return fmt.Errorf("update service charge pending: %w", err)
+			}
+			if h.xeroSync != nil {
+				if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
+					_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
+				}
 			}
 		}
 		return nil
@@ -615,6 +637,12 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	now := time.Now().UTC()
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
 		return fmt.Errorf("update payment succeeded status: %w", err)
+	}
+	p.Status = "succeeded"
+	p.PaidDate = &now
+	if h.xeroSync != nil {
+		_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
+		_ = h.xeroSync.ApplyPaymentForPayment(ctx, p)
 	}
 	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
 		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
@@ -911,6 +939,12 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 		if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "succeeded", &now, nil, nil); err != nil {
 			return fmt.Errorf("update invoice payment succeeded status: %w", err)
 		}
+		p.Status = "succeeded"
+		p.PaidDate = &now
+		if h.xeroSync != nil {
+			_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
+			_ = h.xeroSync.ApplyPaymentForPayment(ctx, p)
+		}
 		if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "succeeded", now); err != nil {
 			log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
 		} else {
@@ -1034,6 +1068,9 @@ func (h *StripeWebhookHandler) handleInvoiceFinalized(ctx context.Context, tenan
 			return fmt.Errorf("set invoice payment pending: %w", err)
 		}
 	}
+	if h.xeroSync != nil {
+		_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
+	}
 	return nil
 }
 
@@ -1113,6 +1150,11 @@ func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, te
 	if err := h.memberRepo.UpdateStatus(ctx, membershipID, tenantID, "cancelled"); err != nil {
 		return fmt.Errorf("cancel membership from subscription.deleted: %w", err)
 	}
+	if h.xeroSync != nil && h.paymentRepo != nil {
+		if openPayment, pErr := h.paymentRepo.FindLatestOpenByMembership(ctx, tenantID, membershipID); pErr == nil && openPayment != nil {
+			_ = h.xeroSync.VoidInvoiceForPaymentIfUnpaid(ctx, openPayment, "Membership cancelled")
+		}
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.MembershipCancelled, tenantID, map[string]interface{}{
 			"membership_id":   m.ID,
@@ -1182,6 +1224,11 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, paymentStatus, nil, nil, nil); err != nil {
 		return fmt.Errorf("update payment dispute status: %w", err)
 	}
+	p.Status = paymentStatus
+	p.PaidDate = nil
+	if h.xeroSync != nil && paymentStatus == "disputed" {
+		_ = h.xeroSync.CreateCreditNoteForMembershipPayment(ctx, p, amount, "Payment disputed")
+	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentDisputed, tenantID, map[string]interface{}{
 			"payment_id":      p.ID,
@@ -1250,8 +1297,13 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
 		return fmt.Errorf("update payment refunded status: %w", err)
 	}
+	p.Status = "refunded"
+	p.PaidDate = nil
 	if amount <= 0 {
 		amount = p.Amount
+	}
+	if h.xeroSync != nil {
+		_ = h.xeroSync.CreateCreditNoteForMembershipPayment(ctx, p, amount, "Payment refunded")
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentRefunded, tenantID, map[string]interface{}{

@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/database"
+	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
@@ -17,8 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
-	"github.com/stripe/stripe-go/v82/customer"
 	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	"github.com/stripe/stripe-go/v82/customer"
 	"github.com/stripe/stripe-go/v82/paymentintent"
 	"github.com/stripe/stripe-go/v82/paymentmethod"
 )
@@ -43,10 +45,16 @@ type ServiceHandler struct {
 	paymentRepo *repository.PaymentRepo
 	credRepo    *repository.TenantCredentialRepo
 	encryptor   *database.Encryptor
+	dispatcher  *events.Dispatcher
+	xeroSync    *xerosync.Service
 }
 
-func NewServiceHandler(sr *repository.ServiceRepo, cr *repository.ClientRepo, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, pr *repository.PaymentRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor) *ServiceHandler {
-	return &ServiceHandler{serviceRepo: sr, clientRepo: cr, memberRepo: mr, mtRepo: mtRepo, paymentRepo: pr, credRepo: credR, encryptor: enc}
+func NewServiceHandler(sr *repository.ServiceRepo, cr *repository.ClientRepo, mr *repository.MembershipRepo, mtRepo *repository.MembershipTypeRepo, pr *repository.PaymentRepo, credR *repository.TenantCredentialRepo, enc *database.Encryptor, xeroSync *xerosync.Service) *ServiceHandler {
+	return &ServiceHandler{serviceRepo: sr, clientRepo: cr, memberRepo: mr, mtRepo: mtRepo, paymentRepo: pr, credRepo: credR, encryptor: enc, xeroSync: xeroSync}
+}
+
+func (h *ServiceHandler) SetDispatcher(d *events.Dispatcher) {
+	h.dispatcher = d
 }
 
 func (h *ServiceHandler) RegisterRoutes(r chi.Router) {
@@ -186,6 +194,9 @@ func (h *ServiceHandler) TakePayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create charge")
 		return
 	}
+	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeCreated, charge)
+	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeSucceeded, charge)
+	h.syncXeroForCharge(r.Context(), charge)
 
 	// --- Try to charge through GoCardless if the client has a mandate ---
 	gcPaymentID := ""
@@ -427,6 +438,9 @@ func (h *ServiceHandler) ChargeWithBankDetails(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "Failed to create charge")
 		return
 	}
+	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeCreated, charge)
+	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeSucceeded, charge)
+	h.syncXeroForCharge(r.Context(), charge)
 
 	ref := fmt.Sprintf("charge-%s", charge.ID)
 	gcPaymentID, err := prov.CreatePayment(r.Context(), payment.CreatePaymentInput{
@@ -484,14 +498,14 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
 
 	var input struct {
-		ClientID      string  `json:"client_id"`
-		ServiceID     *string `json:"service_id"`
-		Description   string  `json:"description"`
-		Amount        float64 `json:"amount"`
-		TaxAmount     float64 `json:"tax_amount"`
-		Notes         *string `json:"notes"`
-		PaymentMethod string  `json:"payment_method"`
-		PaymentMethodID string `json:"payment_method_id,omitempty"`
+		ClientID        string  `json:"client_id"`
+		ServiceID       *string `json:"service_id"`
+		Description     string  `json:"description"`
+		Amount          float64 `json:"amount"`
+		TaxAmount       float64 `json:"tax_amount"`
+		Notes           *string `json:"notes"`
+		PaymentMethod   string  `json:"payment_method"`
+		PaymentMethodID string  `json:"payment_method_id,omitempty"`
 	}
 	if err := decodeJSON(r, &input); err != nil || input.ClientID == "" || input.Amount <= 0 {
 		writeError(w, http.StatusBadRequest, "Client ID and positive amount required")
@@ -544,6 +558,8 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create charge")
 		return
 	}
+	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeCreated, charge)
+	h.syncXeroForCharge(r.Context(), charge)
 	stripeCustomerID := ""
 	if client.StripeCustomerID != nil {
 		stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
@@ -590,25 +606,32 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		paymentMethod := input.PaymentMethod
 		_ = h.serviceRepo.UpdateChargeProviderContext(r.Context(), tenantID, charge.ID, &providerRef, &paymentMethod)
 		_ = h.serviceRepo.MergeStripeDetailsByChargeID(r.Context(), tenantID, charge.ID, map[string]interface{}{
-			"source":                  "stripe",
-			"payment_intent_id":       pi.ID,
-			"payment_intent_status":   string(pi.Status),
-			"stripe_customer_id":      stripeCustomerID,
+			"source":                   "stripe",
+			"payment_intent_id":        pi.ID,
+			"payment_intent_status":    string(pi.Status),
+			"stripe_customer_id":       stripeCustomerID,
 			"stripe_payment_method_id": strings.TrimSpace(input.PaymentMethodID),
 		})
 		switch strings.ToLower(strings.TrimSpace(string(pi.Status))) {
 		case "succeeded":
 			now := time.Now().UTC()
 			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "succeeded", &now)
+			if refreshed, ferr := h.serviceRepo.FindChargeByID(r.Context(), tenantID, charge.ID); ferr == nil && refreshed != nil {
+				h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeSucceeded, refreshed)
+				h.syncXeroForCharge(r.Context(), refreshed)
+			}
 		case "processing", "requires_capture", "requires_action":
 			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "pending", nil)
+			if refreshed, ferr := h.serviceRepo.FindChargeByID(r.Context(), tenantID, charge.ID); ferr == nil && refreshed != nil {
+				h.syncXeroForCharge(r.Context(), refreshed)
+			}
 		default:
 			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
 		}
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"charge":                      charge,
-			"payment_intent_id":          pi.ID,
-			"charged_with_saved_method":  true,
+			"charge":                    charge,
+			"payment_intent_id":         pi.ID,
+			"charged_with_saved_method": true,
 		})
 		return
 	}
@@ -699,7 +722,7 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		}[input.PaymentMethod],
 		"payment_method_label": map[string]string{
 			"direct_debit": map[string]string{
-				"au_becs_debit":  "Australia BECS Direct Debit",
+				"au_becs_debit":   "Australia BECS Direct Debit",
 				"us_bank_account": "US Bank Account (ACH Direct Debit)",
 			}[directDebitType],
 			"card": "Card",
@@ -831,4 +854,51 @@ func (h *ServiceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"charges": charges, "count": len(charges)})
+}
+
+func (h *ServiceHandler) dispatchServiceChargeEvent(ctx context.Context, eventType string, charge *repository.ServiceCharge) {
+	if h.dispatcher == nil || charge == nil {
+		return
+	}
+	h.dispatcher.Dispatch(ctx, events.NewEvent(eventType, charge.TenantID, map[string]interface{}{
+		"charge_id":     charge.ID.String(),
+		"tenant_id":     charge.TenantID.String(),
+		"client_id":     charge.ClientID.String(),
+		"service_id":    uuidToString(charge.ServiceID),
+		"status":        charge.Status,
+		"amount":        charge.Amount,
+		"tax_amount":    charge.TaxAmount,
+		"currency_code": charge.CurrencyCode,
+		"paid_date":     optionalTime(charge.PaidDate),
+		"description":   charge.Description,
+	}))
+}
+
+func (h *ServiceHandler) syncXeroForCharge(ctx context.Context, charge *repository.ServiceCharge) {
+	if h.xeroSync == nil || charge == nil || !h.xeroSync.IsTenantActive(ctx, charge.TenantID) {
+		return
+	}
+	switch charge.Status {
+	case "pending":
+		_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
+	case "succeeded":
+		_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
+		_ = h.xeroSync.ApplyPaymentForServiceCharge(ctx, charge)
+	}
+}
+
+func optionalTime(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := t.UTC().Format(time.RFC3339)
+	return &v
+}
+
+func uuidToString(id *uuid.UUID) *string {
+	if id == nil {
+		return nil
+	}
+	s := id.String()
+	return &s
 }

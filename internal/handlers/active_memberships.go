@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/database"
 	"clientroll/internal/events"
 	"clientroll/internal/middleware"
@@ -37,6 +38,7 @@ type ActiveMembershipsHandler struct {
 	settingsRepo  *repository.SettingsRepo
 	termsRepo     *repository.TermsRepo
 	dispatcher    *events.Dispatcher
+	xeroSync      *xerosync.Service
 }
 
 // NewActiveMembershipsHandler creates a new handler.
@@ -52,10 +54,12 @@ func NewActiveMembershipsHandler(
 	agreementRepo *repository.AgreementSnapshotRepo,
 	settingsRepo *repository.SettingsRepo,
 	termsRepo *repository.TermsRepo,
+	xeroSync *xerosync.Service,
 ) *ActiveMembershipsHandler {
 	return &ActiveMembershipsHandler{
 		db: db, tenantRepo: tenantR, memberRepo: mr, mtRepo: mtRepo, clientRepo: cr, paymentRepo: pr, credRepo: credR, encryptor: enc,
 		agreementRepo: agreementRepo, settingsRepo: settingsRepo, termsRepo: termsRepo,
+		xeroSync: xeroSync,
 	}
 }
 
@@ -469,6 +473,11 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		log.Printf("Error cancelling membership: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to cancel membership")
 		return
+	}
+	if h.xeroSync != nil {
+		if openPayment, pErr := h.paymentRepo.FindLatestOpenByMembership(r.Context(), tenantID, membershipID); pErr == nil && openPayment != nil {
+			_ = h.xeroSync.VoidInvoiceForPaymentIfUnpaid(r.Context(), openPayment, "Membership cancelled")
+		}
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(r.Context(), events.NewEvent(events.MembershipCancelled, tenantID, map[string]interface{}{
