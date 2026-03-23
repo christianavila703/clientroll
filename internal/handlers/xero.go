@@ -117,7 +117,7 @@ func (h *XeroHandler) ConnectURL(w http.ResponseWriter, r *http.Request) {
 		h.cfg.XeroClientID,
 		redirectURI,
 		state,
-		[]string{"openid", "accounting.contacts", "accounting.transactions", "offline_access"},
+		[]string{"openid", "accounting.contacts", "accounting.invoices", "accounting.payments", "offline_access"},
 	)
 	writeJSON(w, http.StatusOK, map[string]string{"redirect_url": redirectURL})
 }
