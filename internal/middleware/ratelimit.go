@@ -15,6 +15,7 @@ type RateLimiter struct {
 	redis       *database.Redis
 	maxAttempts int
 	window      time.Duration
+	prefix      string
 }
 
 // NewRateLimiter creates a new rate limiter.
@@ -30,7 +31,11 @@ func NewRateLimiter(redis *database.Redis, maxAttempts int, window time.Duration
 func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIPFromRequest(r)
-		key := fmt.Sprintf("ratelimit:%s", ip)
+		pfx := rl.prefix
+		if pfx == "" {
+			pfx = "general"
+		}
+		key := fmt.Sprintf("ratelimit:%s:%s", pfx, ip)
 
 		count, err := rl.redis.Client.Incr(r.Context(), rl.redis.Key(key)).Result()
 		if err != nil {
@@ -83,24 +88,20 @@ func clientIPFromRequest(r *http.Request) string {
 	return "unknown"
 }
 
-// NewAuthRateLimiter creates a general rate limiter for public auth endpoints.
-// 120 requests per 15 minutes per IP — generous for signup/reset flows.
+// NewAuthRateLimiter creates a rate limiter for registration and password reset.
+// 10 requests per 15 minutes per IP.
 func NewAuthRateLimiter(redis *database.Redis) *RateLimiter {
-	return NewRateLimiter(redis, 120, 15*time.Minute)
+	return &RateLimiter{redis: redis, maxAttempts: 10, window: 15 * time.Minute, prefix: "auth"}
 }
 
 // NewLoginRateLimiter creates a rate limiter for login endpoints.
-// 200 attempts per 15 minutes per IP.
+// 15 attempts per 15 minutes per IP.
 func NewLoginRateLimiter(redis *database.Redis) *RateLimiter {
-	return &RateLimiter{
-		redis:       redis,
-		maxAttempts: 200,
-		window:      15 * time.Minute,
-	}
+	return &RateLimiter{redis: redis, maxAttempts: 15, window: 15 * time.Minute, prefix: "login"}
 }
 
 // NewSignupRateLimiter creates a rate limiter for public signup endpoints.
-// 90 requests per 15 minutes per IP.
+// 60 requests per 15 minutes per IP (signup forms may make multiple API calls).
 func NewSignupRateLimiter(redis *database.Redis) *RateLimiter {
-	return NewRateLimiter(redis, 90, 15*time.Minute)
+	return &RateLimiter{redis: redis, maxAttempts: 60, window: 15 * time.Minute, prefix: "signup"}
 }

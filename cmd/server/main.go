@@ -188,21 +188,10 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	stripeWebhookHandler.SetDispatcher(dispatcher)
 	serviceHandler.SetDispatcher(dispatcher)
 
-	// Health check
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		metrics := observability.PaymentLifecycleMetrics.Snapshot()
-		fmt.Fprintf(
-			w,
-			`{"status":"ok","service":"clientroll","payment_metrics":{"webhook_received":%d,"webhook_rejected":%d,"webhook_duplicate":%d,"webhook_processed":%d,"webhook_failed":%d,"payment_reconciled":%d}}`,
-			metrics.WebhookReceived,
-			metrics.WebhookRejected,
-			metrics.WebhookDuplicate,
-			metrics.WebhookProcessed,
-			metrics.WebhookFailed,
-			metrics.PaymentReconciled,
-		)
+		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
 	// Public routes

@@ -91,6 +91,7 @@ export default defineConfig({
       minify: !isDev,
     }),
   ].filter(Boolean),
+  devtool: isDev ? "eval-cheap-module-source-map" : false,
   experiments: {
     css: true,
   },

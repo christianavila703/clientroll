@@ -32,9 +32,12 @@ func CheckPassword(password, hash string) bool {
 }
 
 // ValidatePasswordStrength checks that a password meets complexity requirements.
+// All violations are returned in a single error message.
 func ValidatePasswordStrength(password string) error {
+	var problems []string
+
 	if len(password) < minPasswordLength {
-		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
+		problems = append(problems, fmt.Sprintf("at least %d characters", minPasswordLength))
 	}
 
 	var hasUpper, hasLower, hasDigit bool
@@ -49,19 +52,18 @@ func ValidatePasswordStrength(password string) error {
 		}
 	}
 
-	var missing []string
 	if !hasUpper {
-		missing = append(missing, "uppercase letter")
+		problems = append(problems, "an uppercase letter")
 	}
 	if !hasLower {
-		missing = append(missing, "lowercase letter")
+		problems = append(problems, "a lowercase letter")
 	}
 	if !hasDigit {
-		missing = append(missing, "digit")
+		problems = append(problems, "a digit")
 	}
 
-	if len(missing) > 0 {
-		return fmt.Errorf("password must contain at least one %s", strings.Join(missing, ", "))
+	if len(problems) > 0 {
+		return fmt.Errorf("password must contain %s", strings.Join(problems, ", "))
 	}
 
 	return nil
