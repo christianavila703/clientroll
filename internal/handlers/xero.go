@@ -271,6 +271,7 @@ func (h *XeroHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 			"connected":            false,
 			"is_active":            false,
 			"feature_enabled":      h.cfg != nil && h.cfg.XeroSyncEnabled,
+			"oauth_configured":     h.syncService != nil && h.syncService.IsConfigured(),
 			"credit_notes_enabled": h.cfg != nil && h.cfg.XeroCreditNotesEnabled,
 		})
 		return
@@ -279,6 +280,7 @@ func (h *XeroHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		"connected":                    true,
 		"is_active":                    conn.IsActive,
 		"feature_enabled":              h.cfg != nil && h.cfg.XeroSyncEnabled,
+		"oauth_configured":             h.syncService != nil && h.syncService.IsConfigured(),
 		"credit_notes_enabled":         h.cfg != nil && h.cfg.XeroCreditNotesEnabled,
 		"needs_reauth":                 conn.NeedsReauth,
 		"xero_tenant_id":               conn.XeroTenantID,

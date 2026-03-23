@@ -577,6 +577,8 @@ function IntegrationsSettings() {
   const [xero, setXero] = useState<{
     connected: boolean;
     is_active?: boolean;
+    feature_enabled?: boolean;
+    oauth_configured?: boolean;
     needs_reauth?: boolean;
     xero_tenant_id?: string;
     xero_tenant_name?: string;
@@ -649,11 +651,17 @@ function IntegrationsSettings() {
   const connectXero = async () => {
     setSaving("xero-connect");
     setMessage("");
+    if (xero.oauth_configured === false) {
+      showMessage("Xero is not enabled by your platform admin yet. Please contact support.", "error");
+      setSaving(null);
+      return;
+    }
     try {
       const { redirect_url } = await api.getXeroConnectUrl();
       window.location.href = redirect_url;
-    } catch {
-      showMessage("Unable to start Xero connection.", "error");
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Unable to start Xero connection.";
+      showMessage(msg, "error");
       setSaving(null);
     }
   };
@@ -740,6 +748,11 @@ function IntegrationsSettings() {
         </div>
         <div className="card-body space-y-3">
           <p className="text-[12px] text-gray-500">Connect Xero to create invoices when charges are created and mark them paid when settlements succeed.</p>
+          {xero.oauth_configured === false ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              Xero is not currently enabled for this workspace. Ask your platform admin to enable Xero integration.
+            </div>
+          ) : null}
           {xero.connected ? (
             <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
               Connected org: <span className="font-medium">{xero.xero_tenant_name || xero.xero_tenant_id}</span>
@@ -786,7 +799,11 @@ function IntegrationsSettings() {
                 </button>
               </>
             ) : (
-              <button className="btn-primary" onClick={connectXero} disabled={saving === "xero-connect"}>
+              <button
+                className="btn-primary"
+                onClick={connectXero}
+                disabled={saving === "xero-connect" || xero.oauth_configured === false}
+              >
                 {saving === "xero-connect" ? "Connecting..." : "Connect Xero"}
               </button>
             )}

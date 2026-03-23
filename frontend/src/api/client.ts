@@ -322,6 +322,7 @@ export const api = {
       connected: boolean;
       is_active?: boolean;
       feature_enabled?: boolean;
+      oauth_configured?: boolean;
       credit_notes_enabled?: boolean;
       needs_reauth?: boolean;
       xero_tenant_id?: string;
