@@ -311,8 +311,8 @@ func (r *PaymentRepo) MergeStripeDetails(ctx context.Context, tenantID uuid.UUID
 
 // UpdateStatus updates a payment's status.
 func (r *PaymentRepo) UpdateStatus(ctx context.Context, id, tenantID uuid.UUID, status string, paidDate *time.Time, failureReason, failureCode *string) error {
-	query := `UPDATE payments SET status=$3, paid_date=$4, failure_reason=$5, failure_code=$6,
-		retry_count = CASE WHEN $3 = 'failed' THEN retry_count + 1 ELSE retry_count END,
+	query := `UPDATE payments SET status=$3::text, paid_date=$4, failure_reason=$5, failure_code=$6,
+		retry_count = CASE WHEN $3::text = 'failed' THEN retry_count + 1 ELSE retry_count END,
 		updated_at=NOW() WHERE id=$1 AND tenant_id=$2`
 	_, err := r.db.Pool.Exec(ctx, query, id, tenantID, status, paidDate, failureReason, failureCode)
 	return err
