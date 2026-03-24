@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"clientroll/internal/database"
@@ -97,6 +99,71 @@ func (r *MembershipRepo) Create(
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating membership: %w", err)
+	}
+	return &m, nil
+}
+
+// FindUnpaidDuplicateCandidate returns an existing non-cancelled membership that matches
+// the requested signup payload and has no payment rows yet. This protects against rapid
+// retries creating multiple memberships before the first payment materializes.
+func (r *MembershipRepo) FindUnpaidDuplicateCandidate(
+	ctx context.Context,
+	tenantID, clientID, membershipTypeID, termOptionID uuid.UUID,
+	startDate time.Time,
+	paymentMethod, paymentFrequency string,
+	paymentAmount float64,
+	paymentIntervalUnit *string,
+	paymentIntervalCount int,
+) (*models.Membership, error) {
+	paymentMethod = strings.ToLower(strings.TrimSpace(paymentMethod))
+	paymentFrequency = strings.ToLower(strings.TrimSpace(paymentFrequency))
+	unit := ""
+	if paymentIntervalUnit != nil {
+		unit = strings.ToLower(strings.TrimSpace(*paymentIntervalUnit))
+	}
+	if paymentIntervalCount <= 0 {
+		paymentIntervalCount = 1
+	}
+
+	query := `
+		SELECT m.id, m.tenant_id, m.client_id, m.membership_type_id, m.term_option_id,
+		    m.start_date, m.min_term_end_date, m.payment_method, m.payment_frequency, m.currency_code, m.payment_interval_unit, m.payment_interval_count, m.payment_amount, m.num_payments, m.payments_made,
+		    m.continue_after_term, m.status, m.gocardless_mandate_id, m.gocardless_subscription_id, m.member_signature_data, m.member_signed_at,
+		    m.staff_user_id, m.staff_signature_data, m.staff_signed_at, m.created_at, m.updated_at
+		FROM memberships m
+		WHERE m.tenant_id = $1
+		  AND m.client_id = $2
+		  AND m.membership_type_id = $3
+		  AND m.term_option_id = $4
+		  AND m.start_date = $5::date
+		  AND LOWER(COALESCE(m.payment_method, '')) = $6
+		  AND LOWER(COALESCE(m.payment_frequency, '')) = $7
+		  AND COALESCE(m.payment_interval_count, 1) = $8
+		  AND LOWER(COALESCE(m.payment_interval_unit, '')) = $9
+		  AND ABS(COALESCE(m.payment_amount, 0) - $10) <= 0.01
+		  AND m.status IN ('pending', 'scheduled', 'active', 'past_due')
+		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.membership_id = m.id)
+		ORDER BY m.created_at DESC
+		LIMIT 1`
+
+	var m models.Membership
+	err := r.db.Pool.QueryRow(
+		ctx,
+		query,
+		tenantID, clientID, membershipTypeID, termOptionID,
+		startDate, paymentMethod, paymentFrequency, paymentIntervalCount, unit, math.Round(paymentAmount*100)/100,
+	).Scan(
+		&m.ID, &m.TenantID, &m.ClientID, &m.MembershipTypeID, &m.TermOptionID,
+		&m.StartDate, &m.MinTermEndDate, &m.PaymentMethod, &m.PaymentFrequency, &m.CurrencyCode, &m.PaymentIntervalUnit, &m.PaymentIntervalCount,
+		&m.PaymentAmount, &m.NumPayments, &m.PaymentsMade, &m.ContinueAfterTerm, &m.Status, &m.GoCardlessMandateID, &m.GoCardlessSubscriptionID,
+		&m.MemberSignature, &m.MemberSignedAt,
+		&m.StaffUserID, &m.StaffSignature, &m.StaffSignedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding duplicate candidate membership: %w", err)
 	}
 	return &m, nil
 }

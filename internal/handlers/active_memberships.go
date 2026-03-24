@@ -201,6 +201,31 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	if membershipCurrency == "" {
 		membershipCurrency = "AUD"
 	}
+	dup, dupErr := h.memberRepo.FindUnpaidDuplicateCandidate(
+		r.Context(),
+		tenantID, clientID, mtID, toID,
+		startDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		func() *string {
+			if input.PaymentIntervalUnit == "" {
+				return nil
+			}
+			return &input.PaymentIntervalUnit
+		}(),
+		input.PaymentIntervalCount,
+	)
+	if dupErr != nil {
+		log.Printf("membership duplicate check failed tenant=%s client=%s err=%v", tenantID, clientID, dupErr)
+		writeError(w, http.StatusInternalServerError, "Failed to validate membership request")
+		return
+	}
+	if dup != nil {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":               "A matching membership already exists and is still awaiting first payment.",
+			"existing_membership": dup,
+		})
+		return
+	}
+
 	m, err := h.memberRepo.Create(r.Context(), tenantID, clientID, mtID, toID,
 		startDate, input.PaymentMethod, input.PaymentFrequency, membershipCurrency, input.PaymentAmount,
 		func() *string {

@@ -647,6 +647,24 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(mtForCreate.CurrencyCode) != "" {
 		membershipCurrency = strings.ToUpper(strings.TrimSpace(mtForCreate.CurrencyCode))
 	}
+	dup, dupErr := h.memberRepo.FindUnpaidDuplicateCandidate(
+		r.Context(),
+		tenant.ID, client.ID, mtID, toID,
+		input.StartDate, input.PaymentMethod, input.PaymentFrequency, input.PaymentAmount,
+		input.PaymentIntervalUnit, input.PaymentIntervalCount,
+	)
+	if dupErr != nil {
+		log.Printf("signup duplicate check failed tenant=%s client=%s err=%v", tenant.ID, client.ID, dupErr)
+		writeError(w, http.StatusInternalServerError, "Failed to validate signup request")
+		return
+	}
+	if dup != nil {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":               "A matching membership already exists and is still awaiting first payment.",
+			"existing_membership": dup,
+		})
+		return
+	}
 
 	// Create membership
 	membership, err := h.memberRepo.Create(r.Context(), tenant.ID, client.ID, mtID, toID,
