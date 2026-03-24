@@ -415,6 +415,10 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	} else {
 		input.StartDate = time.Now()
 	}
+	if err := validateMinimumFutureStartDate(input.StartDate, tenant.Timezone, minFutureMembershipStartDays); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if input.Client.Name == "" || input.TermOptionID == "" || input.MembershipTypeID == "" {
 		writeError(w, http.StatusBadRequest, "Client name, membership type and term option are required")
@@ -660,7 +664,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	if dup != nil {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":               "A matching membership already exists and is still awaiting first payment.",
+			"error":               "A matching membership was created in the last 5 minutes and is still awaiting first payment. Please wait 5 minutes before trying again.",
 			"existing_membership": dup,
 		})
 		return
@@ -703,7 +707,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		if invite != nil && inviteStrategy == "use_existing" && pmID != "" && input.PaymentFrequency != "upfront" {
 			if err := h.signupStripeCardSubscriptionWithSavedPM(r.Context(), tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, pmID); err != nil {
 				log.Printf("signup saved-card stripe subscription tenant=%s membership=%s err=%v", tenant.ID, membership.ID, err)
-				writeError(w, http.StatusBadGateway, "Card payment setup failed")
+				writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
 				return
 			}
 			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
@@ -724,7 +728,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
-			writeError(w, http.StatusBadGateway, "Card payment setup failed")
+			writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
 			return
 		}
 		// Capture the signed legal agreement at submission time (before redirect to checkout).
@@ -804,7 +808,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
 			if err != nil {
 				log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
-				writeError(w, http.StatusBadGateway, err.Error())
+				writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Direct debit payment setup failed"))
 				return
 			}
 			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
@@ -1018,6 +1022,15 @@ func (h *SignupHandler) CreateMembershipInvite(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "Invalid start_date")
 		return
 	}
+	tenantModel, tenantErr := h.tenantRepo.FindByID(r.Context(), tenantID)
+	if tenantErr != nil || tenantModel == nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	if err := validateMinimumFutureStartDate(startDate, tenantModel.Timezone, minFutureMembershipStartDays); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	clientID, err := uuid.Parse(input.ClientID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid client_id")
@@ -1082,7 +1095,7 @@ func (h *SignupHandler) CreateMembershipInvite(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tenant, _ := h.tenantRepo.FindByID(r.Context(), tenantID)
+	tenant := tenantModel
 	tenantSlug := ""
 	tenantName := "Your organisation"
 	if tenant != nil {
@@ -2317,6 +2330,22 @@ func sanitizeCheckoutCustomerParams(p *stripe.CheckoutSessionParams) {
 	if p.Customer != nil && strings.TrimSpace(*p.Customer) != "" {
 		p.CustomerEmail = nil
 	}
+}
+
+// stripeProviderErrorMessage returns a user-facing Stripe error when available.
+func stripeProviderErrorMessage(err error, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	var se *stripe.Error
+	if errors.As(err, &se) && strings.TrimSpace(se.Msg) != "" {
+		return strings.TrimSpace(se.Msg)
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return fallback
+	}
+	return msg
 }
 
 // applyDeferFirstSubscriptionChargeCheckout defers the first recurring charge to anchor (membership start

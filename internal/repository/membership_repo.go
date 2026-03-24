@@ -104,8 +104,9 @@ func (r *MembershipRepo) Create(
 }
 
 // FindUnpaidDuplicateCandidate returns an existing non-cancelled membership that matches
-// the requested signup payload and has no payment rows yet. This protects against rapid
-// retries creating multiple memberships before the first payment materializes.
+// the requested signup payload, has no payment rows yet, and was created very recently.
+// This blocks near-immediate accidental retries while still allowing legitimate same-day
+// or same-client additional memberships created after a short gap.
 func (r *MembershipRepo) FindUnpaidDuplicateCandidate(
 	ctx context.Context,
 	tenantID, clientID, membershipTypeID, termOptionID uuid.UUID,
@@ -143,6 +144,7 @@ func (r *MembershipRepo) FindUnpaidDuplicateCandidate(
 		  AND ABS(COALESCE(m.payment_amount, 0) - $10) <= 0.01
 		  AND m.status IN ('pending', 'scheduled', 'active', 'past_due')
 		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.membership_id = m.id)
+		  AND m.created_at >= (NOW() - INTERVAL '5 minutes')
 		ORDER BY m.created_at DESC
 		LIMIT 1`
 

@@ -152,6 +152,15 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "Invalid start_date")
 		return
 	}
+	tenant, tenantErr := h.tenantRepo.FindByID(r.Context(), tenantID)
+	if tenantErr != nil || tenant == nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	if err := validateMinimumFutureStartDate(startDate, tenant.Timezone, minFutureMembershipStartDays); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	mt, err := h.mtRepo.FindByID(r.Context(), mtID, tenantID)
 	if err != nil || mt == nil {
@@ -220,7 +229,7 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	}
 	if dup != nil {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":               "A matching membership already exists and is still awaiting first payment.",
+			"error":               "A matching membership was created in the last 5 minutes and is still awaiting first payment. Please wait 5 minutes before trying again.",
 			"existing_membership": dup,
 		})
 		return
