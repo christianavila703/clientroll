@@ -542,8 +542,8 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 
 	params := &stripe.SubscriptionParams{}
 	if input.ContinueAfterTerm {
-		// Clear scheduled cancellation; must not send cancel_at together with cancel_at_period_end.
-		params.CancelAtPeriodEnd = stripe.Bool(false)
+		// Clear scheduled cancellation. Do not send cancel_at_period_end together with cancel_at,
+		// Stripe rejects requests that include both parameters in a single update call.
 		params.AddExtra("cancel_at", "")
 	} else {
 		cancelAt := time.Date(
