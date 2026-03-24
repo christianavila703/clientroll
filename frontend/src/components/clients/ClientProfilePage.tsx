@@ -7,7 +7,7 @@ import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessi
 import type { MembershipRecord } from "../../types/memberships";
 import type { PaymentRecord } from "../../types/payments";
 import { useAuth } from "../../store/AuthContext";
-import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
+import { addDaysToISODate, daysUntilDateOnly, formatTenantDate, tenantTodayISO, tenantTimezoneOrUTC } from "../../utils/tenantDate";
 
 /* ─── Types ─── */
 interface Client {
@@ -560,6 +560,7 @@ export default function ClientProfilePage() {
         <SetupMembershipModal
           clientId={client.id}
           clientName={client.name}
+          tenantTimezone={tenantTimezone}
           onClose={() => setShowSetupMembership(false)}
           onCreated={() => { setShowSetupMembership(false); loadAll(); }}
         />
@@ -1982,8 +1983,8 @@ interface MembershipTypeOption {
   }[];
 }
 
-function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
-  clientId: string; clientName: string; onClose: () => void; onCreated: () => void;
+function SetupMembershipModal({ clientId, clientName, tenantTimezone, onClose, onCreated }: {
+  clientId: string; clientName: string; tenantTimezone: string; onClose: () => void; onCreated: () => void;
 }) {
   const [step, setStep] = useState<"type" | "term" | "details" | "confirm">("type");
   const [flowMode, setFlowMode] = useState<"create_now" | "send_invite">("create_now");
@@ -1992,7 +1993,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [selectedType, setSelectedType] = useState<MembershipTypeOption | null>(null);
   const [selectedTerm, setSelectedTerm] = useState<any>(null);
   const [frequency, setFrequency] = useState("monthly");
-  const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState(tenantTodayISO(tenantTimezone));
   const [billingMethod, setBillingMethod] = useState<"direct_debit" | "card">("direct_debit");
   const [bsb, setBsb] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
@@ -2009,6 +2010,7 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
   const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const minFutureStartDate = addDaysToISODate(tenantTodayISO(tenantTimezone), 2);
 
   useEffect(() => {
     Promise.all([
@@ -2151,6 +2153,16 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
       }
     } catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
+  };
+
+  const handleStartDateChange = (next: string) => {
+    const todayISO = tenantTodayISO(tenantTimezone);
+    if (next > todayISO && next < minFutureStartDate) {
+      setError(`Future start dates must be at least 2 days ahead (${minFutureStartDate} or later).`);
+      return;
+    }
+    setError("");
+    setStartDate(next);
   };
 
   const frequencies = selectedTerm ? [
@@ -2306,7 +2318,16 @@ function SetupMembershipModal({ clientId, clientName, onClose, onCreated }: {
 
                   <div>
                     <label className="block text-[13px] font-semibold text-gray-700 mb-2">Start Date</label>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-field max-w-xs" />
+                    <input
+                      type="date"
+                      value={startDate}
+                      min={tenantTodayISO(tenantTimezone)}
+                      onChange={(e) => handleStartDateChange(e.target.value)}
+                      className="input-field max-w-xs"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      Today is allowed. Future dates must be {minFutureStartDate} or later.
+                    </p>
                   </div>
 
                   <div>

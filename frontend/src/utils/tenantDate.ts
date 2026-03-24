@@ -44,3 +44,24 @@ export function daysUntilDateOnly(targetDateISO: string, timezone: string): numb
   const targetUTC = Date.UTC(ty, tm - 1, td);
   return Math.ceil((targetUTC - todayUTC) / (1000 * 60 * 60 * 24));
 }
+
+export function tenantTodayISO(timezone: string): string {
+  const tz = tenantTimezoneOrUTC(timezone);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function addDaysToISODate(dateISO: string, days: number): string {
+  if (!ISO_DATE_ONLY_RE.test(dateISO)) return dateISO;
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const baseUTC = Date.UTC(y, (m || 1) - 1, d || 1);
+  const next = new Date(baseUTC + days * 24 * 60 * 60 * 1000);
+  const yy = next.getUTCFullYear();
+  const mm = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(next.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
