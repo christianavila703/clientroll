@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -2823,7 +2825,7 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 		b.WriteString(`<h2>5. Terms & Conditions</h2>`)
 		for _, t := range terms {
 			b.WriteString(fmt.Sprintf(`<div class="tc-block"><h3>%s (Version %d)</h3>`, t.Title, t.Version))
-			b.WriteString(fmt.Sprintf(`<div class="tc-content">%s</div>`, t.ContentHTML))
+			b.WriteString(fmt.Sprintf(`<div class="tc-content">%s</div>`, formatTermsContentForAgreementPDF(t.ContentHTML, snap)))
 			b.WriteString(`<p class="tc-accepted">&#10003; Read, understood, and accepted by the Member</p></div>`)
 		}
 	}
@@ -2875,6 +2877,79 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 
 	b.WriteString(`</body></html>`)
 	return b.String()
+}
+
+var (
+	termsTemplateControlPattern = regexp.MustCompile(`\{%\s*[^%]*\s*%\}`)
+	termsTemplateValuePattern   = regexp.MustCompile(`\{\{\s*[^}]*\s*\}\}`)
+	termsHTMLTagPattern         = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
+)
+
+func formatTermsContentForAgreementPDF(raw string, snap *repository.AgreementSnapshot) string {
+	content := strings.TrimSpace(replaceKnownTermsPlaceholders(raw, snap))
+	if content == "" {
+		return `<p>No terms content available.</p>`
+	}
+	content = termsTemplateControlPattern.ReplaceAllString(content, "")
+	content = termsTemplateValuePattern.ReplaceAllString(content, "")
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return `<p>No terms content available.</p>`
+	}
+
+	// If terms content is already HTML (e.g. from rich-text editor), keep it as HTML
+	// after removing unresolved template placeholders.
+	if termsHTMLTagPattern.MatchString(content) {
+		return content
+	}
+
+	// Plain-text fallback: preserve paragraphs and line breaks.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	parts := strings.Split(content, "\n\n")
+	var out strings.Builder
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = html.EscapeString(p)
+		p = strings.ReplaceAll(p, "\n", "<br>")
+		out.WriteString("<p>")
+		out.WriteString(p)
+		out.WriteString("</p>")
+	}
+	if out.Len() == 0 {
+		return `<p>No terms content available.</p>`
+	}
+	return out.String()
+}
+
+func replaceKnownTermsPlaceholders(raw string, snap *repository.AgreementSnapshot) string {
+	if strings.TrimSpace(raw) == "" || snap == nil {
+		return raw
+	}
+	clientName := strings.TrimSpace(snap.ClientName)
+	if clientName == "" {
+		clientName = "Client"
+	}
+	clientAddress := ""
+	if snap.ClientAddress != nil {
+		clientAddress = strings.TrimSpace(*snap.ClientAddress)
+	}
+	if clientAddress == "" {
+		clientAddress = "Client address"
+	}
+	replacer := strings.NewReplacer(
+		"{{client.name}}", clientName,
+		"{{ client.name }}", clientName,
+		"{{contact.name}}", clientName,
+		"{{ contact.name }}", clientName,
+		"{{member.name}}", clientName,
+		"{{ member.name }}", clientName,
+		"{{client.address}}", clientAddress,
+		"{{ client.address }}", clientAddress,
+	)
+	return replacer.Replace(raw)
 }
 
 // RenderAgreementHTMLForSnapshot builds the legal agreement HTML for a prepared snapshot.
