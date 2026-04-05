@@ -13,7 +13,8 @@ interface OverduePayment {
 
 interface ExpectedVsReceived {
   total_expected: number;
-  total_received: number;
+  total_succeeded: number;
+  total_pending: number;
   total_overdue: number;
   overdue_items: OverduePayment[];
 }
@@ -259,9 +260,10 @@ function ExpectedVsReceivedCard({ data }: { data: ExpectedVsReceived | null }) {
           <p className="text-xs text-gray-500">Source: payment calendar (our database)</p>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-4 gap-4 mb-4">
         <Stat label="Expected" value={data.total_expected} />
-        <Stat label="Received" value={data.total_received} color="text-green-600" />
+        <Stat label="Collected" value={data.total_succeeded} color="text-green-600" />
+        <Stat label="Pending" value={data.total_pending} color={data.total_pending > 0 ? "text-amber-600" : undefined} />
         <Stat label="Overdue" value={data.total_overdue} color={statusColor} />
       </div>
       {(data.overdue_items?.length ?? 0) > 0 && (

@@ -175,8 +175,12 @@ func (ds *DigestService) buildDigestHTML(
 	if evr.TotalOverdue > 0 {
 		statusColor = "#dc2626"
 	}
-	sb.WriteString(fmt.Sprintf(`<p style="font-size:14px;color:#374151;margin:0 0 12px;"><strong style="color:%s">%d</strong> payments expected · <strong>%d</strong> received · <strong style="color:%s">%d overdue</strong></p>`,
-		statusColor, evr.TotalExpected, evr.TotalReceived, statusColor, evr.TotalOverdue))
+	pendingColor := ""
+	if evr.TotalPending > 0 {
+		pendingColor = `style="color:#d97706;"`
+	}
+	sb.WriteString(fmt.Sprintf(`<p style="font-size:14px;color:#374151;margin:0 0 12px;"><strong style="color:%s">%d</strong> expected · <strong style="color:#059669;">%d</strong> collected · <strong %s>%d</strong> pending · <strong style="color:%s">%d overdue</strong></p>`,
+		statusColor, evr.TotalExpected, evr.TotalSucceeded, pendingColor, evr.TotalPending, statusColor, evr.TotalOverdue))
 	if len(evr.OverdueItems) > 0 {
 		sb.WriteString(overdueTable(evr.OverdueItems))
 	}

@@ -209,10 +209,11 @@ type OverduePayment struct {
 
 // ExpectedVsReceivedSummary is the output of the expected payment calendar check.
 type ExpectedVsReceivedSummary struct {
-	TotalExpected int              `json:"total_expected"`
-	TotalReceived int              `json:"total_received"`
-	TotalOverdue  int              `json:"total_overdue"`
-	OverdueItems  []OverduePayment `json:"overdue_items"`
+	TotalExpected  int              `json:"total_expected"`
+	TotalSucceeded int              `json:"total_succeeded"`
+	TotalPending   int              `json:"total_pending"`
+	TotalOverdue   int              `json:"total_overdue"`
+	OverdueItems   []OverduePayment `json:"overdue_items"`
 }
 
 // CheckExpectedVsReceived calculates which payments were expected by now and flags missing ones.
@@ -307,7 +308,7 @@ func (s *OwnerAlertService) CheckExpectedVsReceived(ctx context.Context, tenantI
 		return nil, err
 	}
 
-	var totalExpected, totalReceived int
+	var totalExpected int
 	_ = s.db.Pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM memberships
@@ -315,16 +316,31 @@ func (s *OwnerAlertService) CheckExpectedVsReceived(ctx context.Context, tenantI
 		  AND payment_frequency IS NOT NULL AND payment_frequency <> 'upfront'
 	`, tenantID).Scan(&totalExpected)
 
-	totalReceived = totalExpected - len(overdue)
-	if totalReceived < 0 {
-		totalReceived = 0
-	}
+	var totalSucceeded, totalPending int
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE latest_status = 'succeeded'),
+			COUNT(*) FILTER (WHERE latest_status = 'pending')
+		FROM (
+			SELECT DISTINCT ON (p.membership_id)
+				p.membership_id,
+				p.status AS latest_status
+			FROM payments p
+			JOIN memberships m ON m.id = p.membership_id AND m.tenant_id = p.tenant_id
+			WHERE p.tenant_id = $1
+			  AND m.status IN ('active', 'past_due')
+			  AND m.payment_frequency IS NOT NULL
+			  AND m.payment_frequency <> 'upfront'
+			ORDER BY p.membership_id, COALESCE(p.paid_date, p.due_date, p.created_at) DESC, p.created_at DESC
+		) latest
+	`, tenantID).Scan(&totalSucceeded, &totalPending)
 
 	return &ExpectedVsReceivedSummary{
-		TotalExpected: totalExpected,
-		TotalReceived: totalReceived,
-		TotalOverdue:  len(overdue),
-		OverdueItems:  overdue,
+		TotalExpected:  totalExpected,
+		TotalSucceeded: totalSucceeded,
+		TotalPending:   totalPending,
+		TotalOverdue:   len(overdue),
+		OverdueItems:   overdue,
 	}, nil
 }
 
