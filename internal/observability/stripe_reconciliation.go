@@ -398,6 +398,7 @@ func (sr *StripeReconciler) reconcilePendingPayments(ctx context.Context, tenant
 		ORDER BY p.due_date DESC
 	`, tenantID, m.MembershipID)
 	if err != nil {
+		log.Printf("stripe_reconciler pending_query failed tenant=%s membership=%s err=%v", tenantID, m.MembershipID, err)
 		return nil
 	}
 	defer rows.Close()
@@ -405,7 +406,9 @@ func (sr *StripeReconciler) reconcilePendingPayments(ctx context.Context, tenant
 	var mismatches []repository.ReconciliationMismatch
 	stripe.Key = apiKey
 
+	found := 0
 	for rows.Next() {
+		found++
 		var paymentID uuid.UUID
 		var provRef string
 		var amount float64
@@ -459,6 +462,7 @@ func (sr *StripeReconciler) reconcilePendingPayments(ctx context.Context, tenant
 			})
 		}
 	}
+	log.Printf("stripe_reconciler pending_check tenant=%s membership=%s found=%d mismatches=%d", tenantID, m.MembershipID, found, len(mismatches))
 	return mismatches
 }
 
