@@ -2928,18 +2928,25 @@ func replaceKnownTermsPlaceholders(raw string, snap *repository.AgreementSnapsho
 	if strings.TrimSpace(raw) == "" || snap == nil {
 		return raw
 	}
+
+	deref := func(s *string) string {
+		if s != nil {
+			return strings.TrimSpace(*s)
+		}
+		return ""
+	}
+
 	clientName := strings.TrimSpace(snap.ClientName)
 	if clientName == "" {
 		clientName = "Client"
 	}
-	clientAddress := ""
-	if snap.ClientAddress != nil {
-		clientAddress = strings.TrimSpace(*snap.ClientAddress)
-	}
+	clientAddress := deref(snap.ClientAddress)
 	if clientAddress == "" {
 		clientAddress = "Client address"
 	}
-	replacer := strings.NewReplacer(
+
+	pairs := []string{
+		// Legacy dotted placeholders (backwards compat)
 		"{{client.name}}", clientName,
 		"{{ client.name }}", clientName,
 		"{{contact.name}}", clientName,
@@ -2948,8 +2955,41 @@ func replaceKnownTermsPlaceholders(raw string, snap *repository.AgreementSnapsho
 		"{{ member.name }}", clientName,
 		"{{client.address}}", clientAddress,
 		"{{ client.address }}", clientAddress,
-	)
-	return replacer.Replace(raw)
+
+		// Standard snake_case placeholders
+		"{{client_name}}", clientName,
+		"{{client_email}}", deref(snap.ClientEmail),
+		"{{client_phone}}", deref(snap.ClientPhone),
+		"{{client_address}}", clientAddress,
+		"{{client_dob}}", deref(snap.ClientDateOfBirth),
+		"{{client_gender}}", deref(snap.ClientGender),
+		"{{emergency_contact_name}}", deref(snap.ClientEmergencyContactName),
+		"{{emergency_contact_phone}}", deref(snap.ClientEmergencyContactPhone),
+
+		"{{membership_title}}", snap.MembershipTypeTitle,
+		"{{term_months}}", fmt.Sprintf("%d", snap.TermMonths),
+		"{{term_weeks}}", fmt.Sprintf("%d", snap.TermMonths*52/12),
+		"{{total_fee}}", fmt.Sprintf("%.2f", snap.TotalFee),
+		"{{start_date}}", snap.StartDate,
+		"{{end_date}}", deref(snap.EndDate),
+		"{{payment_frequency}}", deref(snap.PaymentFrequency),
+		"{{payment_method}}", deref(snap.PaymentMethod),
+
+		"{{company_name}}", deref(snap.OrgCompanyName),
+		"{{company_trading_name}}", deref(snap.OrgTradingName),
+		"{{company_abn}}", deref(snap.OrgABN),
+		"{{company_address}}", deref(snap.OrgAddress),
+		"{{company_email}}", deref(snap.OrgEmail),
+		"{{company_phone}}", deref(snap.OrgPhone),
+
+		"{{today_date}}", time.Now().Format("2 January 2006"),
+	}
+
+	if snap.PaymentAmount != nil {
+		pairs = append(pairs, "{{payment_amount}}", fmt.Sprintf("%.2f", *snap.PaymentAmount))
+	}
+
+	return strings.NewReplacer(pairs...).Replace(raw)
 }
 
 // RenderAgreementHTMLForSnapshot builds the legal agreement HTML for a prepared snapshot.
