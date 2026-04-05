@@ -307,6 +307,8 @@ export const api = {
     request(`/platform/monitoring/payment-aging?tenant_id=${tenantId}`),
   getReconciliationReport: (tenantId: string) =>
     request(`/platform/monitoring/payment-reconciliation?tenant_id=${tenantId}`),
+  runReconciliationNow: (tenantId: string) =>
+    request(`/platform/monitoring/run-reconciliation?tenant_id=${tenantId}`, { method: "POST" }),
 
   // Terms & Conditions
   listTerms: () => request("/tenant/terms"),

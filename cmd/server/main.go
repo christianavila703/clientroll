@@ -56,17 +56,16 @@ func main() {
 	reconRepo := repository.NewReconciliationRepo(db)
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
 	ownerAlertSvc := observability.NewOwnerAlertService(db, emailSvc, alertConfigRepo)
+	credRepoMain := repository.NewTenantCredentialRepo(db)
+	paymentRepoMain := repository.NewPaymentRepo(db)
+	memberRepoMain := repository.NewMembershipRepo(db)
+	stripeReconciler := observability.NewStripeReconciler(db, enc, credRepoMain, paymentRepoMain, memberRepoMain, reconRepo)
 
-	r := setupRouter(cfg, db, rdb, enc, ownerAlertSvc, alertConfigRepo, reconRepo)
+	r := setupRouter(cfg, db, rdb, enc, ownerAlertSvc, alertConfigRepo, reconRepo, stripeReconciler)
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go events.NewWorker(db, rdb, enc).Start(workerCtx)
 	go observability.StartAlertsMonitor(workerCtx, db, 2*time.Minute)
-
-	credRepo := repository.NewTenantCredentialRepo(db)
-	paymentRepo := repository.NewPaymentRepo(db)
-	memberRepo := repository.NewMembershipRepo(db)
-	stripeReconciler := observability.NewStripeReconciler(db, enc, credRepo, paymentRepo, memberRepo, reconRepo)
 	go observability.StartStripeReconciliationScheduler(workerCtx, stripeReconciler, alertConfigRepo)
 
 	digestService := observability.NewDigestService(db, emailSvc, alertConfigRepo, reconRepo, ownerAlertSvc)
@@ -102,7 +101,7 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis, enc *database.Encryptor, ownerAlertSvc *observability.OwnerAlertService, alertConfigRepo *repository.AlertConfigRepo, reconRepo *repository.ReconciliationRepo) *chi.Mux {
+func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis, enc *database.Encryptor, ownerAlertSvc *observability.OwnerAlertService, alertConfigRepo *repository.AlertConfigRepo, reconRepo *repository.ReconciliationRepo, stripeReconciler *observability.StripeReconciler) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -203,7 +202,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	stripeWebhookHandler.SetDispatcher(dispatcher)
 	stripeWebhookHandler.SetOwnerAlerts(ownerAlertSvc)
 	serviceHandler.SetDispatcher(dispatcher)
-	alertConfigHandler := handlers.NewAlertConfigHandler(alertConfigRepo, reconRepo, ownerAlertSvc)
+	alertConfigHandler := handlers.NewAlertConfigHandler(alertConfigRepo, reconRepo, ownerAlertSvc, stripeReconciler)
 
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

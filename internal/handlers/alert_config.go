@@ -15,13 +15,24 @@ import (
 
 // AlertConfigHandler manages payment monitoring endpoints (platform admin only).
 type AlertConfigHandler struct {
-	alertConfigRepo *repository.AlertConfigRepo
-	reconRepo       *repository.ReconciliationRepo
-	ownerAlerts     *observability.OwnerAlertService
+	alertConfigRepo    *repository.AlertConfigRepo
+	reconRepo          *repository.ReconciliationRepo
+	ownerAlerts        *observability.OwnerAlertService
+	stripeReconciler   *observability.StripeReconciler
 }
 
-func NewAlertConfigHandler(acr *repository.AlertConfigRepo, rr *repository.ReconciliationRepo, oa *observability.OwnerAlertService) *AlertConfigHandler {
-	return &AlertConfigHandler{alertConfigRepo: acr, reconRepo: rr, ownerAlerts: oa}
+func NewAlertConfigHandler(
+	acr *repository.AlertConfigRepo,
+	rr *repository.ReconciliationRepo,
+	oa *observability.OwnerAlertService,
+	sr *observability.StripeReconciler,
+) *AlertConfigHandler {
+	return &AlertConfigHandler{
+		alertConfigRepo:  acr,
+		reconRepo:        rr,
+		ownerAlerts:      oa,
+		stripeReconciler: sr,
+	}
 }
 
 // RegisterRoutes registers under the platform admin route group (already protected by RequirePlatformAdmin).
@@ -29,6 +40,7 @@ func (h *AlertConfigHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/monitoring/alert-config", h.GetAlertConfig)
 	r.Put("/monitoring/alert-config", h.UpdateAlertConfig)
 	r.Get("/monitoring/payment-reconciliation", h.GetReconciliationReport)
+	r.Post("/monitoring/run-reconciliation", h.RunReconciliationNow)
 	r.Get("/monitoring/expected-vs-received", h.GetExpectedVsReceived)
 	r.Get("/monitoring/webhook-health", h.GetWebhookHealth)
 	r.Get("/monitoring/payment-aging", h.GetPaymentAging)
@@ -105,6 +117,26 @@ func (h *AlertConfigHandler) GetReconciliationReport(w http.ResponseWriter, r *h
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"runs": runs})
+}
+
+// RunReconciliationNow triggers an on-demand Stripe reconciliation for a tenant.
+func (h *AlertConfigHandler) RunReconciliationNow(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
+		return
+	}
+	if h.stripeReconciler == nil {
+		writeError(w, http.StatusInternalServerError, "Stripe reconciler not configured")
+		return
+	}
+	run, err := h.stripeReconciler.RunForTenant(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("on-demand reconciliation failed tenant=%s err=%v", tenantID, err)
+		writeError(w, http.StatusInternalServerError, "Reconciliation failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 func (h *AlertConfigHandler) GetExpectedVsReceived(w http.ResponseWriter, r *http.Request) {

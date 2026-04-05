@@ -233,7 +233,7 @@ export default function PaymentMonitoringPage() {
       )}
 
       {tab === "reconciliation" && (
-        <ReconciliationTab runs={reconRuns} />
+        <ReconciliationTab runs={reconRuns} tenantId={selectedTenantId} onRefresh={() => loadData(selectedTenantId)} />
       )}
 
       {tab === "settings" && configLoaded && (
@@ -356,18 +356,45 @@ function PaymentAgingCard({ data }: { data: PaymentAging | null }) {
   );
 }
 
-function ReconciliationTab({ runs }: { runs: ReconciliationRun[] }) {
+function ReconciliationTab({ runs, tenantId, onRefresh }: { runs: ReconciliationRun[]; tenantId: string; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  if (runs.length === 0) {
-    return (
-      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500">
-        <p>No reconciliation runs yet.</p>
-        <p className="text-sm mt-1">The system runs automatically at 4 AM UTC daily once alert settings are configured.</p>
-      </div>
-    );
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState("");
+
+  async function runNow() {
+    if (!tenantId) return;
+    setRunning(true);
+    setRunError("");
+    try {
+      await api.runReconciliationNow(tenantId);
+      onRefresh();
+    } catch (err: any) {
+      setRunError(err?.message || "Reconciliation failed");
+    } finally {
+      setRunning(false);
+    }
   }
   return (
     <div className="space-y-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Stripe API Verification</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Calls Stripe's API directly to compare subscription status, invoice status, and payment status against our records.
+            {runs.length === 0 && " No runs yet — click Run Now to verify."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {runError && <p className="text-sm text-red-600">{runError}</p>}
+          <button
+            onClick={runNow}
+            disabled={running || !tenantId}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {running ? "Running..." : "Run Now"}
+          </button>
+        </div>
+      </div>
       {runs.map((run) => (
         <div key={run.id} className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between">
