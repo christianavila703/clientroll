@@ -360,9 +360,6 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				webhookHandler.RegisterRoutes(r)
 				inboundWebhookKeyHandler.RegisterRoutes(r)
 
-				// Payment monitoring + alerts
-				alertConfigHandler.RegisterRoutes(r)
-
 				// File uploads + serving
 				fileHandler.RegisterAuthRoutes(r)
 			})
@@ -376,7 +373,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				gocardlessHandler.RegisterPlatformRoutes(r)
 				xeroHandler.RegisterPlatformRoutes(r)
 				inboundWebhookHandler.RegisterPlatformRoutes(r)
-				// Phase 8: Platform billing
+				alertConfigHandler.RegisterRoutes(r)
 			})
 		})
 	})

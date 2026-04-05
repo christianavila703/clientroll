@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"clientroll/internal/middleware"
 	"clientroll/internal/observability"
 	"clientroll/internal/repository"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// AlertConfigHandler manages tenant alert configuration and reconciliation report endpoints.
+// AlertConfigHandler manages payment monitoring endpoints (platform admin only).
 type AlertConfigHandler struct {
 	alertConfigRepo *repository.AlertConfigRepo
 	reconRepo       *repository.ReconciliationRepo
@@ -25,19 +24,37 @@ func NewAlertConfigHandler(acr *repository.AlertConfigRepo, rr *repository.Recon
 	return &AlertConfigHandler{alertConfigRepo: acr, reconRepo: rr, ownerAlerts: oa}
 }
 
+// RegisterRoutes registers under the platform admin route group (already protected by RequirePlatformAdmin).
 func (h *AlertConfigHandler) RegisterRoutes(r chi.Router) {
-	r.Get("/settings/alert-config", h.GetAlertConfig)
-	r.Put("/settings/alert-config", h.UpdateAlertConfig)
-	r.Get("/reports/payment-reconciliation", h.GetReconciliationReport)
-	r.Get("/reports/expected-vs-received", h.GetExpectedVsReceived)
-	r.Get("/reports/webhook-health", h.GetWebhookHealth)
-	r.Get("/reports/payment-aging", h.GetPaymentAging)
+	r.Get("/monitoring/alert-config", h.GetAlertConfig)
+	r.Put("/monitoring/alert-config", h.UpdateAlertConfig)
+	r.Get("/monitoring/payment-reconciliation", h.GetReconciliationReport)
+	r.Get("/monitoring/expected-vs-received", h.GetExpectedVsReceived)
+	r.Get("/monitoring/webhook-health", h.GetWebhookHealth)
+	r.Get("/monitoring/payment-aging", h.GetPaymentAging)
+}
+
+func parseTenantIDParam(r *http.Request) (uuid.UUID, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("tenant_id"))
+	if raw == "" {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 func (h *AlertConfigHandler) GetAlertConfig(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		configs, err := h.alertConfigRepo.ListAll(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load alert configs")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"configs": configs})
 		return
 	}
 	cfg, err := h.alertConfigRepo.GetByTenant(r.Context(), tenantID)
@@ -46,18 +63,16 @@ func (h *AlertConfigHandler) GetAlertConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if cfg == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"configured": false,
-		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"configured": false, "tenant_id": tenantID})
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
 }
 
 func (h *AlertConfigHandler) UpdateAlertConfig(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
 		return
 	}
 	var input repository.AlertConfig
@@ -79,9 +94,9 @@ func (h *AlertConfigHandler) UpdateAlertConfig(w http.ResponseWriter, r *http.Re
 }
 
 func (h *AlertConfigHandler) GetReconciliationReport(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
 		return
 	}
 	runs, err := h.reconRepo.ListByTenant(r.Context(), tenantID, 30)
@@ -89,15 +104,13 @@ func (h *AlertConfigHandler) GetReconciliationReport(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "Failed to load reconciliation report")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"runs": runs,
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"runs": runs})
 }
 
 func (h *AlertConfigHandler) GetExpectedVsReceived(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
 		return
 	}
 	graceDaysCard, graceDaysDD := 1, 3
@@ -115,9 +128,9 @@ func (h *AlertConfigHandler) GetExpectedVsReceived(w http.ResponseWriter, r *htt
 }
 
 func (h *AlertConfigHandler) GetWebhookHealth(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
 		return
 	}
 	result, err := h.ownerAlerts.GetWebhookHealth(r.Context(), tenantID)
@@ -129,9 +142,9 @@ func (h *AlertConfigHandler) GetWebhookHealth(w http.ResponseWriter, r *http.Req
 }
 
 func (h *AlertConfigHandler) GetPaymentAging(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid tenant")
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
 		return
 	}
 	result, err := h.ownerAlerts.GetPaymentAging(r.Context(), tenantID)

@@ -86,8 +86,16 @@ const defaultConfig: AlertConfig = {
   grace_days_direct_debit: 3,
 };
 
+interface Tenant {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 export default function PaymentMonitoringPage() {
   const [tab, setTab] = useState<"overview" | "reconciliation" | "settings">("overview");
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
   const [evr, setEvr] = useState<ExpectedVsReceived | null>(null);
   const [wh, setWh] = useState<WebhookHealth | null>(null);
   const [aging, setAging] = useState<PaymentAging | null>(null);
@@ -99,18 +107,32 @@ export default function PaymentMonitoringPage() {
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    loadData();
+    api.listTenants().then((data) => {
+      const list = (data as any)?.tenants || [];
+      setTenants(list);
+      if (list.length > 0) {
+        setSelectedTenantId(list[0].id);
+      }
+    }).catch(() => {});
   }, []);
 
-  async function loadData() {
+  useEffect(() => {
+    if (selectedTenantId) loadData(selectedTenantId);
+  }, [selectedTenantId]);
+
+  async function loadData(tenantId: string) {
     setLoadError("");
+    setEvr(null);
+    setWh(null);
+    setAging(null);
+    setReconRuns([]);
     try {
       const [evrRes, whRes, agingRes, reconRes, cfgRes] = await Promise.all([
-        api.getExpectedVsReceived(),
-        api.getWebhookHealth(),
-        api.getPaymentAging(),
-        api.getReconciliationReport(),
-        api.getAlertConfig(),
+        api.getExpectedVsReceived(tenantId),
+        api.getWebhookHealth(tenantId),
+        api.getPaymentAging(tenantId),
+        api.getReconciliationReport(tenantId),
+        api.getAlertConfig(tenantId),
       ]);
       setEvr(evrRes as ExpectedVsReceived);
       setWh(whRes as WebhookHealth);
@@ -118,18 +140,21 @@ export default function PaymentMonitoringPage() {
       setReconRuns((reconRes as any)?.runs || []);
       if ((cfgRes as any)?.configured !== false) {
         setConfig(cfgRes as AlertConfig);
+      } else {
+        setConfig(defaultConfig);
       }
       setConfigLoaded(true);
-    } catch (err) {
+    } catch {
       setLoadError("Failed to load monitoring data. Please try again.");
     }
   }
 
   async function saveConfig() {
+    if (!selectedTenantId) return;
     setSaving(true);
     setSaveMsg("");
     try {
-      await api.updateAlertConfig(config);
+      await api.updateAlertConfig(selectedTenantId, config);
       setSaveMsg("Alert settings saved.");
     } catch {
       setSaveMsg("Failed to save. Please try again.");
@@ -149,6 +174,16 @@ export default function PaymentMonitoringPage() {
             Triple-checked against your database, payment provider APIs, and webhook event log.
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={selectedTenantId}
+            onChange={(e) => setSelectedTenantId(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name || t.slug}</option>
+            ))}
+          </select>
         {hasIssues && (
           <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
             Issues detected
@@ -159,6 +194,7 @@ export default function PaymentMonitoringPage() {
             All clear
           </span>
         )}
+        </div>
       </div>
 
       {loadError && (

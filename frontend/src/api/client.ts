@@ -294,15 +294,19 @@ export const api = {
   getPaymentStatusReport: () => request("/tenant/reports/payments/status"),
   getComprehensiveReport: () => request("/tenant/reports/comprehensive"),
 
-  // Payment Monitoring
-  getAlertConfig: () => request("/tenant/settings/alert-config"),
-  updateAlertConfig: (data: unknown) =>
-    request("/tenant/settings/alert-config", { method: "PUT", body: data }),
-  getExpectedVsReceived: () => request("/tenant/reports/expected-vs-received"),
-  getWebhookHealth: () => request("/tenant/reports/webhook-health"),
-  getPaymentAging: () => request("/tenant/reports/payment-aging"),
-  getReconciliationReport: () =>
-    request("/tenant/reports/payment-reconciliation"),
+  // Payment Monitoring (platform admin)
+  getAlertConfig: (tenantId?: string) =>
+    request(`/platform/monitoring/alert-config${tenantId ? `?tenant_id=${tenantId}` : ""}`),
+  updateAlertConfig: (tenantId: string, data: unknown) =>
+    request(`/platform/monitoring/alert-config?tenant_id=${tenantId}`, { method: "PUT", body: data }),
+  getExpectedVsReceived: (tenantId: string) =>
+    request(`/platform/monitoring/expected-vs-received?tenant_id=${tenantId}`),
+  getWebhookHealth: (tenantId: string) =>
+    request(`/platform/monitoring/webhook-health?tenant_id=${tenantId}`),
+  getPaymentAging: (tenantId: string) =>
+    request(`/platform/monitoring/payment-aging?tenant_id=${tenantId}`),
+  getReconciliationReport: (tenantId: string) =>
+    request(`/platform/monitoring/payment-reconciliation?tenant_id=${tenantId}`),
 
   // Terms & Conditions
   listTerms: () => request("/tenant/terms"),

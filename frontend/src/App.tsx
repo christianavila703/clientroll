@@ -58,7 +58,6 @@ function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/payment-monitoring" element={<PaymentMonitoringPage />} />
           <Route path="/staff" element={<StaffPage />} />
           <Route path="/signup" element={<StaffSignupLauncher />} />
           <Route path="/email-templates" element={<EmailTemplatesPage />} />
@@ -71,6 +70,7 @@ function App() {
             <Route path="/platform/tenants/new" element={<PlatformTenantCreatePage />} />
             <Route path="/platform/billing" element={<PlatformBillingPage />} />
             <Route path="/platform/billing/tenants/:tenantId" element={<PlatformTenantBillingDetailPage />} />
+            <Route path="/platform/monitoring" element={<PaymentMonitoringPage />} />
           </Route>
         </Route>
 
