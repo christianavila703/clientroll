@@ -142,6 +142,17 @@ func runAlertChecks(ctx context.Context, db *database.Postgres) {
 			"threshold": alertMembershipStatusDriftThresh,
 		})
 	}
+
+	var stuckInboundWebhooks int
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbound_webhook_events
+		WHERE status = 'received' AND received_at < NOW() - INTERVAL '10 minutes'
+	`).Scan(&stuckInboundWebhooks)
+	if stuckInboundWebhooks > 0 {
+		emitAlert("stuck_inbound_webhooks", map[string]interface{}{
+			"count": stuckInboundWebhooks,
+		})
+	}
 }
 
 func activateScheduledMemberships(ctx context.Context, db *database.Postgres) {

@@ -309,6 +309,10 @@ export const api = {
     request(`/platform/monitoring/payment-reconciliation?tenant_id=${tenantId}`),
   runReconciliationNow: (tenantId: string) =>
     request(`/platform/monitoring/run-reconciliation?tenant_id=${tenantId}`, { method: "POST" }),
+  runGCReconciliationNow: (tenantId: string) =>
+    request(`/platform/monitoring/run-gc-reconciliation?tenant_id=${tenantId}`, { method: "POST" }),
+  getWebhookAudit: (tenantId: string) =>
+    request(`/platform/monitoring/webhook-audit?tenant_id=${tenantId}`),
 
   // Terms & Conditions
   listTerms: () => request("/tenant/terms"),

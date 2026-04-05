@@ -45,13 +45,14 @@ func NewStripeReconciler(
 }
 
 type membershipStripeInfo struct {
-	MembershipID       uuid.UUID
-	ClientID           uuid.UUID
-	ClientName         string
-	MembershipTitle    string
-	MembershipStatus   string
-	StripeSubID        string
+	MembershipID        uuid.UUID
+	ClientID            uuid.UUID
+	ClientName          string
+	MembershipTitle     string
+	MembershipStatus    string
+	StripeSubID         string
 	LatestPaymentStatus string
+	PaymentAmount       float64
 }
 
 // RunForTenant performs the full Stripe reconciliation sweep for a single tenant.
@@ -111,6 +112,12 @@ func (sr *StripeReconciler) RunForTenant(ctx context.Context, tenantID uuid.UUID
 		} else {
 			matched++
 		}
+
+		if m.PaymentAmount > 0 && sub.LatestInvoice != nil {
+			if amtMismatch := sr.checkInvoiceAmount(m, sub.LatestInvoice); amtMismatch != nil {
+				mismatches = append(mismatches, *amtMismatch)
+			}
+		}
 	}
 
 	autoFixed := 0
@@ -154,7 +161,8 @@ func (sr *StripeReconciler) getMembershipsWithStripe(ctx context.Context, tenant
 		SELECT DISTINCT ON (m.id)
 			m.id, m.client_id, c.name, mt.title, m.status,
 			p.stripe_details->>'stripe_subscription_id' AS stripe_sub_id,
-			p.status AS payment_status
+			p.status AS payment_status,
+			COALESCE(m.payment_amount, 0)
 		FROM memberships m
 		JOIN clients c ON c.id = m.client_id AND c.tenant_id = m.tenant_id
 		JOIN membership_types mt ON mt.id = m.membership_type_id AND mt.tenant_id = m.tenant_id
@@ -172,7 +180,7 @@ func (sr *StripeReconciler) getMembershipsWithStripe(ctx context.Context, tenant
 	var items []membershipStripeInfo
 	for rows.Next() {
 		var m membershipStripeInfo
-		if err := rows.Scan(&m.MembershipID, &m.ClientID, &m.ClientName, &m.MembershipTitle, &m.MembershipStatus, &m.StripeSubID, &m.LatestPaymentStatus); err != nil {
+		if err := rows.Scan(&m.MembershipID, &m.ClientID, &m.ClientName, &m.MembershipTitle, &m.MembershipStatus, &m.StripeSubID, &m.LatestPaymentStatus, &m.PaymentAmount); err != nil {
 			return nil, fmt.Errorf("scan membership stripe info: %w", err)
 		}
 		items = append(items, m)
@@ -274,6 +282,35 @@ func (sr *StripeReconciler) compareStatuses(m membershipStripeInfo, stripeStatus
 
 	default:
 		return nil
+	}
+}
+
+func (sr *StripeReconciler) checkInvoiceAmount(m membershipStripeInfo, inv *stripe.Invoice) *repository.ReconciliationMismatch {
+	stripeAmount := float64(inv.AmountPaid) / 100.0
+	if stripeAmount == 0 {
+		stripeAmount = float64(inv.AmountDue) / 100.0
+	}
+	if stripeAmount == 0 {
+		return nil
+	}
+	diff := m.PaymentAmount - stripeAmount
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff < 0.01 {
+		return nil
+	}
+	return &repository.ReconciliationMismatch{
+		MembershipID:      m.MembershipID,
+		ClientID:          m.ClientID,
+		ClientName:        m.ClientName,
+		MembershipTitle:   m.MembershipTitle,
+		LocalStatus:       fmt.Sprintf("$%.2f", m.PaymentAmount),
+		ProviderStatus:    fmt.Sprintf("$%.2f", stripeAmount),
+		ProviderSubID:     m.StripeSubID,
+		Severity:          "warning",
+		Category:          "amount_mismatch",
+		RecommendedAction: fmt.Sprintf("Local amount $%.2f vs Stripe invoice $%.2f", m.PaymentAmount, stripeAmount),
 	}
 }
 

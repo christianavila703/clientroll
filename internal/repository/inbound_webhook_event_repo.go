@@ -92,6 +92,17 @@ func (r *InboundWebhookEventRepo) MarkFailed(ctx context.Context, tenantID uuid.
 	return nil
 }
 
+// LinkPayment records which payment/membership a webhook event affected and what outcome was expected.
+func (r *InboundWebhookEventRepo) LinkPayment(ctx context.Context, tenantID uuid.UUID, provider, eventID string, paymentID *uuid.UUID, membershipID *uuid.UUID, expectedOutcome string) {
+	_, _ = r.db.Pool.Exec(ctx, `
+		UPDATE inbound_webhook_events
+		SET payment_id = COALESCE($4, payment_id),
+		    membership_id = COALESCE($5, membership_id),
+		    expected_outcome = COALESCE(NULLIF($6, ''), expected_outcome)
+		WHERE tenant_id = $1 AND provider = $2 AND event_id = $3
+	`, tenantID, provider, eventID, paymentID, membershipID, expectedOutcome)
+}
+
 // ListFailed returns recent failed inbound webhook events for a provider.
 func (r *InboundWebhookEventRepo) ListFailed(ctx context.Context, provider string, limit int) ([]InboundWebhookEvent, error) {
 	return r.ListFailedFiltered(ctx, provider, nil, limit)

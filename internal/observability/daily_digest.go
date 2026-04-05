@@ -127,8 +127,17 @@ func (ds *DigestService) sendDigest(ctx context.Context, cfg repository.AlertCon
 		latestRecon, _ = ds.reconRepo.LatestByTenant(ctx, cfg.TenantID)
 	}
 
-	hasIssues := evr.TotalOverdue > 0 || (wh.Failed24h > 0) || aging.ActiveUnpaid30d > 0
+	audit, err := ds.ownerAlerts.AuditWebhookOutcomes(ctx, cfg.TenantID)
+	if err != nil {
+		log.Printf("daily_digest webhook_audit failed tenant=%s err=%v", cfg.TenantID, err)
+		audit = &WebhookAuditSummary{}
+	}
+
+	hasIssues := evr.TotalOverdue > 0 || (wh.Failed24h > 0) || wh.Stuck > 0 || aging.ActiveUnpaid30d > 0
 	if latestRecon != nil && latestRecon.TotalMismatched > 0 {
+		hasIssues = true
+	}
+	if len(audit.OutcomeMismatches) > 0 || audit.StuckEvents > 0 {
 		hasIssues = true
 	}
 
@@ -137,7 +146,7 @@ func (ds *DigestService) sendDigest(ctx context.Context, cfg repository.AlertCon
 	}
 
 	subject := ds.buildDigestSubject(evr, hasIssues)
-	html := ds.buildDigestHTML(evr, wh, aging, latestRecon)
+	html := ds.buildDigestHTML(evr, wh, aging, latestRecon, audit)
 
 	if _, err := ds.emailSvc.Send(ctx, email.SendInput{
 		To:      cfg.AlertEmail,
@@ -163,6 +172,7 @@ func (ds *DigestService) buildDigestHTML(
 	wh *WebhookHealthSummary,
 	aging *PaymentAgingSummary,
 	recon *repository.ReconciliationRun,
+	audit *WebhookAuditSummary,
 ) string {
 	var sb strings.Builder
 
@@ -212,13 +222,15 @@ func (ds *DigestService) buildDigestHTML(
 			<tr><td style="padding:4px 0;color:#6b7280;">Failed (24h)</td><td style="text-align:right;%s">%d</td></tr>
 			<tr><td style="padding:4px 0;color:#6b7280;">Processed (7d)</td><td style="text-align:right;">%d</td></tr>
 			<tr><td style="padding:4px 0;color:#6b7280;">Failed (7d)</td><td style="text-align:right;">%d</td></tr>
+			<tr><td style="padding:4px 0;color:#6b7280;">Stuck events</td><td style="text-align:right;%s">%d</td></tr>
 		</table>
 	</div>`,
 		formatOptionalTime(wh.LastStripeWebhook),
 		formatOptionalTime(wh.LastGoCardlessWebhook),
 		wh.Processed24h,
 		failedStyle(wh.Failed24h), wh.Failed24h,
-		wh.Processed7d, wh.Failed7d))
+		wh.Processed7d, wh.Failed7d,
+		failedStyle(wh.Stuck), wh.Stuck))
 
 	// Section 4: Payment Aging
 	sb.WriteString(sectionHeader("Payment Aging", "Failed payments by age"))
@@ -231,6 +243,23 @@ func (ds *DigestService) buildDigestHTML(
 		sb.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 0;color:#6b7280;font-weight:600;">Active, unpaid 30+ days</td><td style="text-align:right;%s">%d</td></tr>`,
 			failedStyle(aging.ActiveUnpaid30d), aging.ActiveUnpaid30d))
 		sb.WriteString(`</table></div>`)
+	}
+
+	// Section 5: Webhook Audit Trail
+	if audit != nil && (audit.TotalAudited > 0 || audit.StuckEvents > 0 || audit.UnlinkedProcessed > 0) {
+		sb.WriteString(sectionHeader("Webhook Audit Trail", "Leg 3: webhook-to-DB verification"))
+		auditColor := "#059669"
+		if len(audit.OutcomeMismatches) > 0 || audit.StuckEvents > 0 {
+			auditColor = "#dc2626"
+		}
+		sb.WriteString(fmt.Sprintf(`<p style="font-size:14px;color:#374151;margin:0 0 12px;"><strong>%d</strong> audited · <strong style="color:#059669;">%d</strong> verified · <strong style="color:%s">%d mismatches</strong> · <strong style="color:%s">%d stuck</strong> · <strong>%d</strong> unlinked</p>`,
+			audit.TotalAudited, audit.TotalVerified,
+			auditColor, len(audit.OutcomeMismatches),
+			failedStyleColor(audit.StuckEvents), audit.StuckEvents,
+			audit.UnlinkedProcessed))
+		if len(audit.OutcomeMismatches) > 0 {
+			sb.WriteString(auditMismatchTable(audit.OutcomeMismatches))
+		}
 	}
 
 	sb.WriteString(`<p style="font-size:11px;color:#d1d5db;margin:16px 0 0;">This is an automated report from ClientRoll payment monitoring. Triple-checked against your database, payment provider APIs, and webhook event log.</p>`)
@@ -306,4 +335,38 @@ func failedStyle(count int) string {
 		return "color:#dc2626;font-weight:600;"
 	}
 	return ""
+}
+
+func failedStyleColor(count int) string {
+	if count > 0 {
+		return "#dc2626"
+	}
+	return "#059669"
+}
+
+func auditMismatchTable(items []WebhookAuditMismatch) string {
+	var sb strings.Builder
+	sb.WriteString(`<table style="width:100%;font-size:13px;color:#374151;border-collapse:collapse;margin:0 0 16px;">
+		<tr style="background:#fef2f2;">
+			<th style="text-align:left;padding:6px;border-bottom:1px solid #fecaca;">Event</th>
+			<th style="text-align:left;padding:6px;border-bottom:1px solid #fecaca;">Provider</th>
+			<th style="text-align:left;padding:6px;border-bottom:1px solid #fecaca;">Expected</th>
+			<th style="text-align:left;padding:6px;border-bottom:1px solid #fecaca;">Actual</th>
+			<th style="text-align:left;padding:6px;border-bottom:1px solid #fecaca;">Received</th>
+		</tr>`)
+	for _, item := range items {
+		eventShort := item.EventID
+		if len(eventShort) > 20 {
+			eventShort = eventShort[:20] + "..."
+		}
+		sb.WriteString(fmt.Sprintf(`<tr>
+			<td style="padding:6px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:11px;">%s</td>
+			<td style="padding:6px;border-bottom:1px solid #f3f4f6;">%s</td>
+			<td style="padding:6px;border-bottom:1px solid #f3f4f6;color:#059669;">%s</td>
+			<td style="padding:6px;border-bottom:1px solid #f3f4f6;color:#dc2626;">%s</td>
+			<td style="padding:6px;border-bottom:1px solid #f3f4f6;">%s</td>
+		</tr>`, eventShort, item.Provider, item.ExpectedOutcome, item.ActualStatus, item.ReceivedAt.Format("2 Jan 15:04")))
+	}
+	sb.WriteString(`</table>`)
+	return sb.String()
 }

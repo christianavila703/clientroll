@@ -60,13 +60,15 @@ func main() {
 	paymentRepoMain := repository.NewPaymentRepo(db)
 	memberRepoMain := repository.NewMembershipRepo(db)
 	stripeReconciler := observability.NewStripeReconciler(db, enc, credRepoMain, paymentRepoMain, memberRepoMain, reconRepo)
+	gcReconciler := observability.NewGCReconciler(db, enc, credRepoMain, paymentRepoMain, memberRepoMain, reconRepo)
 
-	r := setupRouter(cfg, db, rdb, enc, ownerAlertSvc, alertConfigRepo, reconRepo, stripeReconciler)
+	r := setupRouter(cfg, db, rdb, enc, ownerAlertSvc, alertConfigRepo, reconRepo, stripeReconciler, gcReconciler)
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go events.NewWorker(db, rdb, enc).Start(workerCtx)
 	go observability.StartAlertsMonitor(workerCtx, db, 2*time.Minute)
 	go observability.StartStripeReconciliationScheduler(workerCtx, stripeReconciler, alertConfigRepo)
+	go observability.StartGCReconciliationScheduler(workerCtx, gcReconciler, alertConfigRepo)
 
 	digestService := observability.NewDigestService(db, emailSvc, alertConfigRepo, reconRepo, ownerAlertSvc)
 	go observability.StartDailyDigestScheduler(workerCtx, digestService)
@@ -101,7 +103,7 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis, enc *database.Encryptor, ownerAlertSvc *observability.OwnerAlertService, alertConfigRepo *repository.AlertConfigRepo, reconRepo *repository.ReconciliationRepo, stripeReconciler *observability.StripeReconciler) *chi.Mux {
+func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis, enc *database.Encryptor, ownerAlertSvc *observability.OwnerAlertService, alertConfigRepo *repository.AlertConfigRepo, reconRepo *repository.ReconciliationRepo, stripeReconciler *observability.StripeReconciler, gcReconciler *observability.GCReconciler) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -202,7 +204,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	stripeWebhookHandler.SetDispatcher(dispatcher)
 	stripeWebhookHandler.SetOwnerAlerts(ownerAlertSvc)
 	serviceHandler.SetDispatcher(dispatcher)
-	alertConfigHandler := handlers.NewAlertConfigHandler(alertConfigRepo, reconRepo, ownerAlertSvc, stripeReconciler)
+	alertConfigHandler := handlers.NewAlertConfigHandler(alertConfigRepo, reconRepo, ownerAlertSvc, stripeReconciler, gcReconciler)
 
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

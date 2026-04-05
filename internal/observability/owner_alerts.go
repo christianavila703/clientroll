@@ -34,6 +34,7 @@ const (
 	AlertMandateCancelled   AlertType = "mandate_cancelled"
 	AlertPipelineBreak      AlertType = "pipeline_break"
 	AlertWebhookDropped     AlertType = "webhook_dropped"
+	AlertWebhookStuck       AlertType = "webhook_stuck"
 )
 
 // PaymentAlertData carries context for a payment-related immediate alert.
@@ -85,7 +86,7 @@ func (s *OwnerAlertService) isAlertEnabled(cfg *repository.AlertConfig, alertTyp
 		return cfg.ImmediateDispute
 	case AlertMandateCancelled:
 		return cfg.ImmediateMandateCancelled
-	case AlertPipelineBreak, AlertWebhookDropped:
+	case AlertPipelineBreak, AlertWebhookDropped, AlertWebhookStuck:
 		return cfg.ImmediatePipelineBreak
 	default:
 		return true
@@ -184,6 +185,20 @@ func (s *OwnerAlertService) buildImmediateEmail(alertType AlertType, data Paymen
 			<p style="font-size:14px;color:#374151;margin:0;">%s</p>
 		</div>
 		<p style="font-size:13px;color:#9ca3af;">Payment status updates from Stripe will not be processed until the integration is correctly configured.</p>`,
+			data.FailureReason))
+		return subject, html
+
+	case AlertWebhookStuck:
+		subject := "Webhook events stuck — not processing"
+		html := email.WrapHTML(fmt.Sprintf(`
+		<h1 style="font-size:20px;font-weight:600;color:#dc2626;margin:0 0 8px;">Stuck Webhook Events Detected</h1>
+		<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 16px;">
+			Webhook events have been received but stuck in "received" status for over 10 minutes without being processed. Payment status updates may be delayed.
+		</p>
+		<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:0 0 24px;">
+			<p style="font-size:14px;color:#374151;margin:0;">%s</p>
+		</div>
+		<p style="font-size:13px;color:#9ca3af;">Check server logs for webhook processing errors. These events may need manual reprocessing.</p>`,
 			data.FailureReason))
 		return subject, html
 
@@ -352,6 +367,7 @@ type WebhookHealthSummary struct {
 	Failed24h             int        `json:"failed_24h"`
 	Processed7d           int        `json:"processed_7d"`
 	Failed7d              int        `json:"failed_7d"`
+	Stuck                 int        `json:"stuck"`
 }
 
 // GetWebhookHealth returns webhook pipeline health metrics for a tenant.
@@ -389,6 +405,11 @@ func (s *OwnerAlertService) GetWebhookHealth(ctx context.Context, tenantID uuid.
 		SELECT COUNT(*) FROM inbound_webhook_events
 		WHERE tenant_id = $1 AND status = 'failed' AND received_at >= NOW() - INTERVAL '7 days'
 	`, tenantID).Scan(&wh.Failed7d)
+
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbound_webhook_events
+		WHERE tenant_id = $1 AND status = 'received' AND received_at < NOW() - INTERVAL '10 minutes'
+	`, tenantID).Scan(&wh.Stuck)
 
 	return &wh, nil
 }
@@ -439,4 +460,118 @@ func (s *OwnerAlertService) GetPaymentAging(ctx context.Context, tenantID uuid.U
 		},
 		ActiveUnpaid30d: activeUnpaid,
 	}, nil
+}
+
+// WebhookAuditMismatch records a single webhook-to-DB verification failure.
+type WebhookAuditMismatch struct {
+	EventID         string    `json:"event_id"`
+	Provider        string    `json:"provider"`
+	ResourceType    string    `json:"resource_type"`
+	ExpectedOutcome string    `json:"expected_outcome"`
+	ActualStatus    string    `json:"actual_status"`
+	PaymentID       *string   `json:"payment_id,omitempty"`
+	MembershipID    *string   `json:"membership_id,omitempty"`
+	ReceivedAt      time.Time `json:"received_at"`
+	Category        string    `json:"category"`
+}
+
+// WebhookAuditSummary groups all webhook audit findings.
+type WebhookAuditSummary struct {
+	TotalAudited      int                    `json:"total_audited"`
+	TotalVerified     int                    `json:"total_verified"`
+	OutcomeMismatches []WebhookAuditMismatch `json:"outcome_mismatches"`
+	StuckEvents       int                    `json:"stuck_events"`
+	UnlinkedProcessed int                    `json:"unlinked_processed"`
+}
+
+// AuditWebhookOutcomes verifies that processed webhooks actually produced the expected DB changes.
+func (s *OwnerAlertService) AuditWebhookOutcomes(ctx context.Context, tenantID uuid.UUID) (*WebhookAuditSummary, error) {
+	summary := &WebhookAuditSummary{}
+
+	// 1. Outcome mismatches: webhook says expected X but payment is actually Y
+	rows, err := s.db.Pool.Query(ctx, `
+		SELECT w.event_id, w.provider, w.resource_type, w.expected_outcome,
+		       COALESCE(p.status, ''), COALESCE(p.id::text, ''), COALESCE(m.status, ''),
+		       COALESCE(w.membership_id::text, ''), w.received_at
+		FROM inbound_webhook_events w
+		LEFT JOIN payments p ON p.id = w.payment_id
+		LEFT JOIN memberships m ON m.id = w.membership_id
+		WHERE w.tenant_id = $1
+		  AND w.status = 'processed'
+		  AND w.expected_outcome IS NOT NULL
+		  AND w.received_at >= NOW() - INTERVAL '7 days'
+		ORDER BY w.received_at DESC
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("audit webhook outcomes: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var eventID, provider, resourceType, expected, payStatus, payID, memStatus, memID string
+		var receivedAt time.Time
+		if err := rows.Scan(&eventID, &provider, &resourceType, &expected, &payStatus, &payID, &memStatus, &memID, &receivedAt); err != nil {
+			return nil, fmt.Errorf("scan audit row: %w", err)
+		}
+		summary.TotalAudited++
+
+		actualStatus := payStatus
+		if actualStatus == "" {
+			actualStatus = memStatus
+		}
+
+		if actualStatus == expected {
+			summary.TotalVerified++
+			continue
+		}
+
+		mm := WebhookAuditMismatch{
+			EventID:         eventID,
+			Provider:        provider,
+			ResourceType:    resourceType,
+			ExpectedOutcome: expected,
+			ActualStatus:    actualStatus,
+			ReceivedAt:      receivedAt,
+			Category:        "outcome_mismatch",
+		}
+		if payID != "" {
+			mm.PaymentID = &payID
+		}
+		if memID != "" {
+			mm.MembershipID = &memID
+		}
+		summary.OutcomeMismatches = append(summary.OutcomeMismatches, mm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 2. Stuck events: received but never processed (older than 10 minutes)
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbound_webhook_events
+		WHERE tenant_id = $1 AND status = 'received'
+		  AND received_at < NOW() - INTERVAL '10 minutes'
+	`, tenantID).Scan(&summary.StuckEvents)
+
+	// 3. Unlinked processed: marked processed but no payment/membership linked
+	//    (only for resource types that should affect a payment)
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbound_webhook_events
+		WHERE tenant_id = $1 AND status = 'processed'
+		  AND payment_id IS NULL AND membership_id IS NULL
+		  AND resource_type IN ('invoice', 'checkout', 'charge', 'payments', 'refunds', 'subscriptions')
+		  AND received_at >= NOW() - INTERVAL '7 days'
+	`, tenantID).Scan(&summary.UnlinkedProcessed)
+
+	return summary, nil
+}
+
+// CountStuckWebhookEvents returns the count of events stuck in 'received' status globally (all tenants).
+func (s *OwnerAlertService) CountStuckWebhookEvents(ctx context.Context) int {
+	var count int
+	_ = s.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM inbound_webhook_events
+		WHERE status = 'received' AND received_at < NOW() - INTERVAL '10 minutes'
+	`).Scan(&count)
+	return count
 }

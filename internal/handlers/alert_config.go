@@ -15,10 +15,11 @@ import (
 
 // AlertConfigHandler manages payment monitoring endpoints (platform admin only).
 type AlertConfigHandler struct {
-	alertConfigRepo    *repository.AlertConfigRepo
-	reconRepo          *repository.ReconciliationRepo
-	ownerAlerts        *observability.OwnerAlertService
-	stripeReconciler   *observability.StripeReconciler
+	alertConfigRepo  *repository.AlertConfigRepo
+	reconRepo        *repository.ReconciliationRepo
+	ownerAlerts      *observability.OwnerAlertService
+	stripeReconciler *observability.StripeReconciler
+	gcReconciler     *observability.GCReconciler
 }
 
 func NewAlertConfigHandler(
@@ -26,12 +27,14 @@ func NewAlertConfigHandler(
 	rr *repository.ReconciliationRepo,
 	oa *observability.OwnerAlertService,
 	sr *observability.StripeReconciler,
+	gr *observability.GCReconciler,
 ) *AlertConfigHandler {
 	return &AlertConfigHandler{
 		alertConfigRepo:  acr,
 		reconRepo:        rr,
 		ownerAlerts:      oa,
 		stripeReconciler: sr,
+		gcReconciler:     gr,
 	}
 }
 
@@ -44,6 +47,8 @@ func (h *AlertConfigHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/monitoring/expected-vs-received", h.GetExpectedVsReceived)
 	r.Get("/monitoring/webhook-health", h.GetWebhookHealth)
 	r.Get("/monitoring/payment-aging", h.GetPaymentAging)
+	r.Get("/monitoring/webhook-audit", h.GetWebhookAudit)
+	r.Post("/monitoring/run-gc-reconciliation", h.RunGCReconciliationNow)
 }
 
 func parseTenantIDParam(r *http.Request) (uuid.UUID, bool) {
@@ -132,11 +137,46 @@ func (h *AlertConfigHandler) RunReconciliationNow(w http.ResponseWriter, r *http
 	}
 	run, err := h.stripeReconciler.RunForTenant(r.Context(), tenantID)
 	if err != nil {
-		log.Printf("on-demand reconciliation failed tenant=%s err=%v", tenantID, err)
-		writeError(w, http.StatusInternalServerError, "Reconciliation failed: "+err.Error())
+		log.Printf("on-demand stripe reconciliation failed tenant=%s err=%v", tenantID, err)
+		writeError(w, http.StatusInternalServerError, "Stripe reconciliation failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+// RunGCReconciliationNow triggers an on-demand GoCardless reconciliation for a tenant.
+func (h *AlertConfigHandler) RunGCReconciliationNow(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
+		return
+	}
+	if h.gcReconciler == nil {
+		writeError(w, http.StatusInternalServerError, "GoCardless reconciler not configured")
+		return
+	}
+	run, err := h.gcReconciler.RunForTenant(r.Context(), tenantID)
+	if err != nil {
+		log.Printf("on-demand gc reconciliation failed tenant=%s err=%v", tenantID, err)
+		writeError(w, http.StatusInternalServerError, "GoCardless reconciliation failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
+// GetWebhookAudit returns the webhook-to-DB audit verification report.
+func (h *AlertConfigHandler) GetWebhookAudit(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parseTenantIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tenant_id query parameter is required")
+		return
+	}
+	result, err := h.ownerAlerts.AuditWebhookOutcomes(r.Context(), tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to run webhook audit")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *AlertConfigHandler) GetExpectedVsReceived(w http.ResponseWriter, r *http.Request) {

@@ -82,6 +82,14 @@ func (h *StripeWebhookHandler) SetOwnerAlerts(oa *observability.OwnerAlertServic
 	h.ownerAlerts = oa
 }
 
+// linkAudit records which payment/membership a webhook event affected.
+func (h *StripeWebhookHandler) linkAudit(ctx context.Context, tenantID uuid.UUID, eventID string, paymentID *uuid.UUID, membershipID *uuid.UUID, expectedOutcome string) {
+	if h.eventRepo == nil || eventID == "" {
+		return
+	}
+	h.eventRepo.LinkPayment(ctx, tenantID, "stripe", eventID, paymentID, membershipID, expectedOutcome)
+}
+
 // RegisterPublicRoutes registers public Stripe webhook route.
 func (h *StripeWebhookHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/webhooks/stripe/{tenantSlug}", h.Webhook)
@@ -652,6 +660,7 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 	}
 	p.Status = "succeeded"
 	p.PaidDate = &now
+	h.linkAudit(ctx, tenantID, event.ID, &p.ID, &membershipID, "succeeded")
 	if h.xeroSync != nil {
 		_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
 		_ = h.xeroSync.ApplyPaymentForPayment(ctx, p)
@@ -867,6 +876,7 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
 		return fmt.Errorf("update payment failed status: %w", err)
 	}
+	h.linkAudit(ctx, tenantID, event.ID, &p.ID, &membershipID, "failed")
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentFailed, tenantID, map[string]interface{}{
 			"payment_id":    p.ID,
@@ -953,6 +963,7 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 		}
 		p.Status = "succeeded"
 		p.PaidDate = &now
+		h.linkAudit(ctx, tenantID, event.ID, &p.ID, &membershipID, "succeeded")
 		if h.xeroSync != nil {
 			_, _ = h.xeroSync.EnsureInvoiceForPayment(ctx, p)
 			_ = h.xeroSync.ApplyPaymentForPayment(ctx, p)
@@ -979,6 +990,7 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
 		return fmt.Errorf("update invoice payment failed status: %w", err)
 	}
+	h.linkAudit(ctx, tenantID, event.ID, &p.ID, &membershipID, "failed")
 	h.logPaymentFailure(ctx, tenantID, p.ID, nil, &reason, nil)
 	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "failed", time.Now().UTC()); err != nil {
 		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
@@ -1174,6 +1186,7 @@ func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, te
 	if err := h.memberRepo.UpdateStatus(ctx, membershipID, tenantID, "cancelled"); err != nil {
 		return fmt.Errorf("cancel membership from subscription.deleted: %w", err)
 	}
+	h.linkAudit(ctx, tenantID, event.ID, nil, &membershipID, "cancelled")
 	if h.xeroSync != nil && h.paymentRepo != nil {
 		if openPayment, pErr := h.paymentRepo.FindLatestOpenByMembership(ctx, tenantID, membershipID); pErr == nil && openPayment != nil {
 			_ = h.xeroSync.VoidInvoiceForPaymentIfUnpaid(ctx, openPayment, "Membership cancelled")
@@ -1248,6 +1261,7 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, paymentStatus, nil, nil, nil); err != nil {
 		return fmt.Errorf("update payment dispute status: %w", err)
 	}
+	h.linkAudit(ctx, tenantID, event.ID, &p.ID, &p.MembershipID, paymentStatus)
 	p.Status = paymentStatus
 	p.PaidDate = nil
 	if h.xeroSync != nil && paymentStatus == "disputed" {
@@ -1332,6 +1346,7 @@ func (h *StripeWebhookHandler) handleRefundEvent(ctx context.Context, tenantID u
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
 		return fmt.Errorf("update payment refunded status: %w", err)
 	}
+	h.linkAudit(ctx, tenantID, event.ID, &p.ID, &p.MembershipID, "refunded")
 	p.Status = "refunded"
 	p.PaidDate = nil
 	if amount <= 0 {

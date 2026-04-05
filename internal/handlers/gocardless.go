@@ -131,6 +131,14 @@ func (h *GoCardlessHandler) SetOwnerAlerts(oa *observability.OwnerAlertService) 
 	h.ownerAlerts = oa
 }
 
+// linkGCAudit records which payment/membership a GoCardless webhook event affected.
+func (h *GoCardlessHandler) linkGCAudit(ctx context.Context, tenantID uuid.UUID, eventID string, paymentID *uuid.UUID, membershipID *uuid.UUID, expectedOutcome string) {
+	if h.eventRepo == nil || eventID == "" {
+		return
+	}
+	h.eventRepo.LinkPayment(ctx, tenantID, gocardlessProvider, eventID, paymentID, membershipID, expectedOutcome)
+}
+
 // RegisterTenantRoutes registers tenant-scoped routes (require auth + tenant).
 // Every GoCardless API is exposed here so it can be called from inside Client Roll.
 func (h *GoCardlessHandler) RegisterTenantRoutes(r chi.Router) {
@@ -521,13 +529,13 @@ func (h *GoCardlessHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 				_ = h.credRepo.UpsertWithOrganisation(r.Context(), tenantID, gocardlessProvider, "", "", orgID, "", false)
 			}
 		case "payments":
-			processErr = h.handlePaymentEvent(r.Context(), tenantID, ev.Links.Payment, ev.Action, ev.Details.Reason, ev.Details.Cause)
+			processErr = h.handlePaymentEvent(r.Context(), tenantID, ev.ID, ev.Links.Payment, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		case "mandates":
-			h.handleMandateEvent(r.Context(), tenantID, ev.Links.Mandate, ev.Action, ev.Details.Reason, ev.Details.Cause)
+			h.handleMandateEvent(r.Context(), tenantID, ev.ID, ev.Links.Mandate, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		case "subscriptions":
-			h.handleSubscriptionEvent(r.Context(), tenantID, ev.Action, ev.Links.Subscription, ev.Links.Payment, ev.Details.Reason, ev.Details.Cause)
+			h.handleSubscriptionEvent(r.Context(), tenantID, ev.ID, ev.Action, ev.Links.Subscription, ev.Links.Payment, ev.Details.Reason, ev.Details.Cause)
 		case "refunds":
-			processErr = h.handleRefundEvent(r.Context(), tenantID, ev.Links.Refund, ev.Action, ev.Details.Reason, ev.Details.Cause)
+			processErr = h.handleRefundEvent(r.Context(), tenantID, ev.ID, ev.Links.Refund, ev.Action, ev.Details.Reason, ev.Details.Cause)
 		default:
 			// other resource types (e.g. creditor, payout, instalment_schedule, block) — log only
 			log.Printf("gocardless.webhook ignored_resource tenant=%s org=%s resource=%s action=%s event=%s", tenantID, orgID, ev.ResourceType, ev.Action, ev.ID)
@@ -619,7 +627,7 @@ func (h *GoCardlessHandler) ReconcileGoCardlessPayment(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "Unsupported payment status for reconcile")
 		return
 	}
-	if err := h.handlePaymentEvent(r.Context(), tenantID, paymentID, action, "manual_reconcile", "manual_reconcile"); err != nil {
+	if err := h.handlePaymentEvent(r.Context(), tenantID, "", paymentID, action, "manual_reconcile", "manual_reconcile"); err != nil {
 		writeError(w, http.StatusBadGateway, "Failed to reconcile payment")
 		return
 	}
@@ -658,7 +666,7 @@ func reconcileActionFromGoCardlessStatus(status string) string {
 	}
 }
 
-func (h *GoCardlessHandler) handleMandateEvent(ctx context.Context, tenantID uuid.UUID, mandateID, action, reason, cause string) {
+func (h *GoCardlessHandler) handleMandateEvent(ctx context.Context, tenantID uuid.UUID, eventID, mandateID, action, reason, cause string) {
 	if mandateID == "" {
 		return
 	}
@@ -684,7 +692,7 @@ func (h *GoCardlessHandler) handleMandateEvent(ctx context.Context, tenantID uui
 	}
 }
 
-func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantID uuid.UUID, action, subscriptionID, paymentID, reason, cause string) {
+func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantID uuid.UUID, eventID, action, subscriptionID, paymentID, reason, cause string) {
 	log.Printf("GoCardless webhook subscription.%s subscription=%s payment=%s reason=%s cause=%s", action, subscriptionID, paymentID, reason, cause)
 
 	switch action {
@@ -697,6 +705,7 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 					newStatus = "cancelled"
 				}
 				_ = h.memberRepo.UpdateStatus(ctx, m.ID, tenantID, newStatus)
+				h.linkGCAudit(ctx, tenantID, eventID, nil, &m.ID, newStatus)
 				log.Printf("Membership %s set to %s (subscription %s %s)", m.ID, newStatus, subscriptionID, action)
 				if h.xeroSync != nil && h.paymentRepo != nil {
 					if openPayment, pErr := h.paymentRepo.FindLatestOpenByMembership(ctx, tenantID, m.ID); pErr == nil && openPayment != nil {
@@ -724,7 +733,7 @@ func (h *GoCardlessHandler) handleSubscriptionEvent(ctx context.Context, tenantI
 	}
 }
 
-func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, refundID, action, reason, cause string) error {
+func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid.UUID, eventID, refundID, action, reason, cause string) error {
 	log.Printf("GoCardless webhook refund.%s refund=%s reason=%s cause=%s", action, refundID, reason, cause)
 	if refundID == "" || h.paymentRepo == nil {
 		return nil
@@ -760,6 +769,7 @@ func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "refunded", nil, nil, nil); err != nil {
 		return err
 	}
+	h.linkGCAudit(ctx, tenantID, eventID, &p.ID, &p.MembershipID, "refunded")
 	p.Status = "refunded"
 	p.PaidDate = nil
 	if h.xeroSync != nil {
@@ -787,7 +797,7 @@ func (h *GoCardlessHandler) handleRefundEvent(ctx context.Context, tenantID uuid
 // handlePaymentEvent updates the payments table from a GoCardless payment webhook event.
 // If the payment doesn't exist in our system (created externally), it creates a record.
 // Sends email notifications for payment success/failure.
-func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uuid.UUID, gcPaymentID, action, reason, cause string) error {
+func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uuid.UUID, eventID, gcPaymentID, action, reason, cause string) error {
 	if gcPaymentID == "" || h.paymentRepo == nil {
 		return nil
 	}
@@ -850,6 +860,7 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, status, paidDate, failureReason, failureCode); err != nil {
 		return err
 	}
+	h.linkGCAudit(ctx, tenantID, eventID, &p.ID, &p.MembershipID, status)
 	p.Status = status
 	p.PaidDate = paidDate
 	if h.xeroSync != nil {

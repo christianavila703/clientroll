@@ -26,6 +26,27 @@ interface WebhookHealth {
   failed_24h: number;
   processed_7d: number;
   failed_7d: number;
+  stuck: number;
+}
+
+interface WebhookAuditMismatch {
+  event_id: string;
+  provider: string;
+  resource_type: string;
+  expected_outcome: string;
+  actual_status: string;
+  payment_id?: string;
+  membership_id?: string;
+  received_at: string;
+  category: string;
+}
+
+interface WebhookAudit {
+  total_audited: number;
+  total_verified: number;
+  outcome_mismatches: WebhookAuditMismatch[];
+  stuck_events: number;
+  unlinked_processed: number;
 }
 
 interface AgingBucket {
@@ -101,6 +122,7 @@ export default function PaymentMonitoringPage() {
   const [wh, setWh] = useState<WebhookHealth | null>(null);
   const [aging, setAging] = useState<PaymentAging | null>(null);
   const [reconRuns, setReconRuns] = useState<ReconciliationRun[]>([]);
+  const [audit, setAudit] = useState<WebhookAudit | null>(null);
   const [config, setConfig] = useState<AlertConfig>(defaultConfig);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -127,13 +149,15 @@ export default function PaymentMonitoringPage() {
     setWh(null);
     setAging(null);
     setReconRuns([]);
+    setAudit(null);
     try {
-      const [evrRes, whRes, agingRes, reconRes, cfgRes] = await Promise.all([
+      const [evrRes, whRes, agingRes, reconRes, cfgRes, auditRes] = await Promise.all([
         api.getExpectedVsReceived(tenantId),
         api.getWebhookHealth(tenantId),
         api.getPaymentAging(tenantId),
         api.getReconciliationReport(tenantId),
         api.getAlertConfig(tenantId),
+        api.getWebhookAudit(tenantId),
       ]);
       const evrData = evrRes as ExpectedVsReceived;
       if (evrData) evrData.overdue_items = evrData.overdue_items || [];
@@ -143,6 +167,9 @@ export default function PaymentMonitoringPage() {
       if (agingData) agingData.buckets = agingData.buckets || [];
       setAging(agingData);
       setReconRuns((reconRes as any)?.runs || []);
+      const auditData = auditRes as WebhookAudit;
+      if (auditData) auditData.outcome_mismatches = auditData.outcome_mismatches || [];
+      setAudit(auditData);
       if ((cfgRes as any)?.configured !== false) {
         setConfig(cfgRes as AlertConfig);
       } else {
@@ -168,7 +195,7 @@ export default function PaymentMonitoringPage() {
     }
   }
 
-  const hasIssues = (evr?.total_overdue ?? 0) > 0 || (wh?.failed_24h ?? 0) > 0 || (aging?.active_unpaid_30d ?? 0) > 0;
+  const hasIssues = (evr?.total_overdue ?? 0) > 0 || (wh?.failed_24h ?? 0) > 0 || (wh?.stuck ?? 0) > 0 || (aging?.active_unpaid_30d ?? 0) > 0 || (audit?.stuck_events ?? 0) > 0 || (audit?.outcome_mismatches?.length ?? 0) > 0;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -228,6 +255,7 @@ export default function PaymentMonitoringPage() {
         <div className="space-y-6">
           <ExpectedVsReceivedCard data={evr} />
           <WebhookHealthCard data={wh} />
+          <WebhookAuditCard data={audit} />
           <PaymentAgingCard data={aging} />
         </div>
       )}
@@ -333,7 +361,72 @@ function WebhookHealthCard({ data }: { data: WebhookHealth | null }) {
           <p className="text-xs text-gray-500">Failed (7d)</p>
           <p className={`text-sm font-medium ${data.failed_7d > 0 ? "text-red-600" : "text-gray-900"}`}>{data.failed_7d}</p>
         </div>
+        <div>
+          <p className="text-xs text-gray-500">Stuck events</p>
+          <p className={`text-sm font-medium ${(data.stuck ?? 0) > 0 ? "text-red-600 font-bold" : "text-gray-900"}`}>{data.stuck ?? 0}</p>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function WebhookAuditCard({ data }: { data: WebhookAudit | null }) {
+  if (!data) return <CardSkeleton />;
+  const mismatches = data.outcome_mismatches || [];
+  const hasProblems = mismatches.length > 0 || data.stuck_events > 0 || data.unlinked_processed > 0;
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Webhook Audit Trail</h2>
+          <p className="text-xs text-gray-500">Leg 3: Verifies that each webhook produced the expected DB change</p>
+        </div>
+        {!hasProblems && data.total_audited > 0 && (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            All verified
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+        <Stat label="Audited (7d)" value={data.total_audited} />
+        <Stat label="Verified" value={data.total_verified} color="text-green-600" />
+        <Stat label="Mismatches" value={mismatches.length} color={mismatches.length > 0 ? "text-red-600" : undefined} />
+        <Stat label="Stuck" value={data.stuck_events} color={data.stuck_events > 0 ? "text-red-600" : undefined} />
+        <Stat label="Unlinked" value={data.unlinked_processed} color={data.unlinked_processed > 0 ? "text-amber-600" : undefined} />
+      </div>
+      {mismatches.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Outcome Mismatches</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-red-50">
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Event</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Provider</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Expected</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Actual</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Received</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mismatches.map((m, i) => (
+                  <tr key={i} className="border-t border-gray-100">
+                    <td className="px-3 py-2 font-mono text-xs">{m.event_id.substring(0, 20)}...</td>
+                    <td className="px-3 py-2">{m.provider}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">{m.expected_outcome}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">{m.actual_status || "unknown"}</span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{new Date(m.received_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -358,51 +451,127 @@ function PaymentAgingCard({ data }: { data: PaymentAging | null }) {
 
 function ReconciliationTab({ runs, tenantId, onRefresh }: { runs: ReconciliationRun[]; tenantId: string; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
+  const [runningStripe, setRunningStripe] = useState(false);
+  const [runningGC, setRunningGC] = useState(false);
   const [runError, setRunError] = useState("");
+  const [filter, setFilter] = useState<"all" | "daily" | "gocardless">("all");
 
-  async function runNow() {
+  async function runStripe() {
     if (!tenantId) return;
-    setRunning(true);
+    setRunningStripe(true);
     setRunError("");
     try {
       await api.runReconciliationNow(tenantId);
       onRefresh();
     } catch (err: any) {
-      setRunError(err?.message || "Reconciliation failed");
+      setRunError(err?.message || "Stripe reconciliation failed");
     } finally {
-      setRunning(false);
+      setRunningStripe(false);
     }
   }
+
+  async function runGC() {
+    if (!tenantId) return;
+    setRunningGC(true);
+    setRunError("");
+    try {
+      await api.runGCReconciliationNow(tenantId);
+      onRefresh();
+    } catch (err: any) {
+      setRunError(err?.message || "GoCardless reconciliation failed");
+    } finally {
+      setRunningGC(false);
+    }
+  }
+
+  async function runAll() {
+    if (!tenantId) return;
+    setRunningStripe(true);
+    setRunningGC(true);
+    setRunError("");
+    try {
+      await Promise.all([
+        api.runReconciliationNow(tenantId).catch(() => {}),
+        api.runGCReconciliationNow(tenantId).catch(() => {}),
+      ]);
+      onRefresh();
+    } catch (err: any) {
+      setRunError(err?.message || "Reconciliation failed");
+    } finally {
+      setRunningStripe(false);
+      setRunningGC(false);
+    }
+  }
+
+  const filteredRuns = filter === "all" ? runs : runs.filter((r) => r.run_type === filter);
+  const running = runningStripe || runningGC;
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Stripe API Verification</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Calls Stripe's API directly to compare subscription status, invoice status, and payment status against our records.
-            {runs.length === 0 && " No runs yet — click Run Now to verify."}
-          </p>
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Provider API Verification</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Calls provider APIs directly to compare subscription status, payment amounts, and statuses against our records.
+              {runs.length === 0 && " No runs yet — click a button to verify."}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {runError && <p className="text-sm text-red-600">{runError}</p>}
+        <div className="flex items-center gap-3 flex-wrap">
           <button
-            onClick={runNow}
+            onClick={runAll}
             disabled={running || !tenantId}
             className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
-            {running ? "Running..." : "Run Now"}
+            {running ? "Running..." : "Run All"}
           </button>
+          <button
+            onClick={runStripe}
+            disabled={runningStripe || !tenantId}
+            className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {runningStripe ? "Running..." : "Stripe Only"}
+          </button>
+          <button
+            onClick={runGC}
+            disabled={runningGC || !tenantId}
+            className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {runningGC ? "Running..." : "GoCardless Only"}
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-gray-500">Filter:</span>
+            {(["all", "daily", "gocardless"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+                  filter === f ? "bg-indigo-100 text-indigo-700" : "text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {f === "all" ? "All" : f === "daily" ? "Stripe" : "GoCardless"}
+              </button>
+            ))}
+          </div>
+          {runError && <p className="text-sm text-red-600 w-full mt-2">{runError}</p>}
         </div>
       </div>
-      {runs.map((run) => (
+      {filteredRuns.map((run) => (
         <div key={run.id} className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-900">
                 {run.completed_at ? new Date(run.completed_at).toLocaleString() : "In progress..."}
               </p>
-              <p className="text-xs text-gray-500">{run.run_type} run</p>
+              <p className="text-xs text-gray-500">
+                <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium mr-1 ${
+                  run.run_type === "gocardless" ? "bg-teal-100 text-teal-700" : "bg-violet-100 text-violet-700"
+                }`}>
+                  {run.run_type === "gocardless" ? "GoCardless" : "Stripe"}
+                </span>
+                run
+              </p>
             </div>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-gray-600">{run.total_checked} checked</span>
@@ -428,20 +597,22 @@ function ReconciliationTab({ runs, tenantId, onRefresh }: { runs: Reconciliation
                   <tr className="bg-amber-50">
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Client</th>
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Our Status</th>
-                    <th className="text-left px-3 py-2 font-medium text-gray-600">Stripe Status</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Provider Status</th>
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Category</th>
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {run.details.map((d, i) => (
+                  {(run.details || []).map((d, i) => (
                     <tr key={i} className="border-t border-gray-100">
                       <td className="px-3 py-2">{d.client_name}</td>
                       <td className="px-3 py-2">{d.local_status}</td>
                       <td className="px-3 py-2">{d.provider_status}</td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          d.severity === "critical" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"
+                          d.severity === "critical" ? "bg-red-100 text-red-800" :
+                          d.category === "amount_mismatch" ? "bg-orange-100 text-orange-800" :
+                          "bg-amber-100 text-amber-800"
                         }`}>
                           {d.category}
                         </span>
