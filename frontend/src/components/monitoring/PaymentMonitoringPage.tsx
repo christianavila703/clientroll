@@ -134,9 +134,13 @@ export default function PaymentMonitoringPage() {
         api.getReconciliationReport(tenantId),
         api.getAlertConfig(tenantId),
       ]);
-      setEvr(evrRes as ExpectedVsReceived);
+      const evrData = evrRes as ExpectedVsReceived;
+      if (evrData) evrData.overdue_items = evrData.overdue_items || [];
+      setEvr(evrData);
       setWh(whRes as WebhookHealth);
-      setAging(agingRes as PaymentAging);
+      const agingData = agingRes as PaymentAging;
+      if (agingData) agingData.buckets = agingData.buckets || [];
+      setAging(agingData);
       setReconRuns((reconRes as any)?.runs || []);
       if ((cfgRes as any)?.configured !== false) {
         setConfig(cfgRes as AlertConfig);
@@ -180,7 +184,7 @@ export default function PaymentMonitoringPage() {
             onChange={(e) => setSelectedTenantId(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
           >
-            {tenants.map((t) => (
+            {(tenants || []).map((t) => (
               <option key={t.id} value={t.id}>{t.name || t.slug}</option>
             ))}
           </select>
@@ -260,7 +264,7 @@ function ExpectedVsReceivedCard({ data }: { data: ExpectedVsReceived | null }) {
         <Stat label="Received" value={data.total_received} color="text-green-600" />
         <Stat label="Overdue" value={data.total_overdue} color={statusColor} />
       </div>
-      {data.overdue_items.length > 0 && (
+      {(data.overdue_items?.length ?? 0) > 0 && (
         <div className="mt-4">
           <h3 className="text-sm font-medium text-gray-700 mb-2">Overdue Payments</h3>
           <div className="overflow-x-auto">
@@ -275,7 +279,7 @@ function ExpectedVsReceivedCard({ data }: { data: ExpectedVsReceived | null }) {
                 </tr>
               </thead>
               <tbody>
-                {data.overdue_items.map((item, i) => (
+                {(data.overdue_items || []).map((item, i) => (
                   <tr key={i} className="border-t border-gray-100">
                     <td className="px-3 py-2">{item.client_name}</td>
                     <td className="px-3 py-2">{item.membership_title}</td>
@@ -341,7 +345,7 @@ function PaymentAgingCard({ data }: { data: PaymentAging | null }) {
         <p className="text-xs text-gray-500">Source: payments table</p>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {data.buckets.map((b) => (
+        {(data.buckets || []).map((b) => (
           <Stat key={b.label} label={b.label} value={b.count} color={b.count > 0 ? "text-amber-600" : undefined} />
         ))}
         <Stat label="Active, unpaid 30d+" value={data.active_unpaid_30d} color={data.active_unpaid_30d > 0 ? "text-red-600" : undefined} />
@@ -378,7 +382,7 @@ function ReconciliationTab({ runs }: { runs: ReconciliationRun[] }) {
                 {run.total_mismatched} mismatched
               </span>
               <span className="text-blue-600">{run.total_auto_fixed} auto-fixed</span>
-              {run.details?.length > 0 && (
+              {(run.details?.length ?? 0) > 0 && (
                 <button
                   onClick={() => setExpanded(expanded === run.id ? null : run.id)}
                   className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
@@ -388,7 +392,7 @@ function ReconciliationTab({ runs }: { runs: ReconciliationRun[] }) {
               )}
             </div>
           </div>
-          {expanded === run.id && run.details?.length > 0 && (
+          {expanded === run.id && (run.details?.length ?? 0) > 0 && (
             <div className="mt-4 overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
