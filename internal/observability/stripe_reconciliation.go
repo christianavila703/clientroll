@@ -118,6 +118,10 @@ func (sr *StripeReconciler) RunForTenant(ctx context.Context, tenantID uuid.UUID
 				mismatches = append(mismatches, *amtMismatch)
 			}
 		}
+
+		if pendingMismatches := sr.reconcilePendingPayments(ctx, tenantID, apiKey, m); len(pendingMismatches) > 0 {
+			mismatches = append(mismatches, pendingMismatches...)
+		}
 	}
 
 	autoFixed := 0
@@ -379,6 +383,83 @@ func (sr *StripeReconciler) reconcileLatestInvoice(ctx context.Context, tenantID
 			log.Printf("stripe_reconciler invoice_reconcile update_status failed payment=%s err=%v", p.ID, err)
 		}
 	}
+}
+
+// reconcilePendingPayments checks all pending payments for a membership against Stripe's invoice API.
+// If Stripe says the invoice is paid but our DB still shows pending, it auto-fixes and flags the mismatch.
+// If the invoice is still open but overdue, it flags it as a warning.
+func (sr *StripeReconciler) reconcilePendingPayments(ctx context.Context, tenantID uuid.UUID, apiKey string, m membershipStripeInfo) []repository.ReconciliationMismatch {
+	rows, err := sr.db.Pool.Query(ctx, `
+		SELECT p.id, p.provider_reference, p.amount, p.due_date
+		FROM payments p
+		WHERE p.tenant_id = $1 AND p.membership_id = $2
+		  AND p.status = 'pending'
+		  AND p.provider_reference LIKE 'in_%'
+		ORDER BY p.due_date DESC
+	`, tenantID, m.MembershipID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var mismatches []repository.ReconciliationMismatch
+	stripe.Key = apiKey
+
+	for rows.Next() {
+		var paymentID uuid.UUID
+		var provRef string
+		var amount float64
+		var dueDate *time.Time
+		if err := rows.Scan(&paymentID, &provRef, &amount, &dueDate); err != nil {
+			continue
+		}
+
+		inv, err := invoice.Get(provRef, nil)
+		if err != nil {
+			log.Printf("stripe_reconciler pending_invoice_get failed invoice=%s err=%v", provRef, err)
+			continue
+		}
+		if inv == nil {
+			continue
+		}
+
+		stripeStatus := string(inv.Status)
+		if inv.Status == stripe.InvoiceStatusPaid {
+			now := time.Now().UTC()
+			if err := sr.paymentRepo.UpdateStatus(ctx, paymentID, tenantID, "succeeded", &now, nil, nil); err != nil {
+				log.Printf("stripe_reconciler pending_auto_fix failed payment=%s err=%v", paymentID, err)
+			} else {
+				log.Printf("stripe_reconciler auto_fixed_pending_to_succeeded tenant=%s payment=%s invoice=%s", tenantID, paymentID, provRef)
+			}
+			mismatches = append(mismatches, repository.ReconciliationMismatch{
+				MembershipID:      m.MembershipID,
+				ClientID:          m.ClientID,
+				ClientName:        m.ClientName,
+				MembershipTitle:   m.MembershipTitle,
+				LocalStatus:       "pending",
+				ProviderStatus:    stripeStatus,
+				ProviderSubID:     provRef,
+				Severity:          "warning",
+				Category:          "missed_payment_webhook",
+				RecommendedAction: fmt.Sprintf("Invoice %s is paid in Stripe but was pending locally — auto-fixed to succeeded", provRef),
+				AutoFixed:         true,
+			})
+		} else if inv.Status == stripe.InvoiceStatusOpen && dueDate != nil && dueDate.Before(time.Now().UTC().AddDate(0, 0, -1)) {
+			mismatches = append(mismatches, repository.ReconciliationMismatch{
+				MembershipID:      m.MembershipID,
+				ClientID:          m.ClientID,
+				ClientName:        m.ClientName,
+				MembershipTitle:   m.MembershipTitle,
+				LocalStatus:       "pending",
+				ProviderStatus:    "open (overdue)",
+				ProviderSubID:     provRef,
+				Severity:          "warning",
+				Category:          "stale_pending_payment",
+				RecommendedAction: fmt.Sprintf("Invoice %s still open in Stripe, due %s — payment may be stuck", provRef, dueDate.Format("2 Jan 2006")),
+			})
+		}
+	}
+	return mismatches
 }
 
 // StartStripeReconciliationScheduler runs the Stripe reconciliation daily for all configured tenants.
