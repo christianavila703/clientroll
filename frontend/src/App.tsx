@@ -27,6 +27,7 @@ import RequirePlatformAdmin from "./components/platform/RequirePlatformAdmin";
 import PlatformTenantCreatePage from "./components/platform/PlatformTenantCreatePage";
 import PlatformBillingPage from "./components/platform/PlatformBillingPage";
 import PlatformTenantBillingDetailPage from "./components/platform/PlatformTenantBillingDetailPage";
+import PaymentMonitoringPage from "./components/monitoring/PaymentMonitoringPage";
 
 function App() {
   return (
@@ -57,6 +58,7 @@ function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/payment-monitoring" element={<PaymentMonitoringPage />} />
           <Route path="/staff" element={<StaffPage />} />
           <Route path="/signup" element={<StaffSignupLauncher />} />
           <Route path="/email-templates" element={<EmailTemplatesPage />} />

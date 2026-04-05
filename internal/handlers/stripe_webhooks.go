@@ -40,6 +40,7 @@ type StripeWebhookHandler struct {
 	inviteRepo  *repository.MembershipSetupInviteRepo
 	dispatcher  *events.Dispatcher
 	xeroSync    *xerosync.Service
+	ownerAlerts *observability.OwnerAlertService
 }
 
 // NewStripeWebhookHandler creates a Stripe webhook handler.
@@ -76,6 +77,11 @@ func (h *StripeWebhookHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
 }
 
+// SetOwnerAlerts sets optional owner alert service for immediate payment failure emails.
+func (h *StripeWebhookHandler) SetOwnerAlerts(oa *observability.OwnerAlertService) {
+	h.ownerAlerts = oa
+}
+
 // RegisterPublicRoutes registers public Stripe webhook route.
 func (h *StripeWebhookHandler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/webhooks/stripe/{tenantSlug}", h.Webhook)
@@ -106,8 +112,14 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
 	if err != nil || creds == nil || !creds.IsActive || creds.APISecretEncrypted == "" {
-		// Acknowledge unconfigured/inactive tenant webhooks to avoid provider retry storms.
-		// This can happen when an endpoint exists in Stripe but tenant setup is incomplete.
+		// Log the dropped event and alert owner instead of silently succeeding.
+		log.Printf("ALERT stripe_webhook_dropped tenant=%s slug=%s reason=inactive_or_missing_secret", tenant.ID, tenantSlug)
+		if h.ownerAlerts != nil {
+			h.ownerAlerts.SendImmediate(r.Context(), tenant.ID, observability.AlertWebhookDropped, observability.PaymentAlertData{
+				FailureReason: fmt.Sprintf("Stripe webhook received for tenant %s but integration is inactive or webhook secret is missing. Events are being dropped.", tenantSlug),
+			})
+		}
+		// Still return 200 to prevent Stripe retry storms, but now the owner knows.
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -967,6 +979,7 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 	if err := h.paymentRepo.UpdateStatus(ctx, p.ID, tenantID, "failed", nil, &reason, nil); err != nil {
 		return fmt.Errorf("update invoice payment failed status: %w", err)
 	}
+	h.logPaymentFailure(ctx, tenantID, p.ID, nil, &reason, nil)
 	if err := syncMembershipStatusAfterPayment(ctx, h.memberRepo, tenantID, membershipID, "failed", time.Now().UTC()); err != nil {
 		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
 	}
@@ -980,6 +993,17 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 			"provider_ref":  providerRef,
 			"source":        "stripe_webhook",
 		}))
+	}
+	if h.ownerAlerts != nil {
+		clientName, membershipTitle := h.resolveClientAndMembership(ctx, tenantID, clientID, membershipID)
+		h.ownerAlerts.SendImmediate(ctx, tenantID, observability.AlertPaymentFailed, observability.PaymentAlertData{
+			ClientName:      clientName,
+			MembershipTitle: membershipTitle,
+			Amount:          amount,
+			CurrencyCode:    currencyCode,
+			FailureReason:   reason,
+			Provider:        "Stripe",
+		})
 	}
 	return nil
 }
@@ -1244,6 +1268,17 @@ func (h *StripeWebhookHandler) handleDisputeEvent(ctx context.Context, tenantID 
 			"source":          "stripe_webhook",
 		}))
 	}
+	if h.ownerAlerts != nil && paymentStatus == "disputed" {
+		clientName, membershipTitle := h.resolveClientAndMembership(ctx, tenantID, p.ClientID, p.MembershipID)
+		h.ownerAlerts.SendImmediate(ctx, tenantID, observability.AlertDispute, observability.PaymentAlertData{
+			ClientName:      clientName,
+			MembershipTitle: membershipTitle,
+			Amount:          amount,
+			CurrencyCode:    p.CurrencyCode,
+			DisputeReason:   dispute.Reason,
+			Provider:        "Stripe",
+		})
+	}
 	return nil
 }
 
@@ -1398,4 +1433,39 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveClientAndMembership fetches client name and membership title for alert emails.
+func (h *StripeWebhookHandler) resolveClientAndMembership(ctx context.Context, tenantID, clientID, membershipID uuid.UUID) (string, string) {
+	clientName := "Unknown"
+	membershipTitle := "Membership"
+	if clientID == uuid.Nil || tenantID == uuid.Nil {
+		return clientName, membershipTitle
+	}
+	var name string
+	if err := h.db.Pool.QueryRow(ctx, `SELECT name FROM clients WHERE id = $1 AND tenant_id = $2`, clientID, tenantID).Scan(&name); err == nil {
+		clientName = name
+	}
+	if membershipID != uuid.Nil {
+		var title string
+		if err := h.db.Pool.QueryRow(ctx, `
+			SELECT mt.title FROM memberships m
+			JOIN membership_types mt ON mt.id = m.membership_type_id AND mt.tenant_id = m.tenant_id
+			WHERE m.id = $1 AND m.tenant_id = $2
+		`, membershipID, tenantID).Scan(&title); err == nil && strings.TrimSpace(title) != "" {
+			membershipTitle = title
+		}
+	}
+	return clientName, membershipTitle
+}
+
+// logPaymentFailure writes to the payment_failure_log table for audit history.
+func (h *StripeWebhookHandler) logPaymentFailure(ctx context.Context, tenantID, paymentID uuid.UUID, failureCode, failureReason, providerDetail *string) {
+	_, err := h.db.Pool.Exec(ctx, `
+		INSERT INTO payment_failure_log (tenant_id, payment_id, failure_code, failure_reason, provider_detail)
+		VALUES ($1, $2, $3, $4, $5)
+	`, tenantID, paymentID, failureCode, failureReason, providerDetail)
+	if err != nil {
+		log.Printf("payment_failure_log insert failed tenant=%s payment=%s err=%v", tenantID, paymentID, err)
+	}
 }

@@ -294,6 +294,16 @@ export const api = {
   getPaymentStatusReport: () => request("/tenant/reports/payments/status"),
   getComprehensiveReport: () => request("/tenant/reports/comprehensive"),
 
+  // Payment Monitoring
+  getAlertConfig: () => request("/tenant/settings/alert-config"),
+  updateAlertConfig: (data: unknown) =>
+    request("/tenant/settings/alert-config", { method: "PUT", body: data }),
+  getExpectedVsReceived: () => request("/tenant/reports/expected-vs-received"),
+  getWebhookHealth: () => request("/tenant/reports/webhook-health"),
+  getPaymentAging: () => request("/tenant/reports/payment-aging"),
+  getReconciliationReport: () =>
+    request("/tenant/reports/payment-reconciliation"),
+
   // Terms & Conditions
   listTerms: () => request("/tenant/terms"),
   createTerms: (data: unknown) =>

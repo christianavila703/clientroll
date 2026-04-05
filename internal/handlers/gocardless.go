@@ -76,6 +76,7 @@ type GoCardlessHandler struct {
 	emailSvc          email.Provider
 	dispatcher        *events.Dispatcher
 	xeroSync          *xerosync.Service
+	ownerAlerts       *observability.OwnerAlertService
 }
 
 // NewGoCardlessHandler creates a new GoCardless handler.
@@ -123,6 +124,11 @@ func (h *GoCardlessHandler) membershipAppliesSalesTax(ctx context.Context, tenan
 // SetDispatcher sets optional outbound webhook event dispatcher.
 func (h *GoCardlessHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
+}
+
+// SetOwnerAlerts sets optional owner alert service for immediate payment failure emails.
+func (h *GoCardlessHandler) SetOwnerAlerts(oa *observability.OwnerAlertService) {
+	h.ownerAlerts = oa
 }
 
 // RegisterTenantRoutes registers tenant-scoped routes (require auth + tenant).
@@ -658,9 +664,15 @@ func (h *GoCardlessHandler) handleMandateEvent(ctx context.Context, tenantID uui
 	}
 	switch action {
 	case "cancelled", "failed", "expired":
-		// Clear mandate on memberships that used this mandate so UI shows "set up again"
 		if h.memberRepo != nil {
 			_ = h.memberRepo.ClearGoCardlessMandateByProviderID(ctx, tenantID, mandateID)
+		}
+		if h.ownerAlerts != nil {
+			h.ownerAlerts.SendImmediate(ctx, tenantID, observability.AlertMandateCancelled, observability.PaymentAlertData{
+				ClientName:    "Mandate " + mandateID,
+				FailureReason: fmt.Sprintf("GoCardless mandate %s: reason=%s cause=%s", action, reason, cause),
+				Provider:      "GoCardless",
+			})
 		}
 		log.Printf("GoCardless mandate.%s: cleared mandate %s (reason=%s cause=%s)", action, mandateID, reason, cause)
 	case "active":
@@ -899,6 +911,22 @@ func (h *GoCardlessHandler) handlePaymentEvent(ctx context.Context, tenantID uui
 	}
 
 	h.sendPaymentEmail(ctx, tenantID, p, status, reason)
+	if h.ownerAlerts != nil && (status == "failed" || status == "disputed") {
+		clientName, membershipTitle := h.resolveClientAndMembershipForAlert(ctx, tenantID, p)
+		alertType := observability.AlertPaymentFailed
+		if status == "disputed" {
+			alertType = observability.AlertDispute
+		}
+		h.ownerAlerts.SendImmediate(ctx, tenantID, alertType, observability.PaymentAlertData{
+			ClientName:      clientName,
+			MembershipTitle: membershipTitle,
+			Amount:          p.Amount,
+			CurrencyCode:    p.CurrencyCode,
+			FailureReason:   reason,
+			DisputeReason:   reason,
+			Provider:        "GoCardless",
+		})
+	}
 	log.Printf("gocardless.webhook payment_updated tenant=%s payment=%s provider_ref=%s status=%s", tenantID, p.ID, gcPaymentID, status)
 	return nil
 }
@@ -1117,6 +1145,27 @@ func (h *GoCardlessHandler) buildOperationalTemplateEmail(ctx context.Context, t
 		Text:    renderedSubject,
 	}
 	return emailInput, true
+}
+
+func (h *GoCardlessHandler) resolveClientAndMembershipForAlert(ctx context.Context, tenantID uuid.UUID, p *repository.Payment) (string, string) {
+	clientName := "Unknown"
+	membershipTitle := "Membership"
+	if p == nil {
+		return clientName, membershipTitle
+	}
+	if h.clientRepo != nil {
+		if client, err := h.clientRepo.FindByID(ctx, p.ClientID, tenantID); err == nil && client != nil {
+			clientName = client.Name
+		}
+	}
+	if h.memberRepo != nil && h.mtRepo != nil && p.MembershipID != uuid.Nil {
+		if membership, err := h.memberRepo.FindByID(ctx, p.MembershipID, tenantID); err == nil && membership != nil {
+			if mt, err := h.mtRepo.FindByID(ctx, membership.MembershipTypeID, tenantID); err == nil && mt != nil {
+				membershipTitle = mt.Title
+			}
+		}
+	}
+	return clientName, membershipTitle
 }
 
 func (h *GoCardlessHandler) isEmailTemplateEnabled(ctx context.Context, tenantID uuid.UUID, templateKey string) bool {
