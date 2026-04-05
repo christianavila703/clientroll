@@ -1,0 +1,2 @@
+-- No-op: formatting-only change, not worth reverting to the table-based layout.
+-- If needed, roll back migration 069 entirely.
