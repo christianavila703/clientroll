@@ -574,6 +574,8 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		"supports_direct_debit":  false,
 		"has_stored_direct_debit": false,
 		"direct_debit_source":     nil,
+		"has_stored_card":         false,
+		"stored_card_label":       nil,
 	}
 
 	if client.GoCardlessCustomerID != nil && *client.GoCardlessCustomerID != "" {
@@ -628,7 +630,7 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 		result["has_stored_direct_debit"] = true
 		result["direct_debit_source"] = "gocardless"
 	}
-	if hasStripe && stripeDirectDebitTypeForCountry(client.Country) != "" {
+	if hasStripe {
 		secretKey, keyErr := h.getStripeSecretKey(r.Context(), tenantID)
 		if keyErr == nil && strings.TrimSpace(secretKey) != "" {
 			stripe.Key = secretKey
@@ -644,18 +646,37 @@ func (h *ClientHandler) GetMandateStatus(w http.ResponseWriter, r *http.Request)
 				}
 			}
 			if stripeCustomerID != "" {
-				ddType := stripeDirectDebitTypeForCountry(client.Country)
-				pmList := paymentmethod.List(&stripe.PaymentMethodListParams{
+				if ddType := stripeDirectDebitTypeForCountry(client.Country); ddType != "" {
+					pmList := paymentmethod.List(&stripe.PaymentMethodListParams{
+						Customer: stripe.String(stripeCustomerID),
+						Type:     stripe.String(ddType),
+						ListParams: stripe.ListParams{
+							Limit: stripe.Int64(1),
+						},
+					})
+					if pmList.Next() {
+						result["has_stored_direct_debit"] = true
+						if result["direct_debit_source"] == nil {
+							result["direct_debit_source"] = "stripe"
+						}
+					}
+				}
+				cardList := paymentmethod.List(&stripe.PaymentMethodListParams{
 					Customer: stripe.String(stripeCustomerID),
-					Type:     stripe.String(ddType),
+					Type:     stripe.String("card"),
 					ListParams: stripe.ListParams{
 						Limit: stripe.Int64(1),
 					},
 				})
-				if pmList.Next() {
-					result["has_stored_direct_debit"] = true
-					if result["direct_debit_source"] == nil {
-						result["direct_debit_source"] = "stripe"
+				if cardList.Next() {
+					result["has_stored_card"] = true
+					pm := cardList.PaymentMethod()
+					if pm.Card != nil {
+						brand := string(pm.Card.Brand)
+						if len(brand) > 0 {
+							brand = strings.ToUpper(brand[:1]) + brand[1:]
+						}
+						result["stored_card_label"] = brand + " •••• " + pm.Card.Last4
 					}
 				}
 			}

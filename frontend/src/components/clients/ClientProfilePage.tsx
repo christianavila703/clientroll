@@ -66,10 +66,12 @@ export default function ClientProfilePage() {
     askEmergencyContact: true,
     askCompanyInformation: false,
   });
-  const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean }>({
+  const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean; hasStoredCard: boolean; storedCardLabel: string | null }>({
     hasMandate: false,
     providers: [],
     supportsDirectDebit: false,
+    hasStoredCard: false,
+    storedCardLabel: null,
   });
   const [activeSignupInvite, setActiveSignupInvite] = useState<ActiveSignupInvite | null>(null);
 
@@ -154,6 +156,8 @@ export default function ClientProfilePage() {
         hasMandate: mandateRes?.has_mandate || false,
         providers: mandateRes?.payment_providers || [],
         supportsDirectDebit: !!mandateRes?.supports_direct_debit,
+        hasStoredCard: !!mandateRes?.has_stored_card,
+        storedCardLabel: mandateRes?.stored_card_label || null,
       });
       const txPct = Number(tenantRes?.sales_tax_percent);
       setTenantTax({
@@ -523,8 +527,12 @@ export default function ClientProfilePage() {
                   </div>
                   <div>
                     <p className="text-[13px] font-medium text-gray-700">Card Payments</p>
-                    <p className={`text-[11px] ${hasCardMembership ? "text-blue-600" : "text-gray-500"}`}>
-                      {hasCardMembership ? "Configured on membership" : "Stripe available"}
+                    <p className={`text-[11px] ${paymentInfo.hasStoredCard || hasCardMembership ? "text-blue-600" : "text-gray-500"}`}>
+                      {paymentInfo.hasStoredCard
+                        ? (paymentInfo.storedCardLabel || "Card saved")
+                        : hasCardMembership
+                        ? "Configured on membership"
+                        : "Stripe available"}
                     </p>
                   </div>
                 </div>
