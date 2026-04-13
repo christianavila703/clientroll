@@ -231,7 +231,6 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		create.Country == nil ||
 		create.Email == nil ||
 		create.Phone == nil ||
-		create.BirthDate == nil ||
 		create.Gender == nil {
 		writeError(w, http.StatusBadRequest, "Please complete all required client details")
 		return

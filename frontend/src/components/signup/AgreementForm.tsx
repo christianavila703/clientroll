@@ -143,7 +143,6 @@ function collectSignupMemberMissing(
     { key: "country", label: "Country" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Phone" },
-    { key: "birth_date", label: "Date of Birth" },
     { key: "gender", label: "Gender" },
   ];
   if (askEmergencyContact) {
@@ -682,7 +681,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         <Field label="Country" required><input value={data.country} onChange={(e) => set("country", e.target.value.toUpperCase())} className={inputCls} placeholder="AU or US" required maxLength={2} /></Field>
         <Field label="Email" required><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className={inputCls} placeholder="john@example.com" required /></Field>
         <Field label="Phone" required><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
-        <Field label="Date of Birth" required><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} required /></Field>
+        <Field label="Date of Birth"><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} /></Field>
         <Field label="Gender" required>
           <div className="flex gap-4 mt-1">
             {["Female", "Male"].map((g) => (
@@ -787,7 +786,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         const required: [string, string][] = [
           ["name", "Full Name"], ["address", "Street Address"], ["suburb", "Suburb"],
           ["state", "State"], ["postcode", "Postcode"], ["country", "Country"], ["email", "Email"],
-          ["phone", "Phone"], ["birth_date", "Date of Birth"], ["gender", "Gender"],
+          ["phone", "Phone"], ["gender", "Gender"],
         ];
         if (askEmergencyContact) {
           required.push(["emergency_contact_name", "Emergency Contact Name"], ["emergency_contact_phone", "Emergency Contact Phone"]);

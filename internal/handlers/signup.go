@@ -487,9 +487,6 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		if input.Client.Phone == nil {
 			missing = append(missing, "phone")
 		}
-		if input.Client.BirthDate == nil {
-			missing = append(missing, "birth_date")
-		}
 		if input.Client.Gender == nil {
 			missing = append(missing, "gender")
 		}

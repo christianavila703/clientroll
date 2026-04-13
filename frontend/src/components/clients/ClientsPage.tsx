@@ -42,7 +42,7 @@ const CLIENT_FIELDS = [
   { key: "state", label: "State", required: true },
   { key: "postcode", label: "Postcode", required: true },
   { key: "country", label: "Country", required: true },
-  { key: "birth_date", label: "Date of Birth", required: true },
+  { key: "birth_date", label: "Date of Birth" },
   { key: "gender", label: "Gender", required: true },
   { key: "emergency_contact_name", label: "Emergency Contact Name", required: true },
   { key: "emergency_contact_phone", label: "Emergency Contact Phone", required: true },
@@ -420,7 +420,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.country.trim() || !form.birth_date.trim() || !form.gender.trim();
+      const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.country.trim() || !form.gender.trim();
       const missingEmergency = askEmergencyContact && (!form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim());
       const missingCompany = askCompanyInformation && (
         !form.tax_number.trim() ||
@@ -518,7 +518,6 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 value={form.birth_date}
                 onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
                 type="date"
-                required
               />
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender <span className="text-red-500">*</span></label>
