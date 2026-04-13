@@ -495,36 +495,42 @@ func (h *ActiveMembershipsHandler) CancelMembership(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusNotFound, "Membership not found")
 		return
 	}
-	prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
-	if provErr != nil {
-		log.Printf("membership.cancel provider_error tenant=%s membership=%s err=%v", tenantID, membershipID, provErr)
-		writeError(w, http.StatusBadGateway, "Failed to initialise payment provider for cancellation")
-		return
+	// Cancel GoCardless subscription + mandate if exists
+	if (m.GoCardlessSubscriptionID != nil && *m.GoCardlessSubscriptionID != "") ||
+		(m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "") {
+		prov, provErr := h.getGoCardlessProvider(r.Context(), tenantID)
+		if provErr != nil || prov == nil {
+			log.Printf("membership.cancel gocardless_provider_unavailable tenant=%s membership=%s err=%v", tenantID, membershipID, provErr)
+			writeError(w, http.StatusBadGateway, "GoCardless is not configured but membership has GoCardless references")
+			return
+		}
+		if m.GoCardlessSubscriptionID != nil && *m.GoCardlessSubscriptionID != "" {
+			if err := prov.CancelSubscription(r.Context(), *m.GoCardlessSubscriptionID); err != nil {
+				log.Printf("membership.cancel gc_subscription_cancel_failed tenant=%s membership=%s subscription=%s err=%v", tenantID, membershipID, *m.GoCardlessSubscriptionID, err)
+				writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless subscription")
+				return
+			}
+		}
+		if m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
+			if err := prov.CancelMandate(r.Context(), *m.GoCardlessMandateID); err != nil {
+				log.Printf("membership.cancel gc_mandate_cancel_failed tenant=%s membership=%s mandate=%s err=%v", tenantID, membershipID, *m.GoCardlessMandateID, err)
+				writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless mandate")
+				return
+			}
+		}
 	}
 
-	// Cancel GoCardless subscription if exists
-	if m.GoCardlessSubscriptionID != nil && *m.GoCardlessSubscriptionID != "" {
-		if prov == nil {
-			writeError(w, http.StatusBadGateway, "GoCardless is not configured for this tenant")
-			return
-		}
-		if err := prov.CancelSubscription(r.Context(), *m.GoCardlessSubscriptionID); err != nil {
-			log.Printf("membership.cancel subscription_cancel_failed tenant=%s membership=%s subscription=%s err=%v", tenantID, membershipID, *m.GoCardlessSubscriptionID, err)
-			writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless subscription")
-			return
-		}
-	}
-
-	// Cancel GoCardless mandate if exists
-	if m.GoCardlessMandateID != nil && *m.GoCardlessMandateID != "" {
-		if prov == nil {
-			writeError(w, http.StatusBadGateway, "GoCardless is not configured for this tenant")
-			return
-		}
-		if err := prov.CancelMandate(r.Context(), *m.GoCardlessMandateID); err != nil {
-			log.Printf("membership.cancel mandate_cancel_failed tenant=%s membership=%s mandate=%s err=%v", tenantID, membershipID, *m.GoCardlessMandateID, err)
-			writeError(w, http.StatusBadGateway, "Failed to cancel GoCardless mandate")
-			return
+	// Cancel Stripe subscription if exists
+	if stripeSubID, _ := h.paymentRepo.FindLatestStripeSubscriptionIDByMembership(r.Context(), tenantID, membershipID); stripeSubID != "" {
+		if secretKey, keyErr := h.getStripeSecretKey(r.Context(), tenantID); keyErr == nil {
+			prevKey := stripe.Key
+			stripe.Key = secretKey
+			if _, err := subscription.Cancel(stripeSubID, nil); err != nil {
+				log.Printf("membership.cancel stripe_subscription_cancel_failed tenant=%s membership=%s subscription=%s err=%v", tenantID, membershipID, stripeSubID, err)
+			} else {
+				log.Printf("membership.cancel stripe_subscription_cancelled tenant=%s membership=%s subscription=%s", tenantID, membershipID, stripeSubID)
+			}
+			stripe.Key = prevKey
 		}
 	}
 

@@ -774,7 +774,7 @@ function MembershipsTab({ memberships, fmtShort, tenantTimezone, onRefresh }: { 
   const [togglingMembershipID, setTogglingMembershipID] = useState<string | null>(null);
 
   const handleCancel = async (membershipId: string) => {
-    if (!confirm("Cancel this membership? This will also cancel any GoCardless subscription and mandate.")) return;
+    if (!confirm("Cancel this membership? This will also cancel any active payment subscriptions.")) return;
     const token = localStorage.getItem("access_token");
     try {
       const res = await fetch(`/api/tenant/memberships/${membershipId}/cancel`, {
