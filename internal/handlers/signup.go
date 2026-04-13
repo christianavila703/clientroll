@@ -499,14 +499,8 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if tenant.AskCompanyInformation {
-			if input.Client.TaxNumber == nil {
-				missing = append(missing, "tax_number")
-			}
 			if input.Client.CompanyName == nil {
 				missing = append(missing, "company_name")
-			}
-			if input.Client.CompanyNumber == nil {
-				missing = append(missing, "company_number")
 			}
 			if input.Client.CompanyPhone == nil {
 				missing = append(missing, "company_phone")

@@ -423,9 +423,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
       const missingCore = !form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.address.trim() || !form.suburb.trim() || !form.state.trim() || !form.postcode.trim() || !form.country.trim() || !form.gender.trim();
       const missingEmergency = askEmergencyContact && (!form.emergency_contact_name.trim() || !form.emergency_contact_phone.trim());
       const missingCompany = askCompanyInformation && (
-        !form.tax_number.trim() ||
         !form.company_name.trim() ||
-        !form.company_number.trim() ||
         !form.company_phone.trim() ||
         !form.company_address.trim() ||
         !form.company_city.trim() ||
@@ -635,8 +633,8 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 <h4 className="text-[13px] font-semibold text-gray-900 mb-3">Company information</h4>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <LabeledInput label="Company / business name" value={form.company_name} onChange={(v) => setForm((prev) => ({ ...prev, company_name: v }))} required colSpan />
-                  <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} required />
-                  <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} required />
+                  <LabeledInput label="Tax number" value={form.tax_number} onChange={(v) => setForm((prev) => ({ ...prev, tax_number: v }))} />
+                  <LabeledInput label="Company number" value={form.company_number} onChange={(v) => setForm((prev) => ({ ...prev, company_number: v }))} />
                   <LabeledInput label="Phone" value={form.company_phone} onChange={(v) => setForm((prev) => ({ ...prev, company_phone: v }))} type="tel" required />
                   <LabeledInput label="Website" value={form.company_website} onChange={(v) => setForm((prev) => ({ ...prev, company_website: v }))} placeholder="https://" />
                 </div>

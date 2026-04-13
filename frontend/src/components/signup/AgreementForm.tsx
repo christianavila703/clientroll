@@ -153,9 +153,7 @@ function collectSignupMemberMissing(
   }
   if (askCompanyInformation) {
     required.push(
-      { key: "tax_number", label: "Tax Number" },
       { key: "company_name", label: "Company Name" },
-      { key: "company_number", label: "Company Number" },
       { key: "company_phone", label: "Company Phone" },
       { key: "company_address", label: "Company Address" },
       { key: "company_city", label: "Company City" },
@@ -713,8 +711,8 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
             <h3 className="text-[15px] font-semibold text-gray-900 mb-5">Company Information</h3>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <Field label="Company Name" required><input value={data.company_name} onChange={(e) => set("company_name", e.target.value)} className={inputCls} placeholder="Company name" required /></Field>
-              <Field label="Tax Number" required><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" required /></Field>
-              <Field label="Company Number" required><input value={data.company_number} onChange={(e) => set("company_number", e.target.value)} className={inputCls} placeholder="Company number" required /></Field>
+              <Field label="Tax Number"><input value={data.tax_number} onChange={(e) => set("tax_number", e.target.value)} className={inputCls} placeholder="Tax number" /></Field>
+              <Field label="Company Number"><input value={data.company_number} onChange={(e) => set("company_number", e.target.value)} className={inputCls} placeholder="Company number" /></Field>
               <Field label="Phone" required><input type="tel" value={data.company_phone} onChange={(e) => set("company_phone", e.target.value)} className={inputCls} placeholder="03 9000 0000" required /></Field>
               <Field label="Website" full><input type="url" value={data.company_website} onChange={(e) => set("company_website", e.target.value)} className={inputCls} placeholder="https://example.com" /></Field>
             </div>
@@ -793,9 +791,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         }
         if (askCompanyInformation) {
           required.push(
-            ["tax_number", "Tax Number"],
             ["company_name", "Company Name"],
-            ["company_number", "Company Number"],
             ["company_phone", "Company Phone"],
             ["company_address", "Company Address"],
             ["company_city", "Company City"],
