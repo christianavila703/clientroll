@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/customer"
+	"github.com/stripe/stripe-go/v82/invoice"
+	"github.com/stripe/stripe-go/v82/price"
+	"github.com/stripe/stripe-go/v82/product"
 	"github.com/stripe/stripe-go/v82/subscription"
 )
 
@@ -296,6 +300,28 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 							DefaultPaymentMethod: stripe.String(input.PaymentMethodID),
 						},
 					})
+				}
+			}
+		}
+	}
+
+	// --- Stripe: create subscription for recurring card payments ---
+	if strings.EqualFold(input.PaymentMethod, "card") && input.PaymentMethodID != "" && input.PaymentFrequency != "upfront" {
+		if secretKey, keyErr := h.getStripeSecretKey(r.Context(), tenantID); keyErr == nil {
+			stripe.Key = secretKey
+			client, _ := h.clientRepo.FindByID(r.Context(), clientID, tenantID)
+			if client != nil {
+				stripeCustomerID := ""
+				if client.StripeCustomerID != nil {
+					stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
+				}
+				if stripeCustomerID != "" {
+					applySalesTax := mt.ApplySalesTax
+					if err := h.createStripeSubscription(r.Context(), tenant, client, m, stripeCustomerID, input.PaymentMethodID,
+						membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount,
+						input.PaymentAmount, applySalesTax, term.ContinueAfterTerm, m.MinTermEndDate, startDate); err != nil {
+						log.Printf("membership.create stripe_subscription_failed tenant=%s membership=%s err=%v", tenantID, m.ID, err)
+					}
 				}
 			}
 		}
@@ -609,6 +635,156 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 		"continue_after_term":    input.ContinueAfterTerm,
 		"stripe_subscription_id": subID,
 	})
+}
+
+// createStripeSubscription creates a Stripe subscription for a staff-created card membership.
+func (h *ActiveMembershipsHandler) createStripeSubscription(
+	ctx context.Context,
+	tenant *models.Tenant,
+	client *models.Client,
+	membership *models.Membership,
+	stripeCustomerID, pmID string,
+	currencyCode, frequency, intervalUnit string,
+	intervalCount int,
+	amount float64,
+	applySalesTax, continueAfterTerm bool,
+	termEndTime time.Time,
+	membershipStart time.Time,
+) error {
+	cur := strings.ToLower(strings.TrimSpace(currencyCode))
+	if cur == "" {
+		cur = "aud"
+	}
+	unitAmount := int64(math.Round(amount * 100))
+	if unitAmount <= 0 {
+		unitAmount = 1
+	}
+	feeCents := stripeProcessingFee(unitAmount, "card")
+	baseAmount, taxAmount := splitAmountByTaxMode(amount, tenantSalesTaxPercent(tenant), applySalesTax)
+	totalAmount := float64(unitAmount+feeCents) / 100.0
+
+	subMeta := map[string]string{
+		"tenant_id":             tenant.ID.String(),
+		"tenant_slug":           tenant.Slug,
+		"client_id":             client.ID.String(),
+		"membership_id":         membership.ID.String(),
+		"payment_amount":        strconv.FormatFloat(totalAmount, 'f', 2, 64),
+		"base_amount":           strconv.FormatFloat(baseAmount, 'f', 2, 64),
+		"tax_amount":            strconv.FormatFloat(taxAmount, 'f', 2, 64),
+		"processing_fee_amount": strconv.FormatFloat(float64(feeCents)/100, 'f', 2, 64),
+		"currency_code":         strings.ToUpper(cur),
+		"payment_freq":          frequency,
+		"source":                "staff",
+	}
+	if !continueAfterTerm && !termEndTime.IsZero() {
+		subMeta["continue_after_term"] = "false"
+		subMeta["cancel_at_timestamp"] = strconv.FormatInt(termEndTime.Unix(), 10)
+	} else {
+		subMeta["continue_after_term"] = "true"
+	}
+
+	prod, err := product.New(&stripe.ProductParams{
+		Name: stripe.String("Membership — " + tenant.Name),
+		Metadata: map[string]string{
+			"tenant_id":     tenant.ID.String(),
+			"membership_id": membership.ID.String(),
+			"clientroll":    "staff_subscription",
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("stripe product: %w", err)
+	}
+
+	var iu *string
+	if intervalUnit != "" {
+		iu = &intervalUnit
+	}
+	interval, count := stripeRecurringInterval(frequency, iu, intervalCount)
+	recurring := &stripe.PriceRecurringParams{
+		Interval:      stripe.String(interval),
+		IntervalCount: stripe.Int64(count),
+	}
+	taxExcl := string(stripe.PriceTaxBehaviorExclusive)
+	prMain, err := price.New(&stripe.PriceParams{
+		Currency:    stripe.String(cur),
+		Product:     stripe.String(prod.ID),
+		UnitAmount:  stripe.Int64(unitAmount),
+		Recurring:   recurring,
+		TaxBehavior: stripe.String(taxExcl),
+		Nickname:    stripe.String("Membership"),
+	})
+	if err != nil {
+		return fmt.Errorf("stripe price (membership): %w", err)
+	}
+	items := []*stripe.SubscriptionItemsParams{
+		{Price: stripe.String(prMain.ID), Quantity: stripe.Int64(1)},
+	}
+	if feeCents > 0 {
+		prFee, pErr := price.New(&stripe.PriceParams{
+			Currency:    stripe.String(cur),
+			Product:     stripe.String(prod.ID),
+			UnitAmount:  stripe.Int64(feeCents),
+			Recurring:   recurring,
+			TaxBehavior: stripe.String(taxExcl),
+			Nickname:    stripe.String("Processing fee"),
+		})
+		if pErr != nil {
+			return fmt.Errorf("stripe price (fee): %w", pErr)
+		}
+		items = append(items, &stripe.SubscriptionItemsParams{Price: stripe.String(prFee.ID), Quantity: stripe.Int64(1)})
+	}
+
+	var trialEnd *int64
+	nowUTC := time.Now().UTC()
+	if !membershipStart.IsZero() {
+		startAt := tenantDateStartUTC(membershipStart, tenant.Timezone).Truncate(time.Second)
+		if startAt.After(nowUTC) {
+			v := startAt.Unix()
+			trialEnd = &v
+		}
+	}
+
+	subParams := &stripe.SubscriptionParams{
+		Customer:             stripe.String(stripeCustomerID),
+		DefaultPaymentMethod: stripe.String(pmID),
+		Items:                items,
+		Metadata:             subMeta,
+		PaymentBehavior:      stripe.String("error_if_incomplete"),
+		OffSession:           stripe.Bool(true),
+	}
+	if trialEnd != nil {
+		if time.Unix(*trialEnd, 0).UTC().Sub(nowUTC) >= 2*time.Minute {
+			subParams.TrialEnd = trialEnd
+		} else {
+			subParams.BillingCycleAnchor = trialEnd
+			subParams.ProrationBehavior = stripe.String("none")
+		}
+	}
+	subParams.AddExpand("latest_invoice")
+	sub, err := subscription.New(subParams)
+	if err != nil {
+		return fmt.Errorf("stripe subscription: %w", err)
+	}
+	if sub == nil || strings.TrimSpace(sub.ID) == "" {
+		return fmt.Errorf("stripe subscription missing id")
+	}
+	log.Printf("membership.create stripe_subscription tenant=%s membership=%s subscription=%s", tenant.ID, membership.ID, sub.ID)
+
+	if sub.LatestInvoice != nil && strings.TrimSpace(sub.LatestInvoice.ID) != "" {
+		if _, invErr := invoice.Update(sub.LatestInvoice.ID, &stripe.InvoiceParams{Metadata: subMeta}); invErr != nil {
+			log.Printf("membership.create stripe_invoice_metadata tenant=%s invoice=%s err=%v", tenant.ID, sub.LatestInvoice.ID, invErr)
+		}
+	}
+
+	if !continueAfterTerm && !termEndTime.IsZero() && termEndTime.Unix() > 0 {
+		if _, caErr := subscription.Update(sub.ID, &stripe.SubscriptionParams{
+			CancelAt:          stripe.Int64(termEndTime.Unix()),
+			CancelAtPeriodEnd: stripe.Bool(false),
+		}); caErr != nil {
+			return fmt.Errorf("set subscription cancel_at: %w", caErr)
+		}
+	}
+	return nil
 }
 
 // getGoCardlessProvider returns a GoCardless provider for the tenant (if configured).
