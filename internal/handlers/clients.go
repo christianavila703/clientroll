@@ -747,7 +747,13 @@ func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.
 		},
 	}
 	sess, err := checkoutsession.New(params)
+	if err != nil && len(methodTypes) > 1 {
+		log.Printf("Stripe setup session failed with method types %v, retrying with card only: %v", methodTypes, err)
+		params.PaymentMethodTypes = stripe.StringSlice([]string{"card"})
+		sess, err = checkoutsession.New(params)
+	}
 	if err != nil || sess == nil || strings.TrimSpace(sess.URL) == "" {
+		log.Printf("Failed to create Stripe setup session: %v", err)
 		writeError(w, http.StatusBadGateway, "Failed to create Stripe setup session")
 		return
 	}
