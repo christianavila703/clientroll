@@ -38,9 +38,9 @@ const CLIENT_FIELDS = [
   { key: "phone", label: "Phone", required: true },
   { key: "unit_number", label: "Unit Number" },
   { key: "address", label: "Address" },
-  { key: "suburb", label: "Suburb", required: true },
-  { key: "state", label: "State", required: true },
-  { key: "postcode", label: "Postcode", required: true },
+  { key: "suburb", label: "City / Suburb", required: true },
+  { key: "state", label: "State / Region", required: true },
+  { key: "postcode", label: "Postcode / ZIP", required: true },
   { key: "country", label: "Country", required: true },
   { key: "birth_date", label: "Date of Birth" },
   { key: "gender", label: "Gender", required: true },
@@ -581,22 +581,21 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                     ...(companyAddressSameAsClient ? { company_unit_number: v, company_address: prev.address } : {}),
                   }))
                 }
-                required
               />
               <LabeledInput
-                label="Suburb"
+                label="City / Suburb"
                 value={form.suburb}
                 onChange={(v) => setForm((prev) => ({ ...prev, suburb: v }))}
                 required
               />
               <LabeledInput
-                label="State"
+                label="State / Region"
                 value={form.state}
                 onChange={(v) => setForm((prev) => ({ ...prev, state: v }))}
                 required
               />
               <LabeledInput
-                label="Postcode"
+                label="Postcode / ZIP"
                 value={form.postcode}
                 onChange={(v) => setForm((prev) => ({ ...prev, postcode: v }))}
                 required

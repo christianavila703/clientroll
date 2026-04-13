@@ -137,9 +137,9 @@ function collectSignupMemberMissing(
   const required: { key: string; label: string }[] = [
     { key: "name", label: "Full Name" },
     { key: "address", label: "Street Address" },
-    { key: "suburb", label: "Suburb" },
-    { key: "state", label: "State" },
-    { key: "postcode", label: "Postcode" },
+    { key: "suburb", label: "City / Suburb" },
+    { key: "state", label: "State / Region" },
+    { key: "postcode", label: "Postcode / ZIP" },
     { key: "country", label: "Country" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Phone" },
@@ -675,9 +675,9 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
           />
         </Field>
         <Field label="Unit / Apt Number"><input value={data.unit_number} onChange={(e) => set("unit_number", e.target.value)} className={inputCls} placeholder="Unit 4" /></Field>
-        <Field label="Suburb" required><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className={inputCls} placeholder="Melbourne" required /></Field>
-        <Field label="State" required><input value={data.state} onChange={(e) => set("state", e.target.value)} className={inputCls} placeholder="VIC" required /></Field>
-        <Field label="Postcode" required><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className={inputCls} placeholder="3000" required /></Field>
+        <Field label="City / Suburb" required><input value={data.suburb} onChange={(e) => set("suburb", e.target.value)} className={inputCls} placeholder="e.g. Melbourne, New York" required /></Field>
+        <Field label="State / Region" required><input value={data.state} onChange={(e) => set("state", e.target.value)} className={inputCls} placeholder="e.g. VIC, NY" required /></Field>
+        <Field label="Postcode / ZIP" required><input value={data.postcode} onChange={(e) => set("postcode", e.target.value)} className={inputCls} placeholder="e.g. 3000, 10001" required /></Field>
         <Field label="Country" required><input value={data.country} onChange={(e) => set("country", e.target.value.toUpperCase())} className={inputCls} placeholder="AU or US" required maxLength={2} /></Field>
         <Field label="Email" required><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className={inputCls} placeholder="john@example.com" required /></Field>
         <Field label="Phone" required><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
@@ -784,8 +784,8 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
 
       <NavButtons onNext={() => {
         const required: [string, string][] = [
-          ["name", "Full Name"], ["address", "Street Address"], ["suburb", "Suburb"],
-          ["state", "State"], ["postcode", "Postcode"], ["country", "Country"], ["email", "Email"],
+          ["name", "Full Name"], ["address", "Street Address"], ["suburb", "City / Suburb"],
+          ["state", "State / Region"], ["postcode", "Postcode / ZIP"], ["country", "Country"], ["email", "Email"],
           ["phone", "Phone"], ["gender", "Gender"],
         ];
         if (askEmergencyContact) {
