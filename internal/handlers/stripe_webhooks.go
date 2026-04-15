@@ -14,6 +14,7 @@ import (
 
 	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/database"
+	"clientroll/internal/email"
 	"clientroll/internal/events"
 	"clientroll/internal/observability"
 	"clientroll/internal/repository"
@@ -41,6 +42,11 @@ type StripeWebhookHandler struct {
 	dispatcher  *events.Dispatcher
 	xeroSync    *xerosync.Service
 	ownerAlerts *observability.OwnerAlertService
+
+	clientRepo        *repository.ClientRepo
+	mtRepo            *repository.MembershipTypeRepo
+	emailSvc          email.Provider
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
 }
 
 // NewStripeWebhookHandler creates a Stripe webhook handler.
@@ -80,6 +86,14 @@ func (h *StripeWebhookHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 // SetOwnerAlerts sets optional owner alert service for immediate payment failure emails.
 func (h *StripeWebhookHandler) SetOwnerAlerts(oa *observability.OwnerAlertService) {
 	h.ownerAlerts = oa
+}
+
+// SetEmailDeps injects dependencies needed for client-facing payment emails.
+func (h *StripeWebhookHandler) SetEmailDeps(clientRepo *repository.ClientRepo, mtRepo *repository.MembershipTypeRepo, emailSvc email.Provider, emailTemplateRepo *repository.TenantEmailTemplateRepo) {
+	h.clientRepo = clientRepo
+	h.mtRepo = mtRepo
+	h.emailSvc = emailSvc
+	h.emailTemplateRepo = emailTemplateRepo
 }
 
 // linkAudit records which payment/membership a webhook event affected.
@@ -984,6 +998,7 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 				"source":        "stripe_webhook",
 			}))
 		}
+		h.sendPaymentEmail(ctx, tenantID, p, "succeeded", "")
 		return nil
 	}
 	reason := "invoice payment failed"
@@ -1017,6 +1032,7 @@ func (h *StripeWebhookHandler) handleInvoicePayment(ctx context.Context, tenantI
 			Provider:        "Stripe",
 		})
 	}
+	h.sendPaymentEmail(ctx, tenantID, p, "failed", reason)
 	return nil
 }
 
@@ -1483,4 +1499,121 @@ func (h *StripeWebhookHandler) logPaymentFailure(ctx context.Context, tenantID, 
 	if err != nil {
 		log.Printf("payment_failure_log insert failed tenant=%s payment=%s err=%v", tenantID, paymentID, err)
 	}
+}
+
+// sendPaymentEmail sends payment success/failure emails to the client for Stripe payments.
+func (h *StripeWebhookHandler) sendPaymentEmail(ctx context.Context, tenantID uuid.UUID, p *repository.Payment, status, failureReason string) {
+	if h.emailSvc == nil || h.clientRepo == nil || p == nil {
+		return
+	}
+	client, err := h.clientRepo.FindByID(ctx, p.ClientID, tenantID)
+	if err != nil || client == nil || client.Email == nil || *client.Email == "" {
+		return
+	}
+	tenantName := ""
+	if h.tenantRepo != nil {
+		if tenant, tErr := h.tenantRepo.FindByID(ctx, tenantID); tErr == nil && tenant != nil {
+			tenantName = tenant.Name
+		}
+	}
+	membershipTitle := "Membership"
+	if h.memberRepo != nil && h.mtRepo != nil {
+		if membership, mErr := h.memberRepo.FindByID(ctx, p.MembershipID, tenantID); mErr == nil && membership != nil {
+			if mt, mtErr := h.mtRepo.FindByID(ctx, membership.MembershipTypeID, tenantID); mtErr == nil && mt != nil && strings.TrimSpace(mt.Title) != "" {
+				membershipTitle = mt.Title
+			}
+		}
+	}
+	currencyCode := strings.ToUpper(strings.TrimSpace(p.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	reason := strings.TrimSpace(failureReason)
+	if reason == "" && p.FailureReason != nil {
+		reason = strings.TrimSpace(*p.FailureReason)
+	}
+	if reason == "" {
+		reason = "payment could not be processed"
+	}
+	money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
+	vars := map[string]string{
+		"admin_name":             "",
+		"client_name":            client.Name,
+		"amount":                 money(p.Amount),
+		"total_charged":          money(p.Amount),
+		"amount_due":             money(p.Amount),
+		"base_amount":            money(p.BaseAmount),
+		"tax_amount":             money(p.TaxAmount),
+		"processing_fee_amount":  money(p.ProcessingFeeAmount),
+		"to_organisation_amount": money(p.BaseAmount + p.TaxAmount),
+		"currency_code":          currencyCode,
+		"membership_title":       membershipTitle,
+		"payment_date":           time.Now().Format("2 January 2006"),
+		"failure_reason":         reason,
+		"company_name":           tenantName,
+	}
+
+	go func() {
+		var templateKey string
+		switch status {
+		case "succeeded":
+			templateKey = "payment_receipt"
+		case "failed":
+			templateKey = "payment_failed"
+		default:
+			return
+		}
+		input, ok := h.buildOperationalTemplateEmail(context.Background(), tenantID, templateKey, vars)
+		if !ok {
+			return
+		}
+		input.To = *client.Email
+		if _, err := h.emailSvc.Send(context.Background(), *input); err != nil {
+			log.Printf("stripe.%s email send failed to=%s err=%v", templateKey, *client.Email, err)
+		} else {
+			log.Printf("stripe.%s email sent to=%s", templateKey, *client.Email)
+		}
+	}()
+}
+
+func (h *StripeWebhookHandler) buildOperationalTemplateEmail(ctx context.Context, tenantID uuid.UUID, templateKey string, vars map[string]string) (*email.SendInput, bool) {
+	def, ok := email.OperationalTemplateByKey(templateKey)
+	if !ok {
+		return nil, false
+	}
+	enabled := def.DefaultEnabled
+	subject := def.Subject
+	body := def.Body
+	if h.emailTemplateRepo != nil {
+		override, err := h.emailTemplateRepo.GetByKey(ctx, tenantID, templateKey)
+		if err != nil {
+			log.Printf("stripe.email template lookup failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		} else if override != nil {
+			enabled = override.Enabled
+			if override.SubjectOverride != nil && strings.TrimSpace(*override.SubjectOverride) != "" {
+				subject = *override.SubjectOverride
+			}
+			if override.BodyOverride != nil && strings.TrimSpace(*override.BodyOverride) != "" {
+				body = *override.BodyOverride
+			}
+		}
+	}
+	if !enabled {
+		return nil, false
+	}
+	render := func(input string) string {
+		output := input
+		for k, v := range vars {
+			output = strings.ReplaceAll(output, "{{"+k+"}}", v)
+		}
+		return output
+	}
+	renderedSubject := render(subject)
+	renderedBody := render(body)
+	emailInput := &email.SendInput{
+		Subject: renderedSubject,
+		HTML:    email.WrapHTML(renderedBody),
+		Text:    renderedSubject,
+	}
+	return emailInput, true
 }

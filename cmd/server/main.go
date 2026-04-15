@@ -203,6 +203,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	gocardlessHandler.SetOwnerAlerts(ownerAlertSvc)
 	stripeWebhookHandler.SetDispatcher(dispatcher)
 	stripeWebhookHandler.SetOwnerAlerts(ownerAlertSvc)
+	stripeWebhookHandler.SetEmailDeps(clientRepo, mtRepo, emailSvc, tenantEmailTemplateRepo)
 	serviceHandler.SetDispatcher(dispatcher)
 	alertConfigHandler := handlers.NewAlertConfigHandler(alertConfigRepo, reconRepo, ownerAlertSvc, stripeReconciler, gcReconciler)
 
