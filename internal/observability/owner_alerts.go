@@ -16,13 +16,19 @@ import (
 
 // OwnerAlertService sends immediate and digest alert emails to tenant owners.
 type OwnerAlertService struct {
-	db              *database.Postgres
-	emailSvc        email.Provider
-	alertConfigRepo *repository.AlertConfigRepo
+	db                *database.Postgres
+	emailSvc          email.Provider
+	alertConfigRepo   *repository.AlertConfigRepo
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
 }
 
 func NewOwnerAlertService(db *database.Postgres, emailSvc email.Provider, alertConfigRepo *repository.AlertConfigRepo) *OwnerAlertService {
 	return &OwnerAlertService{db: db, emailSvc: emailSvc, alertConfigRepo: alertConfigRepo}
+}
+
+// SetEmailTemplateRepo injects the template repo for customisable alert emails.
+func (s *OwnerAlertService) SetEmailTemplateRepo(r *repository.TenantEmailTemplateRepo) {
+	s.emailTemplateRepo = r
 }
 
 // AlertType classifies an immediate alert.
@@ -61,7 +67,7 @@ func (s *OwnerAlertService) SendImmediate(ctx context.Context, tenantID uuid.UUI
 		return
 	}
 
-	subject, html := s.buildImmediateEmail(alertType, data)
+	subject, html := s.buildImmediateEmail(ctx, tenantID, alertType, data)
 	go func() {
 		sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -93,7 +99,7 @@ func (s *OwnerAlertService) isAlertEnabled(cfg *repository.AlertConfig, alertTyp
 	}
 }
 
-func (s *OwnerAlertService) buildImmediateEmail(alertType AlertType, data PaymentAlertData) (string, string) {
+func (s *OwnerAlertService) buildImmediateEmail(ctx context.Context, tenantID uuid.UUID, alertType AlertType, data PaymentAlertData) (string, string) {
 	money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
 	cur := strings.ToUpper(strings.TrimSpace(data.CurrencyCode))
 	if cur == "" {
@@ -102,11 +108,21 @@ func (s *OwnerAlertService) buildImmediateEmail(alertType AlertType, data Paymen
 
 	switch alertType {
 	case AlertPaymentFailed:
-		subject := fmt.Sprintf("Payment failed: %s — %s $%s", data.ClientName, cur, money(data.Amount))
 		reason := data.FailureReason
 		if reason == "" {
 			reason = "No details provided"
 		}
+		vars := map[string]string{
+			"admin_name": "", "client_name": data.ClientName, "amount": money(data.Amount),
+			"total_charged": money(data.Amount), "amount_due": money(data.Amount),
+			"base_amount": money(data.Amount), "tax_amount": "0.00",
+			"processing_fee_amount": "0.00", "to_organisation_amount": money(data.Amount),
+			"currency_code": cur, "membership_title": data.MembershipTitle, "failure_reason": reason,
+		}
+		if subj, html, ok := s.tryTemplate(ctx, tenantID, "payment_failed_alert", vars); ok {
+			return subj, html
+		}
+		subject := fmt.Sprintf("Payment failed: %s — %s $%s", data.ClientName, cur, money(data.Amount))
 		html := email.WrapHTML(fmt.Sprintf(`
 		<h1 style="font-size:20px;font-weight:600;color:#dc2626;margin:0 0 8px;">Payment Failed</h1>
 		<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 16px;">A payment has failed and needs your attention.</p>
@@ -124,11 +140,18 @@ func (s *OwnerAlertService) buildImmediateEmail(alertType AlertType, data Paymen
 		return subject, html
 
 	case AlertDispute:
-		subject := fmt.Sprintf("Dispute opened: %s — %s $%s", data.ClientName, cur, money(data.Amount))
 		reason := data.DisputeReason
 		if reason == "" {
 			reason = "Not specified"
 		}
+		vars := map[string]string{
+			"admin_name": "", "client_name": data.ClientName,
+			"amount": money(data.Amount), "reason": reason,
+		}
+		if subj, html, ok := s.tryTemplate(ctx, tenantID, "dispute_alert", vars); ok {
+			return subj, html
+		}
+		subject := fmt.Sprintf("Dispute opened: %s — %s $%s", data.ClientName, cur, money(data.Amount))
 		html := email.WrapHTML(fmt.Sprintf(`
 		<h1 style="font-size:20px;font-weight:600;color:#d97706;margin:0 0 8px;">Payment Dispute Opened</h1>
 		<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 16px;">A client has disputed a payment. This requires immediate review.</p>
@@ -209,6 +232,46 @@ func (s *OwnerAlertService) buildImmediateEmail(alertType AlertType, data Paymen
 		<p style="font-size:14px;color:#6b7280;line-height:1.6;">%s</p>`, alertType, data.FailureReason))
 		return subject, html
 	}
+}
+
+// tryTemplate attempts to render an alert using the customisable template system.
+// Returns false if the template repo is not configured or the template is disabled.
+func (s *OwnerAlertService) tryTemplate(ctx context.Context, tenantID uuid.UUID, templateKey string, vars map[string]string) (string, string, bool) {
+	if s.emailTemplateRepo == nil {
+		return "", "", false
+	}
+	def, ok := email.OperationalTemplateByKey(templateKey)
+	if !ok {
+		return "", "", false
+	}
+	enabled := def.DefaultEnabled
+	subject := def.Subject
+	body := def.Body
+	override, err := s.emailTemplateRepo.GetByKey(ctx, tenantID, templateKey)
+	if err != nil {
+		log.Printf("owner_alert template lookup failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		return "", "", false
+	}
+	if override != nil {
+		enabled = override.Enabled
+		if override.SubjectOverride != nil && strings.TrimSpace(*override.SubjectOverride) != "" {
+			subject = *override.SubjectOverride
+		}
+		if override.BodyOverride != nil && strings.TrimSpace(*override.BodyOverride) != "" {
+			body = *override.BodyOverride
+		}
+	}
+	if !enabled {
+		return "", "", false
+	}
+	render := func(input string) string {
+		out := input
+		for k, v := range vars {
+			out = strings.ReplaceAll(out, "{{"+k+"}}", v)
+		}
+		return out
+	}
+	return render(subject), email.WrapHTML(render(body)), true
 }
 
 // OverduePayment represents a payment that was expected but hasn't arrived.

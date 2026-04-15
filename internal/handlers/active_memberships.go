@@ -12,6 +12,7 @@ import (
 
 	"clientroll/internal/accounting/xerosync"
 	"clientroll/internal/database"
+	"clientroll/internal/email"
 	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
@@ -43,6 +44,9 @@ type ActiveMembershipsHandler struct {
 	termsRepo     *repository.TermsRepo
 	dispatcher    *events.Dispatcher
 	xeroSync      *xerosync.Service
+
+	emailSvc          email.Provider
+	emailTemplateRepo *repository.TenantEmailTemplateRepo
 }
 
 // NewActiveMembershipsHandler creates a new handler.
@@ -70,6 +74,84 @@ func NewActiveMembershipsHandler(
 // SetDispatcher sets optional outbound webhook event dispatcher.
 func (h *ActiveMembershipsHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
+}
+
+// SetEmailDeps injects dependencies needed for client-facing emails.
+func (h *ActiveMembershipsHandler) SetEmailDeps(emailSvc email.Provider, emailTemplateRepo *repository.TenantEmailTemplateRepo) {
+	h.emailSvc = emailSvc
+	h.emailTemplateRepo = emailTemplateRepo
+}
+
+// sendMembershipConfirmationEmail sends a confirmation email to the client after staff creates a membership.
+func (h *ActiveMembershipsHandler) sendMembershipConfirmationEmail(tenantID uuid.UUID, client *models.Client, mt *models.MembershipType, tenant *models.Tenant, paymentAmount float64) {
+	if h.emailSvc == nil || client == nil || client.Email == nil || *client.Email == "" {
+		return
+	}
+	tenantName := ""
+	if tenant != nil {
+		tenantName = tenant.Name
+	}
+	mtTitle := "Membership"
+	if mt != nil && strings.TrimSpace(mt.Title) != "" {
+		mtTitle = mt.Title
+	}
+	clientEmail := *client.Email
+	clientName := client.Name
+	tid := tenantID
+
+	go func() {
+		templateKey := "membership_confirmation"
+		def, ok := email.OperationalTemplateByKey(templateKey)
+		if !ok {
+			return
+		}
+		enabled := def.DefaultEnabled
+		subject := def.Subject
+		body := def.Body
+		if h.emailTemplateRepo != nil {
+			override, err := h.emailTemplateRepo.GetByKey(context.Background(), tid, templateKey)
+			if err != nil {
+				log.Printf("membership.email template lookup failed tenant=%s template=%s err=%v", tid, templateKey, err)
+			} else if override != nil {
+				enabled = override.Enabled
+				if override.SubjectOverride != nil && strings.TrimSpace(*override.SubjectOverride) != "" {
+					subject = *override.SubjectOverride
+				}
+				if override.BodyOverride != nil && strings.TrimSpace(*override.BodyOverride) != "" {
+					body = *override.BodyOverride
+				}
+			}
+		}
+		if !enabled {
+			return
+		}
+		money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
+		vars := map[string]string{
+			"client_name":      clientName,
+			"membership_title": mtTitle,
+			"term_months":      "0",
+			"total_fee":        money(paymentAmount),
+			"company_name":     tenantName,
+		}
+		render := func(input string) string {
+			out := input
+			for k, v := range vars {
+				out = strings.ReplaceAll(out, "{{"+k+"}}", v)
+			}
+			return out
+		}
+		input := email.SendInput{
+			To:      clientEmail,
+			Subject: render(subject),
+			HTML:    email.WrapHTML(render(body)),
+			Text:    render(subject),
+		}
+		if _, err := h.emailSvc.Send(context.Background(), input); err != nil {
+			log.Printf("membership.confirmation email send failed to=%s err=%v", clientEmail, err)
+		} else {
+			log.Printf("membership.confirmation email sent to=%s", clientEmail)
+		}
+	}()
 }
 
 // RegisterRoutes registers routes.
@@ -403,6 +485,9 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 				log.Printf("membership.create explicit mandate set failed tenant=%s membership=%s mandate=%s err=%v", tenantID, m.ID, input.GoCardlessMandateID, err)
 			}
 			h.saveStaffAgreementSnapshot(r, tenantID, clientID, m, mt, term)
+			if cl, _ := h.clientRepo.FindByID(r.Context(), clientID, tenantID); cl != nil {
+				h.sendMembershipConfirmationEmail(tenantID, cl, mt, tenant, input.PaymentAmount)
+			}
 			writeJSON(w, http.StatusCreated, m)
 			return
 		}
@@ -435,6 +520,9 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 	}
 
 	h.saveStaffAgreementSnapshot(r, tenantID, clientID, m, mt, term)
+	if cl, _ := h.clientRepo.FindByID(r.Context(), clientID, tenantID); cl != nil {
+		h.sendMembershipConfirmationEmail(tenantID, cl, mt, tenant, input.PaymentAmount)
+	}
 	writeJSON(w, http.StatusCreated, m)
 }
 

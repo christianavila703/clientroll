@@ -838,19 +838,16 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		payAmt := input.PaymentAmount
 		go func() {
 			templateKey := "membership_confirmation"
-			emailInput := email.MembershipConfirmationEmail(clientName, mtTitle, 0, payAmt, tenantName)
-			emailInput.To = clientEmail
+			var attachments []email.Attachment
 			if sendAgreement && snapshotID != "" && h.agreementRepo != nil {
 				snap, _ := h.agreementRepo.FindByMembership(context.Background(), memID, tenID)
 				if snap != nil && snap.AgreementHTML != nil {
 					templateKey = "membership_agreement"
-					emailInput = email.MembershipAgreementEmail(clientName, mtTitle, tenantName)
-					emailInput.To = clientEmail
 					pdfBytes, pdfErr := pdfpkg.HTMLToPDF(*snap.AgreementHTML)
 					if pdfErr != nil {
 						log.Printf("PDF generation for email failed: %v", pdfErr)
 					} else {
-						emailInput.Attachments = []email.Attachment{{
+						attachments = []email.Attachment{{
 							Filename: fmt.Sprintf("Agreement-%s.pdf", snap.CreatedAt.Format("2006-01-02")),
 							Content:  pdfBytes,
 							MimeType: "application/pdf",
@@ -858,11 +855,22 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			if !h.isEmailTemplateEnabled(context.Background(), tenID, templateKey) {
+			money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
+			vars := map[string]string{
+				"client_name":      clientName,
+				"membership_title": mtTitle,
+				"term_months":      "0",
+				"total_fee":        money(payAmt),
+				"company_name":     tenantName,
+			}
+			emailInput, ok := h.buildOperationalTemplateEmail(context.Background(), tenID, templateKey, vars)
+			if !ok {
 				log.Printf("signup.email skipped tenant=%s template=%s membership=%s", tenID, templateKey, memID)
 				return
 			}
-			if _, err := h.emailSvc.Send(context.Background(), emailInput); err != nil {
+			emailInput.To = clientEmail
+			emailInput.Attachments = attachments
+			if _, err := h.emailSvc.Send(context.Background(), *emailInput); err != nil {
 				log.Printf("Error sending membership confirmation to %s: %v", clientEmail, err)
 			}
 		}()
@@ -1515,6 +1523,45 @@ func (h *SignupHandler) isEmailTemplateEnabled(ctx context.Context, tenantID uui
 		return true
 	}
 	return enabled
+}
+
+func (h *SignupHandler) buildOperationalTemplateEmail(ctx context.Context, tenantID uuid.UUID, templateKey string, vars map[string]string) (*email.SendInput, bool) {
+	def, ok := email.OperationalTemplateByKey(templateKey)
+	if !ok {
+		return nil, false
+	}
+	enabled := def.DefaultEnabled
+	subject := def.Subject
+	body := def.Body
+	if h.emailTemplateRepo != nil {
+		override, err := h.emailTemplateRepo.GetByKey(ctx, tenantID, templateKey)
+		if err != nil {
+			log.Printf("signup.email template lookup failed tenant=%s template=%s err=%v", tenantID, templateKey, err)
+		} else if override != nil {
+			enabled = override.Enabled
+			if override.SubjectOverride != nil && strings.TrimSpace(*override.SubjectOverride) != "" {
+				subject = *override.SubjectOverride
+			}
+			if override.BodyOverride != nil && strings.TrimSpace(*override.BodyOverride) != "" {
+				body = *override.BodyOverride
+			}
+		}
+	}
+	if !enabled {
+		return nil, false
+	}
+	render := func(input string) string {
+		output := input
+		for k, v := range vars {
+			output = strings.ReplaceAll(output, "{{"+k+"}}", v)
+		}
+		return output
+	}
+	return &email.SendInput{
+		Subject: render(subject),
+		HTML:    email.WrapHTML(render(body)),
+		Text:    render(subject),
+	}, true
 }
 
 func (h *SignupHandler) availablePaymentProviders(ctx context.Context, tenantID uuid.UUID) []string {

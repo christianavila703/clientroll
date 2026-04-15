@@ -56,6 +56,7 @@ func main() {
 	reconRepo := repository.NewReconciliationRepo(db)
 	emailSvc := email.NewMailerSendProvider(cfg.MailerSendAPIKey, cfg.MailerSendFromEmail, "ClientRoll")
 	ownerAlertSvc := observability.NewOwnerAlertService(db, emailSvc, alertConfigRepo)
+	ownerAlertSvc.SetEmailTemplateRepo(repository.NewTenantEmailTemplateRepo(db))
 	credRepoMain := repository.NewTenantCredentialRepo(db)
 	paymentRepoMain := repository.NewPaymentRepo(db)
 	memberRepoMain := repository.NewMembershipRepo(db)
@@ -72,6 +73,11 @@ func main() {
 
 	digestService := observability.NewDigestService(db, emailSvc, alertConfigRepo, reconRepo, ownerAlertSvc)
 	go observability.StartDailyDigestScheduler(workerCtx, digestService)
+
+	tenantEmailTemplateRepoForSchedulers := repository.NewTenantEmailTemplateRepo(db)
+	expiryReminderSvc := observability.NewExpiryReminderService(db, emailSvc, tenantEmailTemplateRepoForSchedulers)
+	observability.EnsureExpiryRemindersTable(workerCtx, db)
+	go observability.StartExpiryReminderScheduler(workerCtx, expiryReminderSvc)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -199,6 +205,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	clientHandler.SetDispatcher(dispatcher)
 	signupHandler.SetDispatcher(dispatcher)
 	activeMembershipsHandler.SetDispatcher(dispatcher)
+	activeMembershipsHandler.SetEmailDeps(emailSvc, tenantEmailTemplateRepo)
 	gocardlessHandler.SetDispatcher(dispatcher)
 	gocardlessHandler.SetOwnerAlerts(ownerAlertSvc)
 	stripeWebhookHandler.SetDispatcher(dispatcher)
