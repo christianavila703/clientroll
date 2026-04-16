@@ -54,6 +54,31 @@ type PaymentAlertData struct {
 	DisputeReason   string
 }
 
+// SendRawEmail sends a pre-built email to the tenant's alert email address.
+func (s *OwnerAlertService) SendRawEmail(ctx context.Context, tenantID uuid.UUID, subject, html string) {
+	if s.emailSvc == nil || s.alertConfigRepo == nil {
+		return
+	}
+	cfg, err := s.alertConfigRepo.GetByTenant(ctx, tenantID)
+	if err != nil || cfg == nil || cfg.AlertEmail == "" {
+		return
+	}
+	go func() {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := s.emailSvc.Send(sendCtx, email.SendInput{
+			To:      cfg.AlertEmail,
+			Subject: subject,
+			HTML:    html,
+			Text:    subject,
+		}); err != nil {
+			log.Printf("owner_alert raw send failed tenant=%s to=%s err=%v", tenantID, cfg.AlertEmail, err)
+		} else {
+			log.Printf("owner_alert raw sent tenant=%s to=%s subject=%q", tenantID, cfg.AlertEmail, subject)
+		}
+	}()
+}
+
 // SendImmediate sends a real-time alert email for a critical payment event.
 func (s *OwnerAlertService) SendImmediate(ctx context.Context, tenantID uuid.UUID, alertType AlertType, data PaymentAlertData) {
 	if s.emailSvc == nil || s.alertConfigRepo == nil {

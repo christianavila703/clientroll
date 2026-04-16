@@ -412,14 +412,28 @@ func (h *StripeWebhookHandler) mergeStripeDetailsForServicePaymentIntent(ctx con
 	if err := h.serviceRepo.MergeStripeDetailsByChargeID(ctx, tenantID, chargeID, patch); err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(pi.Status)) {
+	normalStatus := strings.ToLower(strings.TrimSpace(pi.Status))
+	switch normalStatus {
 	case "succeeded":
 		now := time.Now().UTC()
-		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now)
+		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
+			return err
+		}
+		if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
+			h.sendServiceChargeEmails(ctx, tenantID, charge, "succeeded", "")
+		}
+		return nil
 	case "processing", "requires_capture", "requires_action":
 		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil)
 	case "canceled", "requires_payment_method":
-		return h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil)
+		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil); err != nil {
+			return err
+		}
+		reason := "payment " + normalStatus
+		if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
+			h.sendServiceChargeEmails(ctx, tenantID, charge, "failed", reason)
+		}
+		return nil
 	}
 	return nil
 }

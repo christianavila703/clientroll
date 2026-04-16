@@ -134,14 +134,12 @@ func (h *StripeWebhookHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
 	if err != nil || creds == nil || !creds.IsActive || creds.APISecretEncrypted == "" {
-		// Log the dropped event and alert owner instead of silently succeeding.
 		log.Printf("ALERT stripe_webhook_dropped tenant=%s slug=%s reason=inactive_or_missing_secret", tenant.ID, tenantSlug)
 		if h.ownerAlerts != nil {
 			h.ownerAlerts.SendImmediate(r.Context(), tenant.ID, observability.AlertWebhookDropped, observability.PaymentAlertData{
 				FailureReason: fmt.Sprintf("Stripe webhook received for tenant %s but integration is inactive or webhook secret is missing. Events are being dropped.", tenantSlug),
 			})
 		}
-		// Still return 200 to prevent Stripe retry storms, but now the owner knows.
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -661,6 +659,8 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 				_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, refreshed)
 			}
 		}
+
+		h.sendServiceChargeEmails(ctx, tenantID, charge, status, "")
 
 		_ = paidDate
 		return nil
@@ -1643,4 +1643,93 @@ func (h *StripeWebhookHandler) buildOperationalTemplateEmail(ctx context.Context
 		Text:    renderedSubject,
 	}
 	return emailInput, true
+}
+
+// sendServiceChargeEmails sends receipt/failure emails to the client and staff alert emails for service charges.
+func (h *StripeWebhookHandler) sendServiceChargeEmails(ctx context.Context, tenantID uuid.UUID, charge *repository.ServiceCharge, status, failureReason string) {
+	if h.emailSvc == nil || charge == nil {
+		return
+	}
+
+	client, err := h.clientRepo.FindByID(ctx, charge.ClientID, tenantID)
+	if err != nil || client == nil {
+		return
+	}
+	clientEmail := ""
+	if client.Email != nil {
+		clientEmail = strings.TrimSpace(*client.Email)
+	}
+
+	tenantName := ""
+	if h.tenantRepo != nil {
+		if tenant, tErr := h.tenantRepo.FindByID(ctx, tenantID); tErr == nil && tenant != nil {
+			tenantName = tenant.Name
+		}
+	}
+
+	currencyCode := strings.ToUpper(strings.TrimSpace(charge.CurrencyCode))
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	reason := strings.TrimSpace(failureReason)
+	if reason == "" {
+		reason = "payment could not be processed"
+	}
+	money := func(v float64) string { return fmt.Sprintf("%.2f", v) }
+	total := charge.Amount + charge.TaxAmount + charge.ProcessingFeeAmount
+
+	vars := map[string]string{
+		"admin_name":            "",
+		"client_name":           client.Name,
+		"description":           charge.Description,
+		"base_amount":           money(charge.Amount),
+		"tax_amount":            money(charge.TaxAmount),
+		"processing_fee_amount": money(charge.ProcessingFeeAmount),
+		"total_charged":         money(total),
+		"currency_code":         currencyCode,
+		"payment_date":          time.Now().Format("2 January 2006"),
+		"failure_reason":        reason,
+		"company_name":          tenantName,
+	}
+
+	go func() {
+		bgCtx := context.Background()
+
+		// Client email
+		if clientEmail != "" {
+			var clientTemplate string
+			switch status {
+			case "succeeded":
+				clientTemplate = "service_charge_receipt"
+			case "failed":
+				clientTemplate = "service_charge_failed"
+			}
+			if clientTemplate != "" {
+				if input, ok := h.buildOperationalTemplateEmail(bgCtx, tenantID, clientTemplate, vars); ok {
+					input.To = clientEmail
+					if _, err := h.emailSvc.Send(bgCtx, *input); err != nil {
+						log.Printf("stripe.%s email send failed to=%s err=%v", clientTemplate, clientEmail, err)
+					} else {
+						log.Printf("stripe.%s email sent to=%s", clientTemplate, clientEmail)
+					}
+				}
+			}
+		}
+
+		// Staff alert email
+		var staffTemplate string
+		switch status {
+		case "succeeded":
+			staffTemplate = "service_charge_receipt_alert"
+		case "failed":
+			staffTemplate = "service_charge_failed_alert"
+		}
+		if staffTemplate != "" {
+			if input, ok := h.buildOperationalTemplateEmail(bgCtx, tenantID, staffTemplate, vars); ok {
+				if h.ownerAlerts != nil {
+					h.ownerAlerts.SendRawEmail(bgCtx, tenantID, input.Subject, input.HTML)
+				}
+			}
+		}
+	}()
 }
