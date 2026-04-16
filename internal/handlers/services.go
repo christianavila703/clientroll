@@ -693,7 +693,6 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	}
 	if stripeCustomerID != "" {
 		params.Customer = stripe.String(stripeCustomerID)
-		params.PaymentMethodCollection = stripe.String("if_required")
 	}
 	if params.Customer == nil && client.Email != nil && *client.Email != "" {
 		params.CustomerEmail = stripe.String(*client.Email)
