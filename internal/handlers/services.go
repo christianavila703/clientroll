@@ -552,14 +552,6 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	feeCents := stripeProcessingFee(totalCents, feeMethod)
 	feeAmount := float64(feeCents) / 100.0
 
-	charge, err := h.serviceRepo.CreatePendingCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, feeAmount, input.Notes, &userID)
-	if err != nil {
-		log.Printf("Error creating pending service charge: %v", err)
-		writeError(w, http.StatusInternalServerError, "Failed to create charge")
-		return
-	}
-	h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeCreated, charge)
-	h.syncXeroForCharge(r.Context(), charge)
 	stripeCustomerID := ""
 	if client.StripeCustomerID != nil {
 		stripeCustomerID = strings.TrimSpace(*client.StripeCustomerID)
@@ -568,6 +560,13 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		stripeCustomerID, _ = h.paymentRepo.FindLatestStripeCustomerIDByClient(r.Context(), tenantID, clientID)
 	}
 	if strings.TrimSpace(input.PaymentMethodID) != "" {
+		charge, err := h.serviceRepo.CreatePendingCharge(r.Context(), tenantID, clientID, serviceID, input.Description, input.Amount, input.TaxAmount, feeAmount, input.Notes, &userID)
+		if err != nil {
+			log.Printf("Error creating pending service charge: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to create charge")
+			return
+		}
+		h.dispatchServiceChargeEvent(r.Context(), events.ServiceChargeCreated, charge)
 		if stripeCustomerID == "" {
 			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
 			writeError(w, http.StatusBadRequest, "No saved Stripe customer/payment method found for this client")
@@ -636,25 +635,36 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var serviceIDStr string
+	if serviceID != nil {
+		serviceIDStr = serviceID.String()
+	}
+	var notesStr string
+	if input.Notes != nil {
+		notesStr = *input.Notes
+	}
+
+	chargeMetadata := map[string]string{
+		"tenant_id":      tenantID.String(),
+		"client_id":      clientID.String(),
+		"type":           "service_charge",
+		"payment_method": input.PaymentMethod,
+		"service_id":     serviceIDStr,
+		"description":    input.Description,
+		"amount":         fmt.Sprintf("%.2f", input.Amount),
+		"tax_amount":     fmt.Sprintf("%.2f", input.TaxAmount),
+		"fee_amount":     fmt.Sprintf("%.2f", feeAmount),
+		"notes":          notesStr,
+		"created_by":     userID.String(),
+	}
+
 	params := &stripe.CheckoutSessionParams{
 		Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
 		SuccessURL: stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=success"),
 		CancelURL:  stripe.String(origin + "/clients/" + clientID.String() + "?stripe_charge=cancelled"),
-		Metadata: map[string]string{
-			"tenant_id":      tenantID.String(),
-			"client_id":      clientID.String(),
-			"charge_id":      charge.ID.String(),
-			"type":           "service_charge",
-			"payment_method": input.PaymentMethod,
-		},
+		Metadata:   chargeMetadata,
 		PaymentIntentData: &stripe.CheckoutSessionPaymentIntentDataParams{
-			Metadata: map[string]string{
-				"tenant_id":      tenantID.String(),
-				"client_id":      clientID.String(),
-				"charge_id":      charge.ID.String(),
-				"type":           "service_charge",
-				"payment_method": input.PaymentMethod,
-			},
+			Metadata: chargeMetadata,
 		},
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
@@ -683,7 +693,6 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	if input.PaymentMethod == "direct_debit" {
 		directDebitType = stripeDirectDebitTypeForCountry(client.Country)
 		if directDebitType == "" {
-			_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
 			writeError(w, http.StatusBadRequest, "Direct debit requires client country AU or US")
 			return
 		}
@@ -701,35 +710,11 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		log.Printf("Stripe Checkout session error: %v", err)
-		_ = h.serviceRepo.UpdateChargeStatus(r.Context(), tenantID, charge.ID, "failed", nil)
 		writeError(w, http.StatusInternalServerError, "Failed to create Stripe checkout session")
 		return
 	}
-	providerRef := sess.ID
-	paymentMethod := input.PaymentMethod
-	_ = h.serviceRepo.UpdateChargeProviderContext(r.Context(), tenantID, charge.ID, &providerRef, &paymentMethod)
-	_ = h.serviceRepo.MergeStripeDetailsByChargeID(r.Context(), tenantID, charge.ID, map[string]interface{}{
-		"source":                  "stripe",
-		"checkout_session_id":     sess.ID,
-		"checkout_status":         string(sess.Status),
-		"checkout_mode":           string(sess.Mode),
-		"checkout_payment_status": strings.ToLower(string(sess.PaymentStatus)),
-		"currency":                strings.ToLower(string(sess.Currency)),
-		"payment_method_type": map[string]string{
-			"direct_debit": directDebitType,
-			"card":         "card",
-		}[input.PaymentMethod],
-		"payment_method_label": map[string]string{
-			"direct_debit": map[string]string{
-				"au_becs_debit":   "Australia BECS Direct Debit",
-				"us_bank_account": "US Bank Account (ACH Direct Debit)",
-			}[directDebitType],
-			"card": "Card",
-		}[input.PaymentMethod],
-	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"charge":       charge,
 		"checkout_url": sess.URL,
 		"session_id":   sess.ID,
 	})

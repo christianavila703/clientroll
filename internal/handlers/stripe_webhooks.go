@@ -572,51 +572,97 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		if h.serviceRepo == nil {
 			return nil
 		}
-		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
+
+		clientID, err := uuid.Parse(strings.TrimSpace(metadata["client_id"]))
 		if err != nil {
-			return nil
+			return fmt.Errorf("parse client_id from service_charge metadata: %w", err)
 		}
-		// Store provider linkage + Stripe snapshot for service charges too.
-		providerRef := sess.ID
+
+		var serviceID *uuid.UUID
+		if sid := strings.TrimSpace(metadata["service_id"]); sid != "" {
+			parsed, err := uuid.Parse(sid)
+			if err == nil {
+				serviceID = &parsed
+			}
+		}
+
+		description := metadata["description"]
+		amount, _ := strconv.ParseFloat(metadata["amount"], 64)
+		taxAmount, _ := strconv.ParseFloat(metadata["tax_amount"], 64)
+		feeAmount, _ := strconv.ParseFloat(metadata["fee_amount"], 64)
+		var notes *string
+		if n := metadata["notes"]; n != "" {
+			notes = &n
+		}
+		var createdBy *uuid.UUID
+		if cb := strings.TrimSpace(metadata["created_by"]); cb != "" {
+			if parsed, err := uuid.Parse(cb); err == nil {
+				createdBy = &parsed
+			}
+		}
+
 		paymentMethod := strings.TrimSpace(metadata["payment_method"])
 		if paymentMethod == "" {
 			paymentMethod = "card"
 		}
-		if err := h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &paymentMethod); err != nil {
-			log.Printf("stripe service_charge provider context tenant=%s charge=%s err=%v", tenantID, chargeID, err)
-		}
-		if err := h.mergeStripeDetailsForServiceCheckout(ctx, tenantID, chargeID, &sess, event.Created); err != nil {
-			log.Printf("stripe service_charge checkout details tenant=%s charge=%s err=%v", tenantID, chargeID, err)
-		}
-		// Direct-debit checkout.session.completed can still be unpaid/processing.
+
+		// Determine initial status: "paid" means card settled immediately, otherwise pending (e.g. direct debit processing).
+		status := "pending"
+		var paidDate *time.Time
 		if strings.EqualFold(string(sess.PaymentStatus), "paid") {
+			status = "succeeded"
 			now := time.Now().UTC()
-			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "succeeded", &now); err != nil {
-				return fmt.Errorf("update service charge succeeded: %w", err)
+			paidDate = &now
+		}
+
+		// If checkout had a pre-created charge (legacy), look it up first.
+		var charge *repository.ServiceCharge
+		if cid := strings.TrimSpace(metadata["charge_id"]); cid != "" {
+			if parsed, err := uuid.Parse(cid); err == nil {
+				charge, _ = h.serviceRepo.FindChargeByID(ctx, tenantID, parsed)
 			}
+		}
+
+		if charge == nil {
+			var createErr error
+			if status == "succeeded" {
+				charge, createErr = h.serviceRepo.CreateCharge(ctx, tenantID, clientID, serviceID, description, amount, taxAmount, notes, createdBy)
+			} else {
+				charge, createErr = h.serviceRepo.CreatePendingCharge(ctx, tenantID, clientID, serviceID, description, amount, taxAmount, feeAmount, notes, createdBy)
+			}
+			if createErr != nil {
+				return fmt.Errorf("create service charge from checkout webhook: %w", createErr)
+			}
+		} else if status == "succeeded" {
+			now := time.Now().UTC()
+			_ = h.serviceRepo.UpdateChargeStatus(ctx, tenantID, charge.ID, "succeeded", &now)
+		}
+
+		providerRef := sess.ID
+		_ = h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, charge.ID, &providerRef, &paymentMethod)
+		_ = h.mergeStripeDetailsForServiceCheckout(ctx, tenantID, charge.ID, &sess, event.Created)
+
+		if status == "succeeded" {
 			if h.dispatcher != nil {
 				h.dispatcher.Dispatch(ctx, events.NewEvent(events.ServiceChargeSucceeded, tenantID, map[string]interface{}{
-					"charge_id": chargeID.String(),
+					"charge_id": charge.ID.String(),
 					"status":    "succeeded",
 					"source":    "stripe_webhook",
 				}))
 			}
 			if h.xeroSync != nil {
-				if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
-					_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
-					_ = h.xeroSync.ApplyPaymentForServiceCharge(ctx, charge)
+				if refreshed, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, charge.ID); ferr == nil && refreshed != nil {
+					_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, refreshed)
+					_ = h.xeroSync.ApplyPaymentForServiceCharge(ctx, refreshed)
 				}
 			}
-		} else {
-			if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "pending", nil); err != nil {
-				return fmt.Errorf("update service charge pending: %w", err)
-			}
-			if h.xeroSync != nil {
-				if charge, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, chargeID); ferr == nil && charge != nil {
-					_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, charge)
-				}
+		} else if h.xeroSync != nil {
+			if refreshed, ferr := h.serviceRepo.FindChargeByID(ctx, tenantID, charge.ID); ferr == nil && refreshed != nil {
+				_, _ = h.xeroSync.EnsureInvoiceForServiceCharge(ctx, refreshed)
 			}
 		}
+
+		_ = paidDate
 		return nil
 	}
 	// For subscription checkouts: set cancel_at when term has an end (continue_after_term false).
@@ -848,27 +894,8 @@ func (h *StripeWebhookHandler) handleCheckoutFailed(ctx context.Context, tenantI
 	}
 	metadata := sess.Metadata
 	if metadata["type"] == "service_charge" {
-		if h.serviceRepo == nil {
-			return nil
-		}
-		chargeID, err := uuid.Parse(strings.TrimSpace(metadata["charge_id"]))
-		if err != nil {
-			return nil
-		}
-		if err := h.serviceRepo.UpdateChargeStatus(ctx, tenantID, chargeID, "failed", nil); err != nil {
-			return fmt.Errorf("update service charge failed status: %w", err)
-		}
-		providerRef := sess.ID
-		paymentMethod := strings.TrimSpace(metadata["payment_method"])
-		if paymentMethod == "" {
-			paymentMethod = "card"
-		}
-		if err := h.serviceRepo.UpdateChargeProviderContext(ctx, tenantID, chargeID, &providerRef, &paymentMethod); err != nil {
-			log.Printf("stripe service_charge failed provider context tenant=%s charge=%s err=%v", tenantID, chargeID, err)
-		}
-		if err := h.mergeStripeDetailsForServiceCheckout(ctx, tenantID, chargeID, &sess, event.Created); err != nil {
-			log.Printf("stripe service_charge checkout failed details tenant=%s charge=%s err=%v", tenantID, chargeID, err)
-		}
+		// No charge record was created for checkout-based service charges, so nothing to clean up.
+		log.Printf("stripe service_charge checkout expired/cancelled tenant=%s session=%s", tenantID, sess.ID)
 		return nil
 	}
 	membershipID, err1 := uuid.Parse(metadata["membership_id"])
