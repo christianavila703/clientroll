@@ -33,6 +33,8 @@ export default function SignupPage() {
   const [inviteClient, setInviteClient] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  useEffect(() => { window.scrollTo(0, 0); }, [step]);
   const [error, setError] = useState("");
 
   useEffect(() => {

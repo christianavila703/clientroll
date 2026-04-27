@@ -227,6 +227,8 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
 
   const currentIdx = steps.findIndex((s) => s.key === formStep);
 
+  useEffect(() => { window.scrollTo(0, 0); }, [formStep]);
+
   useEffect(() => {
     if (!inviteClient) return;
     setMember((prev) => ({
