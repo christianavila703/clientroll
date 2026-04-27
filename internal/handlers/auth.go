@@ -47,6 +47,11 @@ func (h *AuthHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/auth/logout", h.Logout)
 }
 
+// RegisterTenantRoutes registers authenticated tenant-scoped auth routes.
+func (h *AuthHandler) RegisterTenantRoutes(r chi.Router) {
+	r.Post("/auth/change-password", h.ChangePassword)
+}
+
 // Login handles tenant user login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var input models.LoginInput
@@ -256,4 +261,60 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Logged out"})
+}
+
+// ChangePassword allows a logged-in user to change their own password.
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(middleware.GetUserID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if input.CurrentPassword == "" || input.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, "Current password and new password are required")
+		return
+	}
+
+	user, err := h.userRepo.FindByID(r.Context(), userID, tenantID)
+	if err != nil || user == nil {
+		writeError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	if !auth.CheckPassword(input.CurrentPassword, user.PasswordHash) {
+		writeError(w, http.StatusForbidden, "Current password is incorrect")
+		return
+	}
+
+	if err := auth.ValidatePasswordStrength(input.NewPassword); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	hash, err := auth.HashPassword(input.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
+
+	if err := h.userRepo.UpdatePassword(r.Context(), userID, tenantID, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
 }

@@ -27,10 +27,10 @@ const AVAILABLE_PAYMENT_FREQUENCIES = [
 ];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<"agreement" | "tenant" | "integrations">(() => {
+  const [tab, setTab] = useState<"agreement" | "tenant" | "integrations" | "account">(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
-    if (t === "integrations" || t === "tenant") return t;
+    if (t === "integrations" || t === "tenant" || t === "account") return t;
     return "agreement";
   });
 
@@ -49,6 +49,7 @@ export default function SettingsPage() {
           { key: "agreement" as const, label: "Agreement Details" },
           { key: "tenant" as const, label: "Organisation & Signup" },
           { key: "integrations" as const, label: "Integrations" },
+          { key: "account" as const, label: "My Account" },
         ]).map((t) => (
           <button
             key={t.key}
@@ -65,6 +66,7 @@ export default function SettingsPage() {
       {tab === "agreement" && <AgreementSettings />}
       {tab === "tenant" && <TenantSettings />}
       {tab === "integrations" && <IntegrationsSettings />}
+      {tab === "account" && <AccountSettings />}
     </div>
   );
 }
@@ -934,6 +936,86 @@ function IntegrationCard({ provider, existing, saving, onSave, collapsedByDefaul
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AccountSettings() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"success" | "error">("success");
+
+  const handleSubmit = async () => {
+    setMessage("");
+    if (!currentPassword || !newPassword) {
+      setMessage("Current and new password are required.");
+      setMessageType("error");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setMessage("New passwords do not match.");
+      setMessageType("error");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setMessage("New password must be at least 8 characters.");
+      setMessageType("error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setMessage("Password updated successfully.");
+      setMessageType("success");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (e: unknown) {
+      const err = e as ApiError;
+      setMessage(err.message || "Failed to update password.");
+      setMessageType("error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h2>Change Password</h2>
+      </div>
+      <div className="card-body">
+        {message && (
+          <div className={`mb-4 rounded-md px-3 py-2 text-[13px] ${messageType === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+            {message}
+          </div>
+        )}
+        <div className="space-y-3 max-w-md">
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Current Password</label>
+            <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+              className="input-field" placeholder="Enter current password" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">New Password</label>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              className="input-field" placeholder="Enter new password" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Confirm New Password</label>
+            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+              className="input-field" placeholder="Confirm new password" />
+          </div>
+        </div>
+        <div className="flex justify-end mt-4">
+          <button onClick={handleSubmit} disabled={saving} className="btn-primary">
+            {saving ? "Updating..." : "Update Password"}
+          </button>
+        </div>
       </div>
     </div>
   );

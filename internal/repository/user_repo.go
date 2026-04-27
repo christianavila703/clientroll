@@ -236,6 +236,18 @@ func (r *UserRepo) UpdateStaffProfile(ctx context.Context, userID, tenantID uuid
 	return &u, nil
 }
 
+// UpdatePassword updates the password hash for a user.
+func (r *UserRepo) UpdatePassword(ctx context.Context, userID, tenantID uuid.UUID, passwordHash string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE users SET password_hash = $3, failed_login_attempts = 0, locked_until = NULL, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2`,
+		userID, tenantID, passwordHash)
+	if err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	return nil
+}
+
 // DeactivateStaff disables a tenant staff/admin user account.
 func (r *UserRepo) DeactivateStaff(ctx context.Context, userID, tenantID uuid.UUID) error {
 	query := `

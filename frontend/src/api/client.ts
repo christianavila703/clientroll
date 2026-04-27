@@ -327,6 +327,10 @@ export const api = {
   detachTerms: (mtId: string, termsId: string) =>
     request(`/tenant/membership-types/${mtId}/terms/${termsId}`, { method: "DELETE" }),
 
+  // Account
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request("/tenant/auth/change-password", { method: "POST", body: { current_password: currentPassword, new_password: newPassword } }),
+
   // Integrations
   listIntegrations: () => request("/tenant/integrations"),
   saveIntegration: (provider: string, data: unknown) =>

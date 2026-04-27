@@ -339,6 +339,9 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				// Staff management (Phase 3)
 				staffHandler.RegisterRoutes(r)
 
+				// Auth (change password)
+				authHandler.RegisterTenantRoutes(r)
+
 				// Core entities (Phase 4)
 				bonusHandler.RegisterRoutes(r)
 				mtHandler.RegisterRoutes(r)
