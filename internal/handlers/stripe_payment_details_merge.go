@@ -117,6 +117,15 @@ func buildStripeDetailsPatchFromInvoice(inv *stripe.Invoice, eventCreated int64)
 	if inv.StatusTransitions != nil && inv.StatusTransitions.FinalizedAt > 0 {
 		patch["invoice_finalized_at"] = time.Unix(inv.StatusTransitions.FinalizedAt, 0).UTC().Format(time.RFC3339)
 	}
+	if inv.AttemptCount > 0 {
+		patch["stripe_attempt_count"] = inv.AttemptCount
+	}
+	if inv.NextPaymentAttempt > 0 {
+		patch["stripe_next_payment_attempt"] = time.Unix(inv.NextPaymentAttempt, 0).UTC().Format(time.RFC3339)
+	} else {
+		// Clear stale schedule when Stripe has no further automatic retries.
+		patch["stripe_next_payment_attempt"] = nil
+	}
 	if eventCreated > 0 {
 		patch["last_stripe_event_at"] = time.Unix(eventCreated, 0).UTC().Format(time.RFC3339)
 	}

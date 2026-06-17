@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom"
 import api from "../../api/client";
 import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
 import StripeTransactionPanel, { hasStripeDetails } from "../payments/StripeTransactionPanel";
-import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
+import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents, formatFailedPaymentMessage } from "../../utils/paymentLabels";
 import type { MembershipRecord } from "../../types/memberships";
 import type { PaymentRecord } from "../../types/payments";
 import { useAuth } from "../../store/AuthContext";
@@ -62,9 +62,10 @@ export default function ClientProfilePage() {
   const [mandateCompleteMessage, setMandateCompleteMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<Record<string, { next_charge_date: string; amount: number; status: string }>>({});
   const [tenantTax, setTenantTax] = useState<{ percent: number; name: string }>({ percent: 0, name: "GST" });
-  const [clientFieldSettings, setClientFieldSettings] = useState<{ askEmergencyContact: boolean; askCompanyInformation: boolean }>({
+  const [clientFieldSettings, setClientFieldSettings] = useState<{ askEmergencyContact: boolean; askCompanyInformation: boolean; askBirthDate: boolean }>({
     askEmergencyContact: true,
     askCompanyInformation: false,
+    askBirthDate: true,
   });
   const [paymentInfo, setPaymentInfo] = useState<{ hasMandate: boolean; providers: string[]; supportsDirectDebit: boolean; hasStoredCard: boolean; storedCardLabel: string | null }>({
     hasMandate: false,
@@ -167,6 +168,7 @@ export default function ClientProfilePage() {
       setClientFieldSettings({
         askEmergencyContact: tenantRes?.ask_emergency_contact !== false,
         askCompanyInformation: tenantRes?.ask_company_information === true,
+        askBirthDate: tenantRes?.ask_birth_date !== false,
       });
       setActiveSignupInvite((inviteRes?.invite || null) as ActiveSignupInvite | null);
       const membershipsList = memberRes.memberships || [];
@@ -548,6 +550,7 @@ export default function ClientProfilePage() {
           client={client}
           askEmergencyContact={clientFieldSettings.askEmergencyContact}
           askCompanyInformation={clientFieldSettings.askCompanyInformation}
+          askBirthDate={clientFieldSettings.askBirthDate}
           onClose={() => setShowEdit(false)}
           onSaved={() => { setShowEdit(false); loadAll(); }}
         />
@@ -1284,10 +1287,7 @@ function PaymentsTab({
                   </p>
                 )}
                 {p.status === "failed" && (
-                  <p className="text-[11px] text-red-500">
-                    Payment failed{p.failure_reason ? `: ${p.failure_reason}` : ""}
-                    {p.retry_count && p.retry_count > 0 ? ` (${p.retry_count} retries)` : ""}
-                  </p>
+                  <p className="text-[11px] text-red-500 leading-snug">{formatFailedPaymentMessage(p)}</p>
                 )}
                 {p.status === "cancelled" && (
                   <p className="text-[11px] text-gray-500">
@@ -1301,6 +1301,7 @@ function PaymentsTab({
                       currencyCode={p.currency_code || "AUD"}
                       amount={customerCharged(p)}
                       status={p.status}
+                      retryCount={p.retry_count}
                       clientName={clientName}
                       clientEmail={clientEmail}
                     />
@@ -1641,12 +1642,14 @@ function EditClientModal({
   client,
   askEmergencyContact,
   askCompanyInformation,
+  askBirthDate,
   onClose,
   onSaved,
 }: {
   client: Client;
   askEmergencyContact: boolean;
   askCompanyInformation: boolean;
+  askBirthDate: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1708,7 +1711,7 @@ function EditClientModal({
         company_postcode: askCompanyInformation ? form.company_postcode : null,
         company_country: askCompanyInformation ? form.company_country : null,
       };
-      const birthDateISO = toBirthDateISOString(form.birth_date);
+      const birthDateISO = askBirthDate ? toBirthDateISOString(form.birth_date) : null;
       if (birthDateISO) payload.birth_date = birthDateISO;
       await api.updateClient(client.id, payload);
       onSaved();
@@ -1776,12 +1779,14 @@ function EditClientModal({
                       onChange={(v) => setForm((prev) => ({ ...prev, phone: v }))}
                       type="tel"
                     />
-                    <LabeledInput
-                      label="Date of birth"
-                      value={form.birth_date}
-                      onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
-                      type="date"
-                    />
+                    {askBirthDate && (
+                      <LabeledInput
+                        label="Date of birth"
+                        value={form.birth_date}
+                        onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
+                        type="date"
+                      />
+                    )}
                     <div>
                       <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender</label>
                       <select value={form.gender} onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))} className="input-field">

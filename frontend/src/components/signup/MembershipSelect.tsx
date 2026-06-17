@@ -1,4 +1,8 @@
 import type { MembershipType } from "./SignupPage";
+import {
+  membershipHeadlinePrice,
+  signupPriceSuffix,
+} from "../../utils/signupPricing";
 
 interface Props {
   memberships: MembershipType[];
@@ -49,34 +53,10 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
     }
     return ordered;
   })();
-  const toWeekly = (feeTotal: number, durationMonths: number): number | null => {
-    if (!feeTotal || !durationMonths) return null;
-    const weeks = (durationMonths * 52) / 12;
-    if (!weeks) return null;
-    return feeTotal / weeks;
-  };
-  const toMonthly = (feeTotal: number, durationMonths: number): number | null => {
-    if (!feeTotal || !durationMonths) return null;
-    return feeTotal / durationMonths;
-  };
   const formatMoney = (value: number) =>
     value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const currencyCode = (mt: MembershipType) => ((mt as any).currency_code || "AUD").toUpperCase();
   const moneyWithCurrency = (mt: MembershipType, value: number) => `${currencyCode(mt)} $${formatMoney(value)}`;
-  const minWeekly = (mt: MembershipType): number | null => {
-    const values = (mt.term_options || [])
-      .map((to) => to.fee_weekly || toWeekly(to.fee_total, to.duration_months))
-      .filter((v): v is number => typeof v === "number" && v > 0);
-    if (!values.length) return null;
-    return Math.min(...values);
-  };
-  const minMonthly = (mt: MembershipType): number | null => {
-    const values = (mt.term_options || [])
-      .map((to) => to.fee_monthly || toMonthly(to.fee_total, to.duration_months))
-      .filter((v): v is number => typeof v === "number" && v > 0);
-    if (!values.length) return null;
-    return Math.min(...values);
-  };
 
   if (memberships.length === 0) {
     return (
@@ -124,43 +104,40 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
               <h3 className="text-[19px] font-semibold text-gray-900 transition-colors brand-hover-text">
                 {membershipName(mt) || fallbackTitle(mt)}
               </h3>
-              <p className="mt-1 text-[11px] text-gray-500">
-                {mt.apply_sales_tax !== false ? "Includes GST" : "No GST"}
-              </p>
+              {mt.apply_sales_tax !== false && (
+                <p className="mt-1 text-[11px] text-gray-500">Includes GST</p>
+              )}
               {membershipLevel(mt) && (
                 <p className="mt-1 text-[13px] font-medium" style={{ color: "var(--brandPrimary)" }}>
                   {membershipLevel(mt)}
                 </p>
               )}
-              {((mt as any).summary || mt.description) && (
+              {mt.summary?.trim() && (
                 <p className="mt-2.5 text-[13px] text-gray-500 leading-relaxed line-clamp-3">
-                  {(mt as any).summary || mt.description}
+                  {mt.summary.trim()}
                 </p>
               )}
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="text-[22px] font-medium tabular-nums" style={{ color: "var(--brandPrimary)" }}>
-                  {priceDisplayMode === "weekly" && minWeekly(mt) !== null
-                    ? moneyWithCurrency(mt, minWeekly(mt)!)
-                    : priceDisplayMode === "monthly" && minMonthly(mt) !== null
-                    ? moneyWithCurrency(mt, minMonthly(mt)!)
-                    : `${currencyCode(mt)} $${(() => {
-                        const opts = mt.term_options || [];
-                        if (opts.length > 0) {
-                          const fees = opts.map(o => o.fee_total).sort((a, b) => a - b);
-                          return fees.length === 1 || fees[0] === fees[fees.length - 1]
-                            ? fees[0].toLocaleString()
-                            : `${fees[0].toLocaleString()} – ${currencyCode(mt)} $${fees[fees.length - 1].toLocaleString()}`;
-                        }
-                        return "0";
-                      })()}`}
-                </span>
-                <span className="text-[12px] text-gray-400">
-                  {priceDisplayMode === "weekly" && minWeekly(mt) !== null
-                    ? "per week"
-                    : priceDisplayMode === "monthly" && minMonthly(mt) !== null
-                    ? "per month"
-                    : "membership value"}
-                </span>
+                {(() => {
+                  const headline = membershipHeadlinePrice(
+                    mt.term_options || [],
+                    priceDisplayMode,
+                    mt.enabled_payment_frequencies,
+                  );
+                  const opts = mt.term_options || [];
+                  const totals = opts.map((o) => o.fee_total).filter((v) => v > 0).sort((a, b) => a - b);
+                  const showRange = totals.length > 1 && totals[0] !== totals[totals.length - 1] && headline.suffix === signupPriceSuffix("total");
+                  return (
+                    <>
+                      <span className="text-[22px] font-medium tabular-nums" style={{ color: "var(--brandPrimary)" }}>
+                        {showRange
+                          ? `${currencyCode(mt)} $${totals[0].toLocaleString()} – ${currencyCode(mt)} $${totals[totals.length - 1].toLocaleString()}`
+                          : moneyWithCurrency(mt, headline.amount)}
+                      </span>
+                      <span className="text-[12px] text-gray-400">{headline.suffix}</span>
+                    </>
+                  );
+                })()}
               </div>
               {mt.term_options && mt.term_options.length > 0 && (
                 <p className="mt-1.5 text-[11px] text-gray-400">

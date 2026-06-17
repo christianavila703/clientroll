@@ -44,6 +44,24 @@ Notes:
 - Timestamp skew beyond 5 minutes is rejected.
 - Body size limit is 1 MiB.
 
+## Signup completion webhook (Settings)
+
+Tenant admins configure a dedicated signup webhook under **Settings → Organisation → Signup webhook**:
+
+- `GET /api/tenant/settings/tenant` — includes `signup_webhook_url`, `signup_webhook_enabled`, `signup_webhook_has_secret`
+- `PUT /api/tenant/settings/tenant` — set `signup_webhook_url`, `signup_webhook_enabled`; optional `regenerate_signup_webhook_secret: true`
+- `POST /api/tenant/settings/signup-webhook/test` — sends a sample `signup.completed` payload synchronously
+
+When enabled, ClientRoll POSTs once per completed membership signup (after payment succeeds for checkout flows). The body uses flat Ignition-style keys, for example:
+
+- `Membership Name`, `Contact Name`, `Contact Email`, `Start Date`, `End Date`
+- `Client Name`, `Client Company Address Lines`, `Client Company Address City`, …
+- `Agreement PDF URL`, `Membership Value`, `signatories`
+
+Request headers match outbound webhooks (`X-Webhook-Signature`, `X-Webhook-Event`, `X-Webhook-Event-Id`, `X-Webhook-Timestamp`).
+
+Saving a new URL or enabling the webhook generates a signing secret returned once as `signup_webhook_signing_secret`.
+
 ## Outbound Webhook Endpoints
 
 Tenants can already manage outbound endpoints at:

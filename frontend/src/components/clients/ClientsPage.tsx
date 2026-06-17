@@ -390,6 +390,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
   const [googlePlacesKey, setGooglePlacesKey] = useState("");
   const [askEmergencyContact, setAskEmergencyContact] = useState(true);
   const [askCompanyInformation, setAskCompanyInformation] = useState(false);
+  const [askBirthDate, setAskBirthDate] = useState(true);
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
 
   useEffect(() => {
@@ -400,15 +401,17 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         const integrations = (res as { integrations?: Array<{ provider?: string; public_api_key?: string; is_active?: boolean }> }).integrations || [];
         const googlePlaces = integrations.find((i) => i.provider === "google_places" && i.is_active);
         setGooglePlacesKey(googlePlaces?.public_api_key || "");
-        const tenant = tenantRes as { ask_emergency_contact?: boolean; ask_company_information?: boolean };
+        const tenant = tenantRes as { ask_emergency_contact?: boolean; ask_company_information?: boolean; ask_birth_date?: boolean };
         setAskEmergencyContact(tenant.ask_emergency_contact !== false);
         setAskCompanyInformation(tenant.ask_company_information === true);
+        setAskBirthDate(tenant.ask_birth_date !== false);
       })
       .catch(() => {
         if (!cancelled) {
           setGooglePlacesKey("");
           setAskEmergencyContact(true);
           setAskCompanyInformation(false);
+          setAskBirthDate(true);
         }
       });
     return () => {
@@ -447,7 +450,7 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
         postcode: normalizeStringOrNull(form.postcode),
         country: normalizeStringOrNull(form.country?.toUpperCase() || ""),
         gender: normalizeStringOrNull(form.gender),
-        birth_date: toBirthDateISOStringOrNull(form.birth_date),
+        birth_date: askBirthDate ? toBirthDateISOStringOrNull(form.birth_date) : null,
         emergency_contact_name: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_name) : null,
         emergency_contact_phone: askEmergencyContact ? normalizeStringOrNull(form.emergency_contact_phone) : null,
         tax_number: askCompanyInformation ? normalizeStringOrNull(form.tax_number) : null,
@@ -511,12 +514,14 @@ function CreateClientForm({ editing, onCreated }: { editing: Client | null; onCr
                 type="tel"
                 required
               />
-              <LabeledInput
-                label="Date of birth"
-                value={form.birth_date}
-                onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
-                type="date"
-              />
+              {askBirthDate && (
+                <LabeledInput
+                  label="Date of birth"
+                  value={form.birth_date}
+                  onChange={(v) => setForm((prev) => ({ ...prev, birth_date: v }))}
+                  type="date"
+                />
+              )}
               <div>
                 <label className="block text-[13px] font-medium text-gray-700 mb-1">Gender <span className="text-red-500">*</span></label>
                 <select

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import api from "../../api/client";
 import RichTextEditor from "../common/RichTextEditor";
 import type { Editor } from "@tiptap/react";
+import { normalizeTermsEditorContent } from "../../utils/termsContent";
 
 const TC_VARIABLES = [
   { key: "client_name", label: "Client Name", desc: "Full name of the member" },
@@ -179,7 +180,7 @@ function TermsForm({ initial, onSaved, onCancel }: {
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title || "");
-  const [content, setContent] = useState(initial?.content || "");
+  const [content, setContent] = useState(() => normalizeTermsEditorContent(initial?.content || ""));
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

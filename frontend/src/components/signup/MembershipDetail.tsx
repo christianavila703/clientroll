@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
+import {
+  effectiveSignupDisplayMode,
+  signupDisplayAmount,
+  signupPriceSuffix,
+  termHasExplicitFee,
+} from "../../utils/signupPricing";
 
 interface Props {
   membership: MembershipType;
@@ -21,49 +27,24 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
 
   const terms = membership.term_options || [];
   const currentTerm = terms[selectedTermIdx];
-  const toWeekly = (feeTotal: number, durationMonths: number): number | null => {
-    if (!feeTotal || !durationMonths) return null;
-    const weeks = (durationMonths * 52) / 12;
-    if (!weeks) return null;
-    return feeTotal / weeks;
-  };
-  const toMonthly = (feeTotal: number, durationMonths: number): number | null => {
-    if (!feeTotal || !durationMonths) return null;
-    return feeTotal / durationMonths;
-  };
   const formatMoney = (value: number) =>
     value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
   const moneyWithCurrency = (value: number) => `${currencyCode} $${formatMoney(value)}`;
-  const weeklyFromTerm = currentTerm?.fee_weekly ?? (currentTerm ? toWeekly(currentTerm.fee_total, currentTerm.duration_months) : null);
-  const weeklyFallback = terms
-    .map((t) => t.fee_weekly || toWeekly(t.fee_total, t.duration_months))
-    .filter((v): v is number => typeof v === "number" && v > 0)
-    .sort((a, b) => a - b)[0];
-  const weeklyValue = weeklyFromTerm ?? weeklyFallback ?? null;
-  const monthlyFromTerm = currentTerm?.fee_monthly ?? (currentTerm ? toMonthly(currentTerm.fee_total, currentTerm.duration_months) : null);
-  const monthlyFallback = terms
-    .map((t) => t.fee_monthly || toMonthly(t.fee_total, t.duration_months))
-    .filter((v): v is number => typeof v === "number" && v > 0)
-    .sort((a, b) => a - b)[0];
-  const monthlyValue = monthlyFromTerm ?? monthlyFallback ?? null;
-  const resolvedDisplayMode: "total" | "weekly" | "monthly" =
-    priceDisplayMode === "weekly" && weeklyValue !== null
-      ? "weekly"
-      : priceDisplayMode === "monthly" && monthlyValue !== null
-      ? "monthly"
-      : "total";
+  const enabledFrequencies = membership.enabled_payment_frequencies?.length
+    ? membership.enabled_payment_frequencies
+    : enabledPaymentFrequencies;
+  const displayModeForTerm = (term: TermOption) =>
+    effectiveSignupDisplayMode(priceDisplayMode, term, { enabledPaymentFrequencies: enabledFrequencies });
+  const resolvedDisplayMode = currentTerm ? displayModeForTerm(currentTerm) : "total";
   const showWeekly = resolvedDisplayMode === "weekly";
   const showMonthly = resolvedDisplayMode === "monthly";
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
   const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
   const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
-  const displayAmountForTerm = (term: TermOption): number => {
-    if (resolvedDisplayMode === "weekly") return term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || term.fee_total;
-    if (resolvedDisplayMode === "monthly") return term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || term.fee_total;
-    return term.fee_total;
-  };
+  const displayAmountForTerm = (term: TermOption): number =>
+    signupDisplayAmount(term, displayModeForTerm(term));
   const processingFeeForDisplay = (amount: number, method: "card" | "direct_debit") =>
     estimateStripeProcessingFeeCents(Math.round(amount * 100), method) / 100;
   const processingFeeLabelForTerm = (term: TermOption): string | null => {
@@ -221,19 +202,12 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                       )}
                     </div>
                     <div className="mt-1 text-[15px] font-semibold text-gray-900 tabular-nums">
-                      {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months))
-                        ? moneyWithCurrency(term.fee_weekly || toWeekly(term.fee_total, term.duration_months) || 0)
-                        : resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months))
-                        ? moneyWithCurrency(term.fee_monthly || toMonthly(term.fee_total, term.duration_months) || 0)
-                        : `${currencyCode} $${term.fee_total.toLocaleString()}`}
+                      {moneyWithCurrency(signupDisplayAmount(term, displayModeForTerm(term)))}
                     </div>
-                    {resolvedDisplayMode === "weekly" && (term.fee_weekly || toWeekly(term.fee_total, term.duration_months)) && (
-                      <p className="text-[12px] text-gray-500 mt-1">per week</p>
+                    {(showWeekly || showMonthly || resolvedDisplayMode === "total") && (
+                      <p className="text-[12px] text-gray-500 mt-1">{signupPriceSuffix(displayModeForTerm(term))}</p>
                     )}
-                    {resolvedDisplayMode === "monthly" && (term.fee_monthly || toMonthly(term.fee_total, term.duration_months)) && (
-                      <p className="text-[12px] text-gray-500 mt-1">per month</p>
-                    )}
-                    {resolvedDisplayMode === "total" && term.fee_monthly && (
+                    {displayModeForTerm(term) === "total" && termHasExplicitFee(term, "monthly") && term.fee_monthly && (
                       <p className="text-[12px] text-gray-500 mt-1">
                         or {currencyCode} ${term.fee_monthly.toLocaleString()}/month
                       </p>

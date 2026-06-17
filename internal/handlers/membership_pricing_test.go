@@ -60,3 +60,38 @@ func TestDeriveCanonicalMembershipPricing_CustomScheduleDisabled(t *testing.T) {
 	}
 }
 
+func TestDeriveCanonicalMembershipPricing_UpfrontOnlyRejectsMonthly(t *testing.T) {
+	term := &models.TermOption{
+		DurationMonths: 12,
+		FeeTotal:       5000,
+		AllowUpfront:   true,
+	}
+	got, err := deriveCanonicalMembershipPricing(term, "upfront")
+	if err != nil {
+		t.Fatalf("expected upfront to succeed, got %v", err)
+	}
+	if got.Amount != 5000 {
+		t.Fatalf("expected upfront amount 5000, got %.2f", got.Amount)
+	}
+	_, err = deriveCanonicalMembershipPricing(term, "monthly")
+	if err == nil {
+		t.Fatal("expected monthly to fail when fee_monthly is not configured")
+	}
+}
+
+func TestDeriveCanonicalMembershipPricing_MonthlyRequiresExplicitFee(t *testing.T) {
+	monthly := 416.67
+	term := &models.TermOption{
+		DurationMonths: 12,
+		FeeTotal:       5000,
+		FeeMonthly:     &monthly,
+	}
+	got, err := deriveCanonicalMembershipPricing(term, "monthly")
+	if err != nil {
+		t.Fatalf("expected monthly to succeed, got %v", err)
+	}
+	if got.Amount != 416.67 {
+		t.Fatalf("expected monthly amount 416.67, got %.2f", got.Amount)
+	}
+}
+

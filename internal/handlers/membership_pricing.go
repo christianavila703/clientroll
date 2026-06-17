@@ -16,6 +16,33 @@ type canonicalMembershipPricing struct {
 	NumPayments   *int
 }
 
+func termOffersPaymentFrequency(term *models.TermOption, frequency string) bool {
+	if term == nil {
+		return false
+	}
+	freq := strings.ToLower(strings.TrimSpace(frequency))
+	switch freq {
+	case "upfront":
+		return term.AllowUpfront && term.FeeTotal > 0
+	case "weekly":
+		return term.FeeWeekly != nil && *term.FeeWeekly > 0
+	case "fortnightly":
+		return term.FeeFortnightly != nil && *term.FeeFortnightly > 0
+	case "monthly":
+		return term.FeeMonthly != nil && *term.FeeMonthly > 0
+	case "quarterly":
+		return term.FeeQuarterly != nil && *term.FeeQuarterly > 0
+	case "custom_schedule":
+		return term.CustomScheduleEnabled &&
+			term.CustomScheduleAmount != nil && *term.CustomScheduleAmount > 0 &&
+			term.CustomScheduleIntervalUnit != nil &&
+			term.CustomScheduleIntervalCount != nil && *term.CustomScheduleIntervalCount > 0 &&
+			term.CustomScheduleNumPayments != nil && *term.CustomScheduleNumPayments > 0
+	default:
+		return false
+	}
+}
+
 func deriveCanonicalMembershipPricing(term *models.TermOption, frequency string) (*canonicalMembershipPricing, error) {
 	if term == nil {
 		return nil, fmt.Errorf("term option is required")
@@ -24,25 +51,12 @@ func deriveCanonicalMembershipPricing(term *models.TermOption, frequency string)
 	if freq == "" {
 		return nil, fmt.Errorf("payment frequency is required")
 	}
+	if !termOffersPaymentFrequency(term, freq) {
+		return nil, fmt.Errorf("payment frequency %q is not available for this term option", freq)
+	}
 
 	round2 := func(v float64) float64 {
 		return math.Round(v*100) / 100
-	}
-	weeklyFallback := func() float64 {
-		if term.DurationMonths <= 0 || term.FeeTotal <= 0 {
-			return 0
-		}
-		weeks := (float64(term.DurationMonths) * 52) / 12
-		if weeks <= 0 {
-			return 0
-		}
-		return round2(term.FeeTotal / weeks)
-	}
-	monthlyFallback := func() float64 {
-		if term.DurationMonths <= 0 || term.FeeTotal <= 0 {
-			return 0
-		}
-		return round2(term.FeeTotal / float64(term.DurationMonths))
 	}
 
 	result := &canonicalMembershipPricing{
@@ -64,49 +78,18 @@ func deriveCanonicalMembershipPricing(term *models.TermOption, frequency string)
 		result.IntervalCount = 1
 		return result, nil
 	case "weekly":
-		if term.FeeWeekly != nil && *term.FeeWeekly > 0 {
-			result.Amount = round2(*term.FeeWeekly)
-		} else {
-			result.Amount = weeklyFallback()
-		}
+		result.Amount = round2(*term.FeeWeekly)
 		withInterval("week", 1)
 	case "fortnightly":
-		if term.FeeFortnightly != nil && *term.FeeFortnightly > 0 {
-			result.Amount = round2(*term.FeeFortnightly)
-		} else if weekly := weeklyFallback(); weekly > 0 {
-			result.Amount = round2(weekly * 2)
-		}
+		result.Amount = round2(*term.FeeFortnightly)
 		withInterval("week", 2)
 	case "monthly":
-		if term.FeeMonthly != nil && *term.FeeMonthly > 0 {
-			result.Amount = round2(*term.FeeMonthly)
-		} else {
-			result.Amount = monthlyFallback()
-		}
+		result.Amount = round2(*term.FeeMonthly)
 		withInterval("month", 1)
 	case "quarterly":
-		if term.FeeQuarterly != nil && *term.FeeQuarterly > 0 {
-			result.Amount = round2(*term.FeeQuarterly)
-		} else if term.DurationMonths >= 3 && term.FeeTotal > 0 {
-			result.Amount = round2(term.FeeTotal / (float64(term.DurationMonths) / 3))
-		}
+		result.Amount = round2(*term.FeeQuarterly)
 		withInterval("month", 3)
 	case "custom_schedule":
-		if !term.CustomScheduleEnabled {
-			return nil, fmt.Errorf("custom schedule is not enabled for this term option")
-		}
-		if term.CustomScheduleAmount == nil || *term.CustomScheduleAmount <= 0 {
-			return nil, fmt.Errorf("custom schedule amount is not configured for this term option")
-		}
-		if term.CustomScheduleIntervalUnit == nil || (*term.CustomScheduleIntervalUnit != "week" && *term.CustomScheduleIntervalUnit != "month") {
-			return nil, fmt.Errorf("custom schedule interval is not configured for this term option")
-		}
-		if term.CustomScheduleIntervalCount == nil || *term.CustomScheduleIntervalCount <= 0 {
-			return nil, fmt.Errorf("custom schedule interval count is not configured for this term option")
-		}
-		if term.CustomScheduleNumPayments == nil || *term.CustomScheduleNumPayments <= 0 {
-			return nil, fmt.Errorf("custom schedule number of payments is not configured for this term option")
-		}
 		result.Amount = round2(*term.CustomScheduleAmount)
 		result.IntervalUnit = term.CustomScheduleIntervalUnit
 		result.IntervalCount = *term.CustomScheduleIntervalCount

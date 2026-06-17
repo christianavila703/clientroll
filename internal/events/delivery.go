@@ -113,16 +113,25 @@ func (w *Worker) deliver(ctx context.Context, job DeliveryJob) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// Success
 		w.recordSuccess(ctx, job, resp.StatusCode, string(body))
 	} else {
-		// HTTP error — may retry
 		w.handleFailure(ctx, job, resp.StatusCode, string(body),
 			fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 }
 
 func (w *Worker) recordSuccess(ctx context.Context, job DeliveryJob, httpStatus int, responseBody string) {
+	if job.DeliveryKind == "signup" {
+		_, err := w.db.Pool.Exec(ctx, `
+			UPDATE signup_webhook_deliveries SET status='delivered', http_status=$1,
+			       response_body=$2, attempt_count=attempt_count+1
+			WHERE id=$3 AND tenant_id=$4`,
+			httpStatus, responseBody, job.DeliveryID, job.TenantID)
+		if err != nil {
+			log.Printf("signup webhook record_success_failed delivery=%s tenant=%s err=%v", job.DeliveryID, job.TenantID, err)
+		}
+		return
+	}
 	_, err := w.db.Pool.Exec(ctx, `
 		UPDATE webhook_deliveries SET status='delivered', http_status=$1,
 		       response_body=$2, attempt_count=attempt_count+1
@@ -143,19 +152,25 @@ func (w *Worker) handleFailure(ctx context.Context, job DeliveryJob, httpStatus 
 		return
 	}
 
-	// Re-enqueue with delay
 	delay := NextRetryDelay(job.AttemptCount)
 	nextRetry := time.Now().Add(delay)
 
-	// Update delivery record
-	w.db.Pool.Exec(ctx, `
+	if job.DeliveryKind == "signup" {
+		w.db.Pool.Exec(ctx, `
+			UPDATE signup_webhook_deliveries SET status='retrying', http_status=$1,
+			       response_body=$2, attempt_count=$3, next_retry_at=$4
+			WHERE id=$5 AND tenant_id=$6`,
+			httpStatus, responseBody, job.AttemptCount, nextRetry, job.DeliveryID, job.TenantID)
+	} else {
+		w.db.Pool.Exec(ctx, `
 		UPDATE webhook_deliveries SET status='retrying', http_status=$1,
 		       response_body=$2, attempt_count=$3, next_retry_at=$4
 		WHERE webhook_endpoint_id=$5 AND tenant_id=$6 AND event_type=$7
 		  AND status IN ('pending', 'retrying')
 		ORDER BY created_at DESC LIMIT 1`,
-		httpStatus, responseBody, job.AttemptCount, nextRetry,
-		job.EndpointID, job.TenantID, job.EventType)
+			httpStatus, responseBody, job.AttemptCount, nextRetry,
+			job.EndpointID, job.TenantID, job.EventType)
+	}
 
 	// Schedule retry via Redis delayed queue
 	jobBytes, _ := json.Marshal(job)
@@ -166,6 +181,16 @@ func (w *Worker) handleFailure(ctx context.Context, job DeliveryJob, httpStatus 
 }
 
 func (w *Worker) recordFailure(ctx context.Context, job DeliveryJob, httpStatus int, responseBody, reason string) {
+	if job.DeliveryKind == "signup" {
+		w.db.Pool.Exec(ctx, `
+			UPDATE signup_webhook_deliveries SET status='failed', http_status=$1,
+			       response_body=$2, attempt_count=$3
+			WHERE id=$4 AND tenant_id=$5`,
+			httpStatus, responseBody, job.AttemptCount, job.DeliveryID, job.TenantID)
+		log.Printf("signup webhook delivery_failed delivery=%s tenant=%s attempt_count=%d reason=%s",
+			job.DeliveryID, job.TenantID, job.AttemptCount, reason)
+		return
+	}
 	w.db.Pool.Exec(ctx, `
 		UPDATE webhook_deliveries SET status='failed', http_status=$1,
 		       response_body=$2, attempt_count=$3

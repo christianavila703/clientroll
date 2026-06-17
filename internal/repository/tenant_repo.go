@@ -39,7 +39,7 @@ func NewTenantRepo(db *database.Postgres) *TenantRepo {
 // FindByID returns a tenant by ID.
 func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -49,7 +49,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 	var enabledRaw []byte
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -71,7 +71,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 // FindBySlug returns a tenant by slug.
 func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -81,7 +81,7 @@ func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenan
 	var enabledRaw []byte
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, slug).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -105,7 +105,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	query := `
 		INSERT INTO tenants (name, slug, timezone)
 		VALUES ($1, $2, $3)
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
@@ -114,7 +114,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	var enabledRaw []byte
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, input.Name, input.Slug, input.Timezone).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -133,7 +133,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 // List returns all tenants (for platform admin).
 func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -151,7 +151,7 @@ func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 		var enabledRaw []byte
 		var enabledPaymentFrequenciesRaw []byte
 		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+			&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 			&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 			&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 			&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -196,9 +196,13 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 			END,
 			ask_emergency_contact = COALESCE($18, ask_emergency_contact),
 			ask_company_information = COALESCE($19, ask_company_information),
+			ask_birth_date = COALESCE($20, ask_birth_date),
+			signup_webhook_url = COALESCE($21, signup_webhook_url),
+			signup_webhook_secret_encrypted = COALESCE($22, signup_webhook_secret_encrypted),
+			signup_webhook_enabled = COALESCE($23, signup_webhook_enabled),
 			updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
@@ -225,9 +229,9 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 	err := r.db.Pool.QueryRow(ctx, query, id,
 		input.Name, input.Timezone, input.IsActive, input.PrimaryColour,
 		input.SecondaryColour, input.LogoURL,
-		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL, input.SignupPriceDisplayMode, input.Slug, input.SalesTaxName, input.SalesTaxPercent, enabledJSON, enabledPaymentFrequenciesJSON, input.AskEmergencyContact, input.AskCompanyInformation,
+		input.DefaultThankyouHeading, input.DefaultThankyouBody, input.DefaultThankyouImageURL, input.DefaultThankyouRedirectURL, input.SignupPriceDisplayMode, input.Slug, input.SalesTaxName, input.SalesTaxPercent, enabledJSON, enabledPaymentFrequenciesJSON, input.AskEmergencyContact, input.AskCompanyInformation, input.AskBirthDate, input.SignupWebhookURL, input.SignupWebhookSecretEncrypted, input.SignupWebhookEnabled,
 	).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,
@@ -248,7 +252,7 @@ func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.T
 	query := `
 		UPDATE tenants SET setup_completed_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND setup_completed_at IS NULL
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
@@ -257,7 +261,7 @@ func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.T
 	var enabledRaw []byte
 	var enabledPaymentFrequenciesRaw []byte
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.IsActive,
+		&t.ID, &t.Name, &t.Slug, &t.Timezone, &t.SalesTaxName, &t.SalesTaxPercent, &enabledRaw, &enabledPaymentFrequenciesRaw, &t.AskEmergencyContact, &t.AskCompanyInformation, &t.AskBirthDate, &t.SignupWebhookURL, &t.SignupWebhookSecretEncrypted, &t.SignupWebhookEnabled, &t.IsActive,
 		&t.LogoURL, &t.PrimaryColour, &t.SecondaryColour, &t.SignupPriceDisplayMode,
 		&t.DefaultThankyouHeading, &t.DefaultThankyouBody,
 		&t.DefaultThankyouImageURL, &t.DefaultThankyouRedirectURL,

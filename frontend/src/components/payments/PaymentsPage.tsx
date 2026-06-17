@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
 import StripeTransactionPanel, { hasStripeDetails } from "./StripeTransactionPanel";
-import { customerCharged, fmtMoney } from "../../utils/paymentLabels";
+import { customerCharged, fmtMoney, formatFailedPaymentMessage, normalizeFailureReason } from "../../utils/paymentLabels";
 import type { AdminPaymentRecord } from "../../types/payments";
 import { useAuth } from "../../store/AuthContext";
 import { daysUntilDateOnly, formatTenantDate, tenantTimezoneOrUTC } from "../../utils/tenantDate";
@@ -133,6 +133,7 @@ export default function PaymentsPage() {
                   currencyCode={stripeDetail.currency_code || "AUD"}
                   amount={customerCharged(stripeDetail)}
                   status={stripeDetail.status}
+                  retryCount={stripeDetail.retry_count}
                   clientName={stripeDetail.client_name}
                   clientEmail={stripeDetail.client_email}
                 />
@@ -236,6 +237,9 @@ export default function PaymentsPage() {
                     const remaining = Math.max(0, p.total_expected - p.total_paid);
                     const end = daysUntilEnd(p.membership_end);
                     const paymentMethodBadge = methodBadge(p);
+                    const failedMsg = p.status === "failed" ? formatFailedPaymentMessage(p) : null;
+                    const failureNote =
+                      p.status !== "failed" ? normalizeFailureReason(p.failure_reason) : "";
                     return (
                       <tr
                         key={p.payment_id}
@@ -263,12 +267,17 @@ export default function PaymentsPage() {
                                 {paymentMethodBadge.label}
                               </span>
                             )}
-                            {p.retry_count > 0 && (
-                              <span className="text-[10px] text-red-500 whitespace-nowrap">{p.retry_count} retries</span>
-                            )}
                           </div>
-                          {p.failure_reason && (
-                            <p className="text-[10px] text-red-400 mt-1 truncate max-w-[180px]" title={p.failure_reason}>{p.failure_reason}</p>
+                          {failedMsg ? (
+                            <p className="text-[10px] text-red-400 mt-1 max-w-[240px] leading-snug" title={failedMsg}>
+                              {failedMsg}
+                            </p>
+                          ) : (
+                            failureNote && (
+                              <p className="text-[10px] text-red-400 mt-1 truncate max-w-[180px]" title={failureNote}>
+                                {failureNote}
+                              </p>
+                            )
                           )}
                         </td>
                         <td className="text-[13px] text-gray-700">{fmtDate(p.due_date)}</td>

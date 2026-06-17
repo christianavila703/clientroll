@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 import SignatureCanvas from "../signatures/SignatureCanvas";
 import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
+import {
+  defaultPaymentFrequencyForTerm,
+  effectiveSignupDisplayMode,
+  explicitFrequencyAmount,
+  signupDisplayAmount,
+  signupPriceSuffix,
+  termHasExplicitFee,
+} from "../../utils/signupPricing";
+import { formatTermsContentForDisplay } from "../../utils/termsContent";
 import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
 
 interface Props {
@@ -33,50 +42,8 @@ function positiveNumber(value: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function fallbackWeeklyAmount(termOption: TermOption): number | null {
-  const total = positiveNumber(termOption.fee_total);
-  const months = Number(termOption.duration_months || 0);
-  if (!total || !months) return null;
-  const weeks = (months * 52) / 12;
-  if (!weeks) return null;
-  return total / weeks;
-}
-
-function fallbackFortnightlyAmount(termOption: TermOption): number | null {
-  const weekly = fallbackWeeklyAmount(termOption);
-  if (!weekly) return null;
-  return weekly * 2;
-}
-
-function fallbackMonthlyAmount(termOption: TermOption): number | null {
-  const total = positiveNumber(termOption.fee_total);
-  const months = Number(termOption.duration_months || 0);
-  if (!total || !months) return null;
-  return total / months;
-}
-
-function fallbackQuarterlyAmount(termOption: TermOption): number | null {
-  const total = positiveNumber(termOption.fee_total);
-  const months = Number(termOption.duration_months || 0);
-  if (!total || months < 3) return null;
-  return total / (months / 3);
-}
-
 function resolveFrequencyAmount(termOption: TermOption, frequency: string): number {
-  switch (frequency) {
-    case "weekly":
-      return positiveNumber(termOption.fee_weekly) || fallbackWeeklyAmount(termOption) || termOption.fee_total;
-    case "fortnightly":
-      return positiveNumber(termOption.fee_fortnightly) || fallbackFortnightlyAmount(termOption) || termOption.fee_total;
-    case "monthly":
-      return positiveNumber(termOption.fee_monthly) || fallbackMonthlyAmount(termOption) || termOption.fee_total;
-    case "quarterly":
-      return positiveNumber((termOption as any).fee_quarterly) || fallbackQuarterlyAmount(termOption) || termOption.fee_total;
-    case "upfront":
-      return termOption.fee_total;
-    default:
-      return termOption.fee_total;
-  }
+  return explicitFrequencyAmount(termOption, frequency) || termOption.fee_total;
 }
 
 /** 2-letter code for form + API; maps common full names / variants from saved client records. */
@@ -184,10 +151,17 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
     company_unit_number: "", company_address: "", company_city: "", company_state_region: "", company_postcode: "", company_country: defaultCountryCode,
   });
   const [companyAddressSameAsClient, setCompanyAddressSameAsClient] = useState(false);
-  const [payment, setPayment] = useState({
-    payment_method: inviteContext?.payment_method || defaultMethod,
-    payment_frequency: inviteContext?.payment_frequency || "monthly",
-    start_date: inviteContext?.start_date || new Date().toISOString().split("T")[0],
+  const [payment, setPayment] = useState(() => {
+    const enabled =
+      membership.enabled_payment_frequencies && membership.enabled_payment_frequencies.length > 0
+        ? membership.enabled_payment_frequencies
+        : (tenant.enabled_payment_frequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES);
+    return {
+      payment_method: inviteContext?.payment_method || defaultMethod,
+      payment_frequency:
+        inviteContext?.payment_frequency || defaultPaymentFrequencyForTerm(termOption, enabled),
+      start_date: inviteContext?.start_date || new Date().toISOString().split("T")[0],
+    };
   });
   const [bank, setBank] = useState({
     institution_name: "", branch_location: "",
@@ -328,7 +302,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
             ...member,
             country: coerceCountryDisplay(member.country, defaultCountryCode),
             company_country: askCo ? coerceCountryDisplay(member.company_country || member.country, defaultCountryCode) : member.company_country,
-            birth_date: member.birth_date ? member.birth_date + "T00:00:00Z" : null,
+            birth_date: tenant.ask_birth_date !== false && member.birth_date ? member.birth_date + "T00:00:00Z" : null,
           },
           invite_token: inviteContext?.token || undefined,
           membership_type_id: membership.id, term_option_id: termOption.id,
@@ -424,53 +398,27 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           </div>
           <div className="text-right">
             {(() => {
-              const mode = tenant.signup_price_display_mode || "total";
               const lockedFrequency = paymentFrequencyLocked ? String(payment.payment_frequency || "").toLowerCase() : "";
-              const toWeekly = (total: number, months: number) => months ? total / ((months * 52) / 12) : null;
-              const toFortnightly = (total: number, months: number) => {
-                const weekly = toWeekly(total, months);
-                return weekly ? weekly * 2 : null;
-              };
-              const toMonthly = (total: number, months: number) => months ? total / months : null;
-              const toQuarterly = (total: number, months: number) => months >= 3 ? total / (months / 3) : null;
+              const resolvedMode = effectiveSignupDisplayMode(tenant.signup_price_display_mode, termOption, {
+                lockedFrequency,
+                enabledPaymentFrequencies: effectiveEnabledPaymentFrequencies,
+              });
+              const amount = signupDisplayAmount(termOption, resolvedMode);
               const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-              const weeklyValue = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
-              const fortnightlyValue = termOption.fee_fortnightly || toFortnightly(termOption.fee_total, termOption.duration_months);
-              const monthlyValue = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
-              const quarterlyValue = (termOption as any).fee_quarterly || toQuarterly(termOption.fee_total, termOption.duration_months);
-              const resolvedMode = (() => {
-                // In invite finalisation with locked frequency, the summary must mirror the selected/locked cadence.
-                if (lockedFrequency === "weekly") return weeklyValue ? "weekly" : "total";
-                if (lockedFrequency === "fortnightly") return fortnightlyValue ? "fortnightly" : "total";
-                if (lockedFrequency === "monthly") return monthlyValue ? "monthly" : "total";
-                if (lockedFrequency === "quarterly") return quarterlyValue ? "quarterly" : "total";
-                if (lockedFrequency === "upfront") return "total";
-                if (lockedFrequency === "custom_schedule") return "custom_schedule";
-                if (mode === "weekly") return weeklyValue ? "weekly" : "total";
-                if (mode === "monthly") return monthlyValue ? "monthly" : "total";
-                return "total";
-              })();
-              if (resolvedMode === "weekly") {
-                const w = termOption.fee_weekly || toWeekly(termOption.fee_total, termOption.duration_months);
-                if (w) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(w)}</p><p className="text-[11px] text-gray-400">per week</p></>);
+              if (resolvedMode === "custom_schedule" && termOption.custom_schedule_label) {
+                return (
+                  <>
+                    <p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(amount)}</p>
+                    <p className="text-[11px] text-gray-400">{termOption.custom_schedule_label}</p>
+                  </>
+                );
               }
-              if (resolvedMode === "fortnightly") {
-                const f = termOption.fee_fortnightly || toFortnightly(termOption.fee_total, termOption.duration_months);
-                if (f) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(f)}</p><p className="text-[11px] text-gray-400">per fortnight</p></>);
-              }
-              if (resolvedMode === "monthly") {
-                const m = termOption.fee_monthly || toMonthly(termOption.fee_total, termOption.duration_months);
-                if (m) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(m)}</p><p className="text-[11px] text-gray-400">per month</p></>);
-              }
-              if (resolvedMode === "quarterly") {
-                const q = (termOption as any).fee_quarterly || toQuarterly(termOption.fee_total, termOption.duration_months);
-                if (q) return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(q)}</p><p className="text-[11px] text-gray-400">per quarter</p></>);
-              }
-              if (resolvedMode === "custom_schedule" && termOption.custom_schedule_enabled && termOption.custom_schedule_amount) {
-                const label = termOption.custom_schedule_label || "custom schedule";
-                return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(termOption.custom_schedule_amount)}</p><p className="text-[11px] text-gray-400">{label}</p></>);
-              }
-              return (<><p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${termOption.fee_total.toLocaleString()}</p><p className="text-[11px] text-gray-400">total contract</p></>);
+              return (
+                <>
+                  <p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(amount)}</p>
+                  <p className="text-[11px] text-gray-400">{signupPriceSuffix(resolvedMode)}</p>
+                </>
+              );
             })()}
           </div>
         </div>
@@ -507,6 +455,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
               googlePlacesApiKey={tenant.google_places_api_key}
               askEmergencyContact={tenant.ask_emergency_contact !== false}
               askCompanyInformation={tenant.ask_company_information === true}
+              askBirthDate={tenant.ask_birth_date !== false}
               companyAddressSameAsClient={companyAddressSameAsClient}
               onCompanyAddressSameAsClientChange={setCompanyAddressSameAsClient}
               onNext={() => setFormStep("payment")}
@@ -608,13 +557,14 @@ function NavButtons({ onBack, onNext, nextLabel, isSubmit, disabled }: { onBack?
 }
 
 /* ─── Section A: Member Details ─── */
-function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergencyContact, askCompanyInformation, companyAddressSameAsClient, onCompanyAddressSameAsClientChange }: {
+function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergencyContact, askCompanyInformation, askBirthDate, companyAddressSameAsClient, onCompanyAddressSameAsClientChange }: {
   data: Record<string, string>;
   onChange: (d: Record<string, string>) => void;
   onNext: () => void;
   googlePlacesApiKey?: string;
   askEmergencyContact: boolean;
   askCompanyInformation: boolean;
+  askBirthDate: boolean;
   companyAddressSameAsClient: boolean;
   onCompanyAddressSameAsClientChange: (next: boolean) => void;
 }) {
@@ -681,7 +631,9 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
         <Field label="Country" required><input value={data.country} onChange={(e) => set("country", e.target.value.toUpperCase())} className={inputCls} placeholder="AU or US" required maxLength={2} /></Field>
         <Field label="Email" required><input type="email" value={data.email} onChange={(e) => set("email", e.target.value)} className={inputCls} placeholder="john@example.com" required /></Field>
         <Field label="Phone" required><input type="tel" value={data.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="0400 000 000" required /></Field>
-        <Field label="Date of Birth"><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} /></Field>
+        {askBirthDate && (
+          <Field label="Date of Birth"><input type="date" value={data.birth_date} onChange={(e) => set("birth_date", e.target.value)} className={inputCls} /></Field>
+        )}
         <Field label="Gender" required>
           <div className="flex gap-4 mt-1">
             {["Female", "Male"].map((g) => (
@@ -819,20 +771,20 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
 
-  const weeklyAmount = positiveNumber(termOption.fee_weekly) || fallbackWeeklyAmount(termOption);
-  const fortnightlyAmount = positiveNumber(termOption.fee_fortnightly) || fallbackFortnightlyAmount(termOption);
-  const monthlyAmount = positiveNumber(termOption.fee_monthly) || fallbackMonthlyAmount(termOption);
-  const quarterlyAmount = positiveNumber((termOption as any).fee_quarterly) || fallbackQuarterlyAmount(termOption);
+  const weeklyAmount = explicitFrequencyAmount(termOption, "weekly");
+  const fortnightlyAmount = explicitFrequencyAmount(termOption, "fortnightly");
+  const monthlyAmount = explicitFrequencyAmount(termOption, "monthly");
+  const quarterlyAmount = explicitFrequencyAmount(termOption, "quarterly");
   const enabledSet = new Set(
     (enabledPaymentFrequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES).map((f) => String(f).toLowerCase())
   );
 
   const frequencies = [
-    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termOption.allow_upfront, amount: positiveNumber(termOption.fee_total) },
-    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: !!weeklyAmount, amount: weeklyAmount },
-    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: !!fortnightlyAmount, amount: fortnightlyAmount },
-    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: !!monthlyAmount, amount: monthlyAmount },
-    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: !!quarterlyAmount, amount: quarterlyAmount },
+    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termHasExplicitFee(termOption, "upfront"), amount: explicitFrequencyAmount(termOption, "upfront") },
+    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "weekly"), amount: weeklyAmount },
+    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "fortnightly"), amount: fortnightlyAmount },
+    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "monthly"), amount: monthlyAmount },
+    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "quarterly"), amount: quarterlyAmount },
     {
       value: "custom_schedule",
       label: termOption.custom_schedule_label || `${termOption.custom_schedule_num_payments || 0} instalments`,
@@ -840,8 +792,8 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         ? `${termOption.custom_schedule_num_payments || 0} payments every ${termOption.custom_schedule_interval_count} ${termOption.custom_schedule_interval_unit}${termOption.custom_schedule_interval_count === 1 ? "" : "s"}`
         : "Custom instalment plan",
       icon: "📆",
-      enabled: !!termOption.custom_schedule_enabled && !!termOption.custom_schedule_amount,
-      amount: termOption.custom_schedule_amount,
+      enabled: termHasExplicitFee(termOption, "custom_schedule"),
+      amount: explicitFrequencyAmount(termOption, "custom_schedule"),
     },
   ].filter((f) => f.enabled && enabledSet.has(f.value));
 
@@ -1040,8 +992,8 @@ function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
               {t.version > 1 && <span className="text-[11px] text-gray-400 ml-2">v{t.version}</span>}
             </div>
             <div
-              className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap break-words tc-content"
-              dangerouslySetInnerHTML={{ __html: t.content }}
+              className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed break-words tc-content"
+              dangerouslySetInnerHTML={{ __html: formatTermsContentForDisplay(t.content) }}
             />
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
               <label className="flex items-start gap-3 cursor-pointer">

@@ -1,4 +1,4 @@
-import { fmtMoney } from "../../utils/paymentLabels";
+import { fmtMoney, paymentRetryStatusLabel, type PaymentRetryLike } from "../../utils/paymentLabels";
 
 /** Snapshot merged from Stripe webhooks (invoice, payment_intent, charge). */
 export type StripeDetailsRecord = Record<string, string | number | boolean | undefined>;
@@ -46,6 +46,7 @@ interface Props {
   currencyCode?: string;
   amount?: number;
   status?: string;
+  retryCount?: number;
   clientName?: string;
   clientEmail?: string;
 }
@@ -57,12 +58,20 @@ export default function StripeTransactionPanel({
   stripeDetails,
   currencyCode = "AUD",
   amount,
-  status,
+  status = "",
+  retryCount,
   clientName,
   clientEmail,
 }: Props) {
   const s = parseStripeDetails(stripeDetails);
   if (!s) return null;
+
+  const retryLabel = paymentRetryStatusLabel({
+    amount: amount ?? 0,
+    status,
+    retry_count: retryCount,
+    stripe_details: s,
+  } as PaymentRetryLike);
 
   const cur = (s.currency as string) || currencyCode.toLowerCase();
   const piStatus = String(s.payment_intent_status || "");
@@ -128,6 +137,8 @@ export default function StripeTransactionPanel({
           <p className="text-[12px] text-gray-800">{desc}</p>
         </div>
       )}
+
+      {retryLabel && <p className="text-[12px] text-red-600 mb-4">{retryLabel}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         {(s.stripe_invoice_status || s.payment_intent_status || s.stripe_charge_status) && (

@@ -87,8 +87,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event Event) {
 	}
 }
 
-// DeliveryJob represents a queued webhook delivery.
+	// DeliveryJob represents a queued webhook delivery.
 type DeliveryJob struct {
+	DeliveryKind    string `json:"delivery_kind,omitempty"` // "signup" or empty for endpoint webhooks
+	DeliveryID      string `json:"delivery_id,omitempty"`
 	EndpointID      string `json:"endpoint_id"`
 	TenantID        string `json:"tenant_id"`
 	URL             string `json:"url"`

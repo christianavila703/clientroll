@@ -11,6 +11,13 @@ export type PaymentLike = {
   currency_code?: string;
 };
 
+export type PaymentRetryLike = PaymentLike & {
+  status: string;
+  retry_count?: number;
+  payment_method?: string;
+  stripe_details?: Record<string, string | number | boolean | undefined> | null;
+};
+
 export function fmtMoney(value: number): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -47,6 +54,82 @@ export function shouldShowPaymentSplit(p: PaymentLike): boolean {
 }
 
 /** Same gross-up as server signup (card 1.75%+30c, BECS 1%+30c capped) */
+function parseStripeNextPaymentAttempt(raw: unknown): Date | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const d = new Date(String(raw));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function failedAttemptCount(p: PaymentRetryLike): number {
+  const stripeAttempts = p.stripe_details?.stripe_attempt_count;
+  if (typeof stripeAttempts === "number" && stripeAttempts > 0) return stripeAttempts;
+  return p.retry_count ?? 0;
+}
+
+function stripeInvoiceStatus(p: PaymentRetryLike): string {
+  return String(p.stripe_details?.stripe_invoice_status ?? "").toLowerCase();
+}
+
+/** Strip legacy UI suffixes if ever stored on failure_reason. */
+export function normalizeFailureReason(reason?: string | null): string {
+  if (!reason) return "";
+  return reason.replace(/\s*\(\d+\s+retries?\)\s*$/i, "").trim();
+}
+
+/**
+ * Whether Stripe is expected to charge again (card / BECS subscription invoices).
+ * Returns null when we cannot tell from stored data.
+ */
+export function paymentRetryStatusLabel(p: PaymentRetryLike): string | null {
+  if (p.status !== "failed") return null;
+  const attempts = failedAttemptCount(p);
+  if (attempts <= 0) return null;
+
+  const attemptPhrase =
+    attempts === 1 ? "1 failed charge so far" : `${attempts} failed charges so far`;
+
+  const nextRetry = parseStripeNextPaymentAttempt(p.stripe_details?.stripe_next_payment_attempt);
+  if (nextRetry && nextRetry.getTime() > Date.now()) {
+    const when = nextRetry.toLocaleString("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${attemptPhrase} — Stripe will try again on ${when}`;
+  }
+
+  const hasStripeSchedule =
+    p.stripe_details?.stripe_next_payment_attempt !== undefined ||
+    typeof p.stripe_details?.stripe_attempt_count === "number";
+  if (hasStripeSchedule) {
+    return `${attemptPhrase} — Stripe will not try again automatically`;
+  }
+
+  const invStatus = stripeInvoiceStatus(p);
+  if (invStatus === "open") {
+    return `${attemptPhrase} — Stripe may still try again (invoice still open)`;
+  }
+  if (invStatus === "uncollectible" || invStatus === "void") {
+    return `${attemptPhrase} — Stripe will not try again automatically`;
+  }
+
+  return `${attemptPhrase} — use Show details to see if Stripe will try again`;
+}
+
+/** Single failed-payment line for lists (replaces ambiguous “(N retries)”). */
+export function formatFailedPaymentMessage(p: PaymentRetryLike): string {
+  const reason = normalizeFailureReason(
+    typeof p.failure_reason === "string" ? p.failure_reason : undefined,
+  );
+  const retry = paymentRetryStatusLabel(p);
+  if (!reason && !retry) return "Payment failed";
+  if (!retry) return reason ? `Payment failed: ${reason}` : "Payment failed";
+  if (!reason) return `Payment failed — ${retry}`;
+  return `Payment failed: ${reason} — ${retry}`;
+}
+
 export function estimateStripeProcessingFeeCents(baseCents: number, method: "card" | "direct_debit"): number {
   const base = Math.max(0, Math.round(baseCents));
   if (method === "direct_debit") {

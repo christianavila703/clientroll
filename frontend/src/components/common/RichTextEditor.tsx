@@ -4,7 +4,8 @@ import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { looksLikeTermsHtml, plainTextToTermsHtml } from "../../utils/termsContent";
 
 interface Props {
   content: string;
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export default function RichTextEditor({ content, onChange, placeholder = "Start typing...", onReady }: Props) {
+  const editorRef = useRef<Editor | null>(null);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -25,20 +28,47 @@ export default function RichTextEditor({ content, onChange, placeholder = "Start
       Placeholder.configure({ placeholder }),
     ],
     content,
-    onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+    onUpdate: ({ editor: ed }) => {
+      onChange(ed.getHTML());
+    },
+    onCreate: ({ editor: ed }) => {
+      editorRef.current = ed;
     },
     editorProps: {
       attributes: {
-        class: "prose prose-sm max-w-none px-4 py-3 min-h-[300px] focus:outline-none text-gray-900",
+        class: "ProseMirror px-4 py-3 min-h-[300px] focus:outline-none text-gray-900",
+      },
+      handlePaste: (_view, event) => {
+        const clipboard = event.clipboardData;
+        if (!clipboard) return false;
+
+        const html = clipboard.getData("text/html")?.trim();
+        const text = clipboard.getData("text/plain");
+        if (html || !text) return false;
+
+        // Plain-text paste: preserve paragraph and line breaks instead of one blob.
+        event.preventDefault();
+        const ed = editorRef.current;
+        if (!ed) return true;
+        ed.chain().focus().insertContent(plainTextToTermsHtml(text)).run();
+        return true;
+      },
+      transformPastedHTML(html) {
+        // Word/Google often wrap everything in spans; keep structure but drop noisy styles.
+        return html
+          .replace(/<!--[\s\S]*?-->/g, "")
+          .replace(/\sclass="[^"]*"/gi, "")
+          .replace(/\sstyle="[^"]*"/gi, "");
       },
     },
   });
 
-  // Sync external content changes
+  // Sync external content changes (normalize legacy plain-text documents for editing).
   useEffect(() => {
-    if (editor && content && editor.getHTML() !== content && !editor.isFocused) {
-      editor.commands.setContent(content);
+    if (!editor) return;
+    const normalized = looksLikeTermsHtml(content) ? content : plainTextToTermsHtml(content);
+    if (normalized && editor.getHTML() !== normalized && !editor.isFocused) {
+      editor.commands.setContent(normalized);
     }
   }, [content, editor]);
 

@@ -164,6 +164,11 @@ export const api = {
   getTenantSettings: () => request("/tenant/settings/tenant"),
   updateTenantSettings: (data: unknown) =>
     request("/tenant/settings/tenant", { method: "PUT", body: data }),
+  testSignupWebhook: () =>
+    request<{ http_status: number; response_body: string; success: boolean }>(
+      "/tenant/settings/signup-webhook/test",
+      { method: "POST" }
+    ),
   getEmailTemplates: () =>
     request<{ templates: EmailTemplateConfig[] }>("/tenant/settings/email-templates"),
   updateEmailTemplate: (

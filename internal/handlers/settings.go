@@ -12,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"clientroll/internal/database"
+	"clientroll/internal/config"
 	"clientroll/internal/email"
+	"clientroll/internal/events"
 	"clientroll/internal/middleware"
 	"clientroll/internal/models"
 	"clientroll/internal/repository"
@@ -46,11 +49,20 @@ type SettingsHandler struct {
 	settingsRepo      *repository.SettingsRepo
 	tenantRepo        *repository.TenantRepo
 	emailTemplateRepo *repository.TenantEmailTemplateRepo
+	encryptor         *database.Encryptor
+	signupWebhookSvc  *events.SignupWebhookService
+	cfg               *config.Config
 }
 
 // NewSettingsHandler creates a new settings handler.
 func NewSettingsHandler(sr *repository.SettingsRepo, tr *repository.TenantRepo, etr *repository.TenantEmailTemplateRepo) *SettingsHandler {
 	return &SettingsHandler{settingsRepo: sr, tenantRepo: tr, emailTemplateRepo: etr}
+}
+
+func (h *SettingsHandler) SetSignupWebhookSupport(enc *database.Encryptor, svc *events.SignupWebhookService, cfg *config.Config) {
+	h.encryptor = enc
+	h.signupWebhookSvc = svc
+	h.cfg = cfg
 }
 
 // RegisterRoutes registers settings routes.
@@ -60,6 +72,7 @@ func (h *SettingsHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/settings/business-lookup", h.LookupBusiness)
 	r.Get("/settings/tenant", h.GetTenantSettings)
 	r.Put("/settings/tenant", h.UpdateTenantSettings)
+	r.Post("/settings/signup-webhook/test", h.TestSignupWebhook)
 	r.Get("/settings/email-templates", h.ListEmailTemplates)
 	r.Put("/settings/email-templates/{templateKey}", h.UpdateEmailTemplate)
 	r.Put("/settings/email-templates/category/{category}/toggle-all", h.ToggleEmailTemplatesByCategory)
@@ -269,6 +282,52 @@ func (h *SettingsHandler) UpdateAgreementSettings(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, settings)
 }
 
+func tenantSettingsResponse(tenant *models.Tenant) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                            tenant.ID,
+		"name":                          tenant.Name,
+		"slug":                          tenant.Slug,
+		"timezone":                      tenant.Timezone,
+		"sales_tax_name":                tenant.SalesTaxName,
+		"sales_tax_percent":             tenant.SalesTaxPercent,
+		"enabled_currencies":            tenant.EnabledCurrencies,
+		"enabled_payment_frequencies":   tenant.EnabledPaymentFrequencies,
+		"ask_emergency_contact":         tenant.AskEmergencyContact,
+		"ask_company_information":       tenant.AskCompanyInformation,
+		"ask_birth_date":                tenant.AskBirthDate,
+		"signup_webhook_url":            tenant.SignupWebhookURL,
+		"signup_webhook_enabled":        tenant.SignupWebhookEnabled,
+		"signup_webhook_has_secret":     strings.TrimSpace(tenant.SignupWebhookSecretEncrypted) != "",
+		"is_active":                     tenant.IsActive,
+		"logo_url":                      tenant.LogoURL,
+		"primary_colour":                tenant.PrimaryColour,
+		"secondary_colour":              tenant.SecondaryColour,
+		"signup_price_display_mode":     tenant.SignupPriceDisplayMode,
+		"default_thankyou_heading":      tenant.DefaultThankyouHeading,
+		"default_thankyou_body":         tenant.DefaultThankyouBody,
+		"default_thankyou_image_url":    tenant.DefaultThankyouImageURL,
+		"default_thankyou_redirect_url": tenant.DefaultThankyouRedirectURL,
+		"setup_completed_at":            tenant.SetupCompletedAt,
+		"created_at":                    tenant.CreatedAt,
+		"updated_at":                    tenant.UpdatedAt,
+	}
+}
+
+func validateSignupWebhookURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("signup_webhook_url must be a valid absolute URL")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return "", fmt.Errorf("signup_webhook_url must use http or https")
+	}
+	return trimmed, nil
+}
+
 // GetTenantSettings returns the tenant's own configuration.
 func (h *SettingsHandler) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
@@ -283,7 +342,7 @@ func (h *SettingsHandler) GetTenantSettings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tenant)
+	writeJSON(w, http.StatusOK, tenantSettingsResponse(tenant))
 }
 
 // UpdateTenantSettings updates the tenant's own configuration.
@@ -301,22 +360,26 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	var input struct {
-		Timezone                   *string  `json:"timezone,omitempty"`
-		Slug                       *string  `json:"slug,omitempty"`
-		SalesTaxName               *string  `json:"sales_tax_name,omitempty"`
-		SalesTaxPercent            *float64 `json:"sales_tax_percent,omitempty"`
-		EnabledCurrencies          []string `json:"enabled_currencies,omitempty"`
-		EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
-		AskEmergencyContact        *bool    `json:"ask_emergency_contact,omitempty"`
-		AskCompanyInformation      *bool    `json:"ask_company_information,omitempty"`
-		PrimaryColour              *string  `json:"primary_colour,omitempty"`
-		SecondaryColour            *string  `json:"secondary_colour,omitempty"`
-		SignupPriceDisplayMode     *string  `json:"signup_price_display_mode,omitempty"`
-		LogoURL                    *string  `json:"logo_url,omitempty"`
-		DefaultThankyouHeading     *string  `json:"default_thankyou_heading,omitempty"`
-		DefaultThankyouBody        *string  `json:"default_thankyou_body,omitempty"`
-		DefaultThankyouImageURL    *string  `json:"default_thankyou_image_url,omitempty"`
-		DefaultThankyouRedirectURL *string  `json:"default_thankyou_redirect_url,omitempty"`
+		Timezone                         *string  `json:"timezone,omitempty"`
+		Slug                             *string  `json:"slug,omitempty"`
+		SalesTaxName                     *string  `json:"sales_tax_name,omitempty"`
+		SalesTaxPercent                  *float64 `json:"sales_tax_percent,omitempty"`
+		EnabledCurrencies                []string `json:"enabled_currencies,omitempty"`
+		EnabledPaymentFrequencies        []string `json:"enabled_payment_frequencies,omitempty"`
+		AskEmergencyContact              *bool    `json:"ask_emergency_contact,omitempty"`
+		AskCompanyInformation            *bool    `json:"ask_company_information,omitempty"`
+		AskBirthDate                     *bool    `json:"ask_birth_date,omitempty"`
+		SignupWebhookURL                 *string  `json:"signup_webhook_url,omitempty"`
+		SignupWebhookEnabled             *bool    `json:"signup_webhook_enabled,omitempty"`
+		RegenerateSignupWebhookSecret    *bool    `json:"regenerate_signup_webhook_secret,omitempty"`
+		PrimaryColour                    *string  `json:"primary_colour,omitempty"`
+		SecondaryColour                  *string  `json:"secondary_colour,omitempty"`
+		SignupPriceDisplayMode           *string  `json:"signup_price_display_mode,omitempty"`
+		LogoURL                          *string  `json:"logo_url,omitempty"`
+		DefaultThankyouHeading           *string  `json:"default_thankyou_heading,omitempty"`
+		DefaultThankyouBody              *string  `json:"default_thankyou_body,omitempty"`
+		DefaultThankyouImageURL          *string  `json:"default_thankyou_image_url,omitempty"`
+		DefaultThankyouRedirectURL       *string  `json:"default_thankyou_redirect_url,omitempty"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -422,23 +485,99 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	var nextSignupWebhookURL *string
+	var nextSignupWebhookEnabled *bool
+	var nextSignupWebhookSecret *string
+	var plainSignupWebhookSecret string
+
+	if input.SignupWebhookURL != nil || input.SignupWebhookEnabled != nil || input.RegenerateSignupWebhookSecret != nil {
+		if h.encryptor == nil {
+			writeError(w, http.StatusInternalServerError, "Signup webhook settings unavailable")
+			return
+		}
+		current, err := h.tenantRepo.FindByID(r.Context(), tenantID)
+		if err != nil || current == nil {
+			writeError(w, http.StatusNotFound, "Tenant not found")
+			return
+		}
+
+		currentURL := ""
+		if current.SignupWebhookURL != nil {
+			currentURL = strings.TrimSpace(*current.SignupWebhookURL)
+		}
+		hasSecret := strings.TrimSpace(current.SignupWebhookSecretEncrypted) != ""
+
+		if input.SignupWebhookURL != nil {
+			normalized, err := validateSignupWebhookURL(*input.SignupWebhookURL)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if normalized == "" {
+				empty := ""
+				nextSignupWebhookURL = &empty
+				disabled := false
+				nextSignupWebhookEnabled = &disabled
+				emptySecret := ""
+				nextSignupWebhookSecret = &emptySecret
+			} else {
+				nextSignupWebhookURL = &normalized
+			}
+		}
+		if input.SignupWebhookEnabled != nil {
+			enabled := *input.SignupWebhookEnabled
+			nextSignupWebhookEnabled = &enabled
+		}
+
+		urlAfter := currentURL
+		if nextSignupWebhookURL != nil {
+			urlAfter = strings.TrimSpace(*nextSignupWebhookURL)
+		}
+		enabledAfter := current.SignupWebhookEnabled
+		if nextSignupWebhookEnabled != nil {
+			enabledAfter = *nextSignupWebhookEnabled
+		}
+		if enabledAfter && urlAfter == "" {
+			writeError(w, http.StatusBadRequest, "signup_webhook_url is required when signup webhook is enabled")
+			return
+		}
+
+		regenerate := input.RegenerateSignupWebhookSecret != nil && *input.RegenerateSignupWebhookSecret
+		needsSecret := urlAfter != "" && enabledAfter && (!hasSecret || regenerate || (nextSignupWebhookURL != nil && urlAfter != currentURL))
+		if needsSecret {
+			secret := events.GenerateWebhookSecret()
+			encrypted, err := h.encryptor.Encrypt(secret)
+			if err != nil {
+				log.Printf("Error encrypting signup webhook secret: %v", err)
+				writeError(w, http.StatusInternalServerError, "Failed to save signup webhook settings")
+				return
+			}
+			nextSignupWebhookSecret = &encrypted
+			plainSignupWebhookSecret = secret
+		}
+	}
+
 	updateInput := models.UpdateTenantInput{
-		Timezone:                   input.Timezone,
-		Slug:                       nextSlug,
-		SalesTaxName:               nextSalesTaxName,
-		SalesTaxPercent:            nextSalesTaxPercent,
-		EnabledCurrencies:          nextEnabledCurrencies,
-		EnabledPaymentFrequencies:  nextEnabledPaymentFrequencies,
-		AskEmergencyContact:        input.AskEmergencyContact,
-		AskCompanyInformation:      input.AskCompanyInformation,
-		PrimaryColour:              input.PrimaryColour,
-		SecondaryColour:            input.SecondaryColour,
-		SignupPriceDisplayMode:     nextDisplayMode,
-		LogoURL:                    input.LogoURL,
-		DefaultThankyouHeading:     input.DefaultThankyouHeading,
-		DefaultThankyouBody:        input.DefaultThankyouBody,
-		DefaultThankyouImageURL:    input.DefaultThankyouImageURL,
-		DefaultThankyouRedirectURL: input.DefaultThankyouRedirectURL,
+		Timezone:                     input.Timezone,
+		Slug:                         nextSlug,
+		SalesTaxName:                 nextSalesTaxName,
+		SalesTaxPercent:              nextSalesTaxPercent,
+		EnabledCurrencies:            nextEnabledCurrencies,
+		EnabledPaymentFrequencies:    nextEnabledPaymentFrequencies,
+		AskEmergencyContact:          input.AskEmergencyContact,
+		AskCompanyInformation:        input.AskCompanyInformation,
+		AskBirthDate:                 input.AskBirthDate,
+		SignupWebhookURL:             nextSignupWebhookURL,
+		SignupWebhookEnabled:         nextSignupWebhookEnabled,
+		SignupWebhookSecretEncrypted: nextSignupWebhookSecret,
+		PrimaryColour:                input.PrimaryColour,
+		SecondaryColour:              input.SecondaryColour,
+		SignupPriceDisplayMode:       nextDisplayMode,
+		LogoURL:                      input.LogoURL,
+		DefaultThankyouHeading:       input.DefaultThankyouHeading,
+		DefaultThankyouBody:          input.DefaultThankyouBody,
+		DefaultThankyouImageURL:      input.DefaultThankyouImageURL,
+		DefaultThankyouRedirectURL:   input.DefaultThankyouRedirectURL,
 	}
 
 	tenant, err := h.tenantRepo.Update(r.Context(), tenantID, updateInput)
@@ -448,7 +587,59 @@ func (h *SettingsHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tenant)
+	resp := tenantSettingsResponse(tenant)
+	if plainSignupWebhookSecret != "" {
+		resp["signup_webhook_signing_secret"] = plainSignupWebhookSecret
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// TestSignupWebhook sends a sample signup.completed payload to the configured destination.
+func (h *SettingsHandler) TestSignupWebhook(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := uuid.Parse(middleware.GetTenantID(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tenant context")
+		return
+	}
+	if middleware.GetRole(r.Context()) != "tenant_admin" {
+		writeError(w, http.StatusForbidden, "Only tenant admins can test signup webhooks")
+		return
+	}
+	if h.signupWebhookSvc == nil || h.encryptor == nil {
+		writeError(w, http.StatusInternalServerError, "Signup webhook test unavailable")
+		return
+	}
+
+	tenant, err := h.tenantRepo.FindByID(r.Context(), tenantID)
+	if err != nil || tenant == nil {
+		writeError(w, http.StatusNotFound, "Tenant not found")
+		return
+	}
+	if tenant.SignupWebhookURL == nil || strings.TrimSpace(*tenant.SignupWebhookURL) == "" {
+		writeError(w, http.StatusBadRequest, "Configure a signup webhook URL before testing")
+		return
+	}
+	if strings.TrimSpace(tenant.SignupWebhookSecretEncrypted) == "" {
+		writeError(w, http.StatusBadRequest, "Signup webhook signing secret is missing — save settings to generate one")
+		return
+	}
+
+	appURL := "https://app.clientroll.com"
+	if h.cfg != nil && strings.TrimSpace(h.cfg.AppURL) != "" {
+		appURL = strings.TrimSpace(h.cfg.AppURL)
+	}
+
+	httpStatus, responseBody, err := h.signupWebhookSvc.SendTest(r.Context(), tenant, appURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"http_status":    httpStatus,
+		"response_body":  responseBody,
+		"success":        httpStatus >= 200 && httpStatus < 300,
+	})
 }
 
 // CompleteSetup marks the tenant's onboarding wizard as done.

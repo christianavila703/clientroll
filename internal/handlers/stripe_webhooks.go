@@ -43,6 +43,9 @@ type StripeWebhookHandler struct {
 	xeroSync    *xerosync.Service
 	ownerAlerts *observability.OwnerAlertService
 
+	signupWebhookSvc *events.SignupWebhookService
+	appURL           string
+
 	clientRepo        *repository.ClientRepo
 	mtRepo            *repository.MembershipTypeRepo
 	emailSvc          email.Provider
@@ -81,6 +84,23 @@ func NewStripeWebhookHandler(
 // SetDispatcher sets optional outbound webhook event dispatcher.
 func (h *StripeWebhookHandler) SetDispatcher(dispatcher *events.Dispatcher) {
 	h.dispatcher = dispatcher
+}
+
+// SetSignupWebhookService wires signup completion webhooks for Stripe checkout flows.
+func (h *StripeWebhookHandler) SetSignupWebhookService(svc *events.SignupWebhookService, appURL string) {
+	h.signupWebhookSvc = svc
+	h.appURL = strings.TrimSpace(appURL)
+}
+
+func (h *StripeWebhookHandler) notifySignupCompleted(ctx context.Context, tenantID, membershipID uuid.UUID) {
+	if h.signupWebhookSvc == nil {
+		return
+	}
+	appURL := h.appURL
+	if appURL == "" {
+		appURL = "https://app.clientroll.com"
+	}
+	h.signupWebhookSvc.NotifyCompleted(ctx, tenantID, membershipID, appURL)
 }
 
 // SetOwnerAlerts sets optional owner alert service for immediate payment failure emails.
@@ -689,6 +709,7 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 						log.Printf("stripe checkout.subscription membership sync tenant=%s membership=%s err=%v", tenantID, mid, err)
 					} else {
 						h.markSignupInviteCompletedFromMetadata(ctx, metadata)
+						h.notifySignupCompleted(ctx, tenantID, mid)
 					}
 				}
 			}
@@ -729,6 +750,7 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 		log.Printf("stripe membership status sync failed tenant=%s membership=%s err=%v", tenantID, membershipID, err)
 	} else {
 		h.markSignupInviteCompletedFromMetadata(ctx, metadata)
+		h.notifySignupCompleted(ctx, tenantID, membershipID)
 	}
 	if h.dispatcher != nil {
 		h.dispatcher.Dispatch(ctx, events.NewEvent(events.PaymentSucceeded, tenantID, map[string]interface{}{

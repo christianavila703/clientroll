@@ -57,7 +57,24 @@ type SignupHandler struct {
 	encryptor         *database.Encryptor
 	emailSvc          email.Provider
 	dispatcher        *events.Dispatcher
+	signupWebhookSvc  *events.SignupWebhookService
 	cfg               *config.Config
+}
+
+// SetSignupWebhookService wires optional signup completion webhooks.
+func (h *SignupHandler) SetSignupWebhookService(svc *events.SignupWebhookService) {
+	h.signupWebhookSvc = svc
+}
+
+func (h *SignupHandler) notifySignupCompleted(ctx context.Context, tenantID, membershipID uuid.UUID) {
+	if h.signupWebhookSvc == nil {
+		return
+	}
+	appURL := "https://app.clientroll.com"
+	if h.cfg != nil && strings.TrimSpace(h.cfg.AppURL) != "" {
+		appURL = strings.TrimSpace(h.cfg.AppURL)
+	}
+	h.signupWebhookSvc.NotifyCompleted(ctx, tenantID, membershipID, appURL)
 }
 
 // NewSignupHandler creates a new signup handler.
@@ -156,6 +173,7 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
 			"ask_emergency_contact":       tenant.AskEmergencyContact,
 			"ask_company_information":     tenant.AskCompanyInformation,
+			"ask_birth_date":              tenant.AskBirthDate,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		"memberships":       active,
@@ -216,6 +234,7 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"enabled_payment_frequencies": tenant.EnabledPaymentFrequencies,
 			"ask_emergency_contact":       tenant.AskEmergencyContact,
 			"ask_company_information":     tenant.AskCompanyInformation,
+			"ask_birth_date":              tenant.AskBirthDate,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
 		Terms:            terms,
@@ -526,6 +545,9 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Please complete all required client details: "+strings.Join(missing, ", "))
 			return
 		}
+		if !tenant.AskBirthDate {
+			input.Client.BirthDate = nil
+		}
 	}
 	if input.PaymentMethod == "" {
 		input.PaymentMethod = "direct_debit"
@@ -705,6 +727,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			}
 			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
 			markInviteCompleted()
+			h.notifySignupCompleted(r.Context(), tenant.ID, membership.ID)
 			mt := mtForCreate
 			thankyou := buildThankyouResponse(tenant, mt)
 			writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -785,6 +808,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			}
 			h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
 			markInviteCompleted()
+			h.notifySignupCompleted(r.Context(), tenant.ID, membership.ID)
 			mt := mtForCreate
 			thankyou := buildThankyouResponse(tenant, mt)
 			writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -825,6 +849,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	// Create agreement snapshot for legal custody
 	snapshotID := h.createAgreementSnapshot(r, tenant, client, membership, input, mtID, toID)
 	markInviteCompleted()
+	h.notifySignupCompleted(r.Context(), tenant.ID, membership.ID)
 
 	// Send membership confirmation email to client (async)
 	if client.Email != nil && *client.Email != "" && mt != nil {
@@ -1314,6 +1339,7 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 			"enabled_payment_frequencies":   tenant.EnabledPaymentFrequencies,
 			"ask_emergency_contact":         tenant.AskEmergencyContact,
 			"ask_company_information":       tenant.AskCompanyInformation,
+			"ask_birth_date":                tenant.AskBirthDate,
 			"google_places_api_key":         h.googlePlacesAPIKey(r.Context()),
 		},
 		Terms: terms,
@@ -1960,7 +1986,9 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	}
 	if stripeCustomerID != "" {
 		params.Customer = stripe.String(stripeCustomerID)
-		params.PaymentMethodCollection = stripe.String("if_required")
+		if mode == stripe.CheckoutSessionModeSubscription {
+			params.PaymentMethodCollection = stripe.String("if_required")
+		}
 	}
 	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
 		pmID := strings.TrimSpace(paymentMethodID)
@@ -2194,7 +2222,9 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	}
 	if stripeCustomerID != "" {
 		params.Customer = stripe.String(stripeCustomerID)
-		params.PaymentMethodCollection = stripe.String("if_required")
+		if mode == stripe.CheckoutSessionModeSubscription {
+			params.PaymentMethodCollection = stripe.String("if_required")
+		}
 	}
 	if strings.TrimSpace(paymentMethodID) != "" && stripeCustomerID != "" {
 		pmID := strings.TrimSpace(paymentMethodID)

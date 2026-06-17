@@ -18,6 +18,10 @@ type Tenant struct {
 	EnabledPaymentFrequencies  []string   `json:"enabled_payment_frequencies"`
 	AskEmergencyContact        bool       `json:"ask_emergency_contact"`
 	AskCompanyInformation      bool       `json:"ask_company_information"`
+	AskBirthDate               bool       `json:"ask_birth_date"`
+	SignupWebhookURL           *string    `json:"signup_webhook_url"`
+	SignupWebhookEnabled       bool       `json:"signup_webhook_enabled"`
+	SignupWebhookSecretEncrypted string   `json:"-"`
 	IsActive                   bool       `json:"is_active"`
 	LogoURL                    *string    `json:"logo_url"`
 	PrimaryColour              string     `json:"primary_colour"`
@@ -50,6 +54,10 @@ type UpdateTenantInput struct {
 	EnabledPaymentFrequencies  []string `json:"enabled_payment_frequencies,omitempty"`
 	AskEmergencyContact        *bool    `json:"ask_emergency_contact,omitempty"`
 	AskCompanyInformation      *bool    `json:"ask_company_information,omitempty"`
+	AskBirthDate                 *bool    `json:"ask_birth_date,omitempty"`
+	SignupWebhookURL             *string  `json:"signup_webhook_url,omitempty"`
+	SignupWebhookEnabled         *bool    `json:"signup_webhook_enabled,omitempty"`
+	SignupWebhookSecretEncrypted   *string  `json:"-"`
 	IsActive                   *bool    `json:"is_active,omitempty"`
 	PrimaryColour              *string  `json:"primary_colour,omitempty"`
 	SecondaryColour            *string  `json:"secondary_colour,omitempty"`

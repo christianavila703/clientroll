@@ -8,6 +8,7 @@ export interface TenantBranding {
   enabled_payment_frequencies?: string[];
   ask_emergency_contact?: boolean;
   ask_company_information?: boolean;
+  ask_birth_date?: boolean;
   google_places_api_key?: string;
   payment_providers?: string[];
 }

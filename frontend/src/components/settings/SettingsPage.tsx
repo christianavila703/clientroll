@@ -202,6 +202,10 @@ function TenantSettings() {
     enabled_payment_frequencies: string[];
     ask_emergency_contact: boolean;
     ask_company_information: boolean;
+    ask_birth_date: boolean;
+    signup_webhook_url: string;
+    signup_webhook_enabled: boolean;
+    signup_webhook_has_secret: boolean;
   }>({
     slug: "",
     timezone: "Australia/Brisbane",
@@ -219,7 +223,14 @@ function TenantSettings() {
     enabled_payment_frequencies: ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
     ask_emergency_contact: true,
     ask_company_information: false,
+    ask_birth_date: true,
+    signup_webhook_url: "",
+    signup_webhook_enabled: false,
+    signup_webhook_has_secret: false,
   });
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookTestMessage, setWebhookTestMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [detectingColors, setDetectingColors] = useState(false);
@@ -250,6 +261,10 @@ function TenantSettings() {
           : ["upfront", "weekly", "fortnightly", "monthly", "quarterly", "custom_schedule"],
         ask_emergency_contact: t.ask_emergency_contact !== false,
         ask_company_information: t.ask_company_information === true,
+        ask_birth_date: t.ask_birth_date !== false,
+        signup_webhook_url: String(t.signup_webhook_url || ""),
+        signup_webhook_enabled: t.signup_webhook_enabled === true,
+        signup_webhook_has_secret: t.signup_webhook_has_secret === true,
       });
       const linkData = links as { browse_path?: string } | null;
       if (linkData?.browse_path) {
@@ -259,12 +274,54 @@ function TenantSettings() {
   }, []);
 
   const handleSave = async () => {
-    setSaving(true); setMessage("");
+    setSaving(true); setMessage(""); setWebhookSecret("");
     try {
-      await api.updateTenantSettings(data);
+      const res = await api.updateTenantSettings(data) as Record<string, unknown>;
+      if (typeof res.signup_webhook_signing_secret === "string" && res.signup_webhook_signing_secret) {
+        setWebhookSecret(res.signup_webhook_signing_secret);
+      }
+      if (res.signup_webhook_has_secret === true) {
+        setData((prev) => ({ ...prev, signup_webhook_has_secret: true }));
+      }
       setMessage("Settings saved successfully");
     } catch { setMessage("Unable to save changes."); }
     finally { setSaving(false); }
+  };
+
+  const handleRegenerateWebhookSecret = async () => {
+    setSaving(true); setMessage(""); setWebhookSecret("");
+    try {
+      const res = await api.updateTenantSettings({
+        ...data,
+        regenerate_signup_webhook_secret: true,
+      }) as Record<string, unknown>;
+      if (typeof res.signup_webhook_signing_secret === "string") {
+        setWebhookSecret(res.signup_webhook_signing_secret);
+      }
+      setData((prev) => ({ ...prev, signup_webhook_has_secret: true }));
+      setMessage("New signing secret generated");
+    } catch {
+      setMessage("Unable to regenerate signing secret.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    setWebhookTestMessage("");
+    try {
+      const res = await api.testSignupWebhook();
+      if (res.success) {
+        setWebhookTestMessage(`Test delivered (${res.http_status})`);
+      } else {
+        setWebhookTestMessage(`Destination returned HTTP ${res.http_status}`);
+      }
+    } catch {
+      setWebhookTestMessage("Test failed — check the URL and try again.");
+    } finally {
+      setTestingWebhook(false);
+    }
   };
 
   const joinUrl = signedBrowsePath
@@ -499,6 +556,18 @@ function TenantSettings() {
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600"
                 />
               </label>
+              <label className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 cursor-pointer">
+                <span>
+                  <span className="block text-[13px] font-medium text-gray-800">Date of birth</span>
+                  <span className="block text-[11px] text-gray-500 mt-0.5">Show date of birth on signup and client forms.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!!data.ask_birth_date}
+                  onChange={(e) => setData({ ...data, ask_birth_date: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600"
+                />
+              </label>
             </div>
           </div>
           <div>
@@ -564,6 +633,69 @@ function TenantSettings() {
             <p className="text-[11px] text-gray-400 mb-1.5">Optional — auto-redirect after 5 seconds</p>
             <input value={data.default_thankyou_redirect_url || ""} onChange={(e) => setData({ ...data, default_thankyou_redirect_url: e.target.value })} className="input-field" placeholder="https://yourwebsite.com" />
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><h3>Signup webhook</h3></div>
+        <div className="card-body space-y-4">
+          <p className="text-[11px] text-gray-400 -mt-1">
+            Send a flat JSON payload to Zapier, Make, or your own endpoint when a client completes signup.
+            Field names mirror Ignition-style proposal data (contact, company, dates, agreement PDF URL, etc.).
+          </p>
+          <label className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 cursor-pointer">
+            <span>
+              <span className="block text-[13px] font-medium text-gray-800">Enable signup webhook</span>
+              <span className="block text-[11px] text-gray-500 mt-0.5">Fires once when signup is fully complete (including after Stripe checkout).</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={!!data.signup_webhook_enabled}
+              onChange={(e) => setData({ ...data, signup_webhook_enabled: e.target.checked })}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600"
+            />
+          </label>
+          <div>
+            <label className="block text-[13px] font-medium text-gray-700 mb-1">Webhook URL</label>
+            <input
+              type="url"
+              value={data.signup_webhook_url || ""}
+              onChange={(e) => setData({ ...data, signup_webhook_url: e.target.value })}
+              className="input-field font-mono text-[12px]"
+              placeholder="https://hooks.zapier.com/hooks/catch/..."
+            />
+          </div>
+          {data.signup_webhook_has_secret && !webhookSecret && (
+            <p className="text-[11px] text-gray-500">Signing secret configured. Regenerate if you need a new one.</p>
+          )}
+          {webhookSecret && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <p className="text-[12px] font-medium text-amber-900">Signing secret (copy now — shown once)</p>
+              <code className="mt-1 block break-all text-[11px] text-amber-950">{webhookSecret}</code>
+              <p className="mt-1 text-[11px] text-amber-800">Verify requests with HMAC-SHA256 of <code>{`<timestamp>.<body>`}</code> in header <code>X-Webhook-Signature</code>.</p>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary text-[12px]"
+              disabled={!data.signup_webhook_url || saving}
+              onClick={() => void handleTestWebhook()}
+            >
+              {testingWebhook ? "Sending test..." : "Send test payload"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-[12px]"
+              disabled={!data.signup_webhook_url || !data.signup_webhook_has_secret || saving}
+              onClick={() => void handleRegenerateWebhookSecret()}
+            >
+              Regenerate signing secret
+            </button>
+          </div>
+          {webhookTestMessage && (
+            <p className="text-[12px] text-gray-600">{webhookTestMessage}</p>
+          )}
         </div>
       </div>
 
