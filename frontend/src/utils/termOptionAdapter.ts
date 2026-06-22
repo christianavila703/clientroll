@@ -239,10 +239,31 @@ export const derivedSimpleAmounts = (form: SimplePricingForm) => {
     weekly: total > 0 && weeks > 0 ? round2(total / weeks) : 0,
     fortnightly: total > 0 && fortnights > 0 ? round2(total / fortnights) : 0,
     monthly: total > 0 && months > 0 ? round2(total / months) : 0,
+    custom: derivedCustomAmount(form),
     months,
     weeks,
     fortnights,
   };
+};
+
+/** Derive the per-payment amount for the custom plan from total + cadence.
+ *
+ *   - If `custom_num_payments` is N>0: amount = total / N
+ *   - Else (ongoing recurring): amount = total / (term span / interval_count)
+ *   - Returns 0 when total is not set or cadence inputs are invalid.
+ */
+const derivedCustomAmount = (form: SimplePricingForm): number => {
+  const total = num(form.total_price);
+  if (total <= 0) return 0;
+  const intervalCount = intOrNull(form.custom_interval_count) ?? 1;
+  const explicitN = intOrNull(form.custom_num_payments);
+  if (explicitN !== null) {
+    return round2(total / explicitN);
+  }
+  const { months, weeks } = durationParts(num(form.duration_value), form.duration_unit);
+  const span = form.custom_interval_unit === "week" ? weeks : months;
+  const n = Math.max(1, Math.floor(span / intervalCount));
+  return n > 0 ? round2(total / n) : 0;
 };
 
 /** Convert the SimplePricingForm to the schedule payload (exactly one row). */
@@ -298,13 +319,12 @@ export const payloadFromSimple = (form: SimplePricingForm): PaymentScheduleInput
         sort_order: 0,
       }];
     case "custom": {
-      const cAmount = num(form.custom_amount);
-      if (cAmount <= 0) return [];
+      if (a.custom <= 0) return [];
       const cN = intOrNull(form.custom_num_payments);
       return [{
         kind: cN !== null ? "instalments" : "recurring",
         label: form.custom_label.trim() || null,
-        amount: round2(cAmount),
+        amount: a.custom,
         interval_unit: form.custom_interval_unit,
         interval_count: intOrNull(form.custom_interval_count) ?? 1,
         num_payments: cN,

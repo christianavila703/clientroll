@@ -166,18 +166,7 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
             placeholder='Plan label (shown to the member, e.g. "10 weekly payments")'
             className="input-field py-1.5 px-2 text-[13px] w-full"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-0.5">Amount each time</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.custom_amount}
-                onChange={e => update("custom_amount", e.target.value)}
-                className="input-field py-1 px-2 text-[13px] w-full"
-                placeholder="0.00"
-              />
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div>
               <label className="block text-[11px] text-gray-500 mb-0.5">Every</label>
               <input
@@ -210,6 +199,10 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
                 placeholder="leave blank for ongoing"
               />
             </div>
+          </div>
+          <div className="text-[12px] text-gray-600 pt-1">
+            Each payment: <span className="font-semibold text-gray-900 tabular-nums">{fmtMoney(amounts.custom, currencyCode)}</span>
+            <span className="text-gray-400"> (auto-calculated from total &divide; payments)</span>
           </div>
         </div>
       )}
