@@ -3,8 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 import ImageUpload from "../common/ImageUpload";
 import type { Bonus, MembershipType, PaymentSchedule, TermOption } from "../../types/memberships";
+import { simpleFromPayload } from "../../utils/termOptionAdapter";
 import PaymentSchedulesEditor from "./PaymentSchedulesEditor";
-import TermLengthEditor from "./TermLengthEditor";
 import TermOptionAddForm from "./TermOptionAddForm";
 import TermOptionTermsEditor from "./TermOptionTermsEditor";
 interface Terms { id: string; title: string; version: number; is_active: boolean; }
@@ -459,9 +459,9 @@ function TermOptionsTab({
 }
 
 // === Display-only Term Option card ===
-// All editing happens inside the disclosure (TermLengthEditor +
-// PaymentSchedulesEditor + TermOptionTermsEditor). The card header just shows
-// a glanceable summary plus a delete button.
+// All editing happens inside the disclosure: a single SimplePricingFields-based
+// editor handles term length + price + payment cadences, and a separate
+// TermOptionTermsEditor handles attached legal T&Cs.
 function TermOptionCard({
   termOption: to,
   currencyCode,
@@ -484,6 +484,7 @@ function TermOptionCard({
   const defaultSchedule = schedules.find(s => s.is_default) ?? schedules[0];
   const attachedCount = to.attached_terms?.length ?? 0;
   const bonusCount = to.bonuses?.length ?? 0;
+  const totalPrice = inferTotalPrice(schedules, durationValue, durationUnit);
 
   return (
     <div className="card overflow-hidden">
@@ -491,12 +492,16 @@ function TermOptionCard({
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[14px] font-semibold text-gray-900">{durationLabel}</span>
           {to.label && <span className="text-[12px] text-gray-500 italic">"{to.label}"</span>}
-          {defaultSchedule && (
-            <span className="text-[13px] tabular-nums text-gray-700">
-              {defaultScheduleSummary(defaultSchedule, currencyCode)}
+          {totalPrice > 0 && (
+            <span className="text-[14px] font-semibold tabular-nums text-gray-900">
+              {currencyCode} ${totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           )}
-          <span className="badge badge-gray">{schedules.length} schedule{schedules.length === 1 ? "" : "s"}</span>
+          {defaultSchedule && (
+            <span className="text-[12px] tabular-nums text-gray-500">
+              · default: {defaultScheduleSummary(defaultSchedule, currencyCode)}
+            </span>
+          )}
           {attachedCount > 0 && <span className="badge badge-blue">{attachedCount} T&amp;C{attachedCount === 1 ? "" : "s"}</span>}
           {bonusCount > 0 && <span className="badge badge-purple">{bonusCount} bonus{bonusCount === 1 ? "" : "es"}</span>}
         </div>
@@ -513,15 +518,27 @@ function TermOptionCard({
       <div className="px-5 py-3">
         <details className="group">
           <summary className="cursor-pointer text-[12px] font-medium text-indigo-600 select-none">
-            Term, Schedules &amp; T&amp;Cs
+            Edit term &amp; pricing
           </summary>
-          <TermLengthEditor mtId={mtId} termOption={to} onSaved={onReload} />
-          <PaymentSchedulesEditor termOption={to} currencyCode={currencyCode} onSaved={onReload} />
+          <PaymentSchedulesEditor mtId={mtId} termOption={to} currencyCode={currencyCode} onSaved={onReload} />
           <TermOptionTermsEditor termOption={to} allTerms={allTerms} onSaved={onReload} />
         </details>
       </div>
     </div>
   );
+}
+
+// inferTotalPrice extracts the total contract value for the card header. We
+// reuse the same logic as the editor's `simpleFromPayload` so what the header
+// shows matches what the admin sees in the edit form.
+function inferTotalPrice(
+  schedules: PaymentSchedule[],
+  durationValue: number,
+  durationUnit: "week" | "month",
+): number {
+  const f = simpleFromPayload(schedules, durationValue, durationUnit, null);
+  const n = Number(f.total_price);
+  return Number.isFinite(n) ? n : 0;
 }
 
 // defaultScheduleSummary renders a one-line description of the default
