@@ -183,33 +183,23 @@ export const payloadFromForm = (form: TermOptionForm): PaymentScheduleInput[] =>
 // =============================================================================
 // Simple pricing form (post-redesign)
 //
-// The flat 5-checkbox × amount UI confused admins ("what does quarterly mean?",
-// "why do I type amounts five times?"). The new model is:
-//
-//   * One total contract price.
-//   * Tick which cadences (upfront/weekly/fortnightly/monthly) the member can
-//     choose at signup. Amounts are auto-derived from total ÷ duration.
-//   * Optional single "custom plan" disclosure for exotic schedules (e.g. 10
-//     weekly instalments). Multiple custom plans are not surfaced; if legacy
-//     data has more than one, only the first is shown (the rest are still
-//     preserved server-side until a save overwrites them).
+// One term option = one payment frequency. The admin sets a total price and
+// picks ONE method (upfront / weekly / fortnightly / monthly / custom plan).
+// If the gym wants to offer both "$1,200 upfront" and "$100/month", that's
+// two separate term options.
 //
 // `payloadFromSimple` and `simpleFromPayload` are the canonical converters.
 // =============================================================================
 
-export type SimpleDefaultMethod = "upfront" | "weekly" | "fortnightly" | "monthly" | "custom";
+export type SimplePaymentMethod = "upfront" | "weekly" | "fortnightly" | "monthly" | "custom";
 
 export interface SimplePricingForm {
   duration_value: string;
   duration_unit: IntervalUnit;
   label: string;
   total_price: string;
-  pay_upfront: boolean;
-  pay_weekly: boolean;
-  pay_fortnightly: boolean;
-  pay_monthly: boolean;
-  default_method: SimpleDefaultMethod;
-  use_custom: boolean;
+  payment_method: SimplePaymentMethod;
+  // Only used when payment_method === "custom":
   custom_label: string;
   custom_amount: string;
   custom_interval_count: string;
@@ -222,12 +212,7 @@ export const emptySimplePricingForm = (): SimplePricingForm => ({
   duration_unit: "month",
   label: "",
   total_price: "",
-  pay_upfront: false,
-  pay_weekly: false,
-  pay_fortnightly: false,
-  pay_monthly: true,
-  default_method: "monthly",
-  use_custom: false,
+  payment_method: "monthly",
   custom_label: "",
   custom_amount: "",
   custom_interval_count: "1",
@@ -260,58 +245,88 @@ export const derivedSimpleAmounts = (form: SimplePricingForm) => {
   };
 };
 
-/** Convert the SimplePricingForm to the schedule payload. */
+/** Convert the SimplePricingForm to the schedule payload (exactly one row). */
 export const payloadFromSimple = (form: SimplePricingForm): PaymentScheduleInput[] => {
   const a = derivedSimpleAmounts(form);
-  const out: PaymentScheduleInput[] = [];
-  let sortIdx = 0;
-  const push = (
-    method: SimpleDefaultMethod,
-    enabled: boolean,
-    kind: "upfront" | "recurring",
-    amount: number,
-    intervalUnit: IntervalUnit | null,
-    intervalCount: number | null,
-  ) => {
-    if (!enabled || amount <= 0) return;
-    out.push({
-      kind,
-      label: null,
-      amount,
-      interval_unit: intervalUnit,
-      interval_count: intervalCount,
-      num_payments: null,
-      is_default: form.default_method === method,
-      sort_order: sortIdx++,
-    });
-  };
-  push("upfront", form.pay_upfront, "upfront", a.upfront, null, null);
-  push("weekly", form.pay_weekly, "recurring", a.weekly, "week", 1);
-  push("fortnightly", form.pay_fortnightly, "recurring", a.fortnightly, "week", 2);
-  push("monthly", form.pay_monthly, "recurring", a.monthly, "month", 1);
-
-  if (form.use_custom) {
-    const cAmount = num(form.custom_amount);
-    const cN = intOrNull(form.custom_num_payments);
-    if (cAmount > 0) {
-      out.push({
+  switch (form.payment_method) {
+    case "upfront":
+      if (a.upfront <= 0) return [];
+      return [{
+        kind: "upfront",
+        label: null,
+        amount: a.upfront,
+        interval_unit: null,
+        interval_count: null,
+        num_payments: null,
+        is_default: true,
+        sort_order: 0,
+      }];
+    case "weekly":
+      if (a.weekly <= 0) return [];
+      return [{
+        kind: "recurring",
+        label: null,
+        amount: a.weekly,
+        interval_unit: "week",
+        interval_count: 1,
+        num_payments: null,
+        is_default: true,
+        sort_order: 0,
+      }];
+    case "fortnightly":
+      if (a.fortnightly <= 0) return [];
+      return [{
+        kind: "recurring",
+        label: null,
+        amount: a.fortnightly,
+        interval_unit: "week",
+        interval_count: 2,
+        num_payments: null,
+        is_default: true,
+        sort_order: 0,
+      }];
+    case "monthly":
+      if (a.monthly <= 0) return [];
+      return [{
+        kind: "recurring",
+        label: null,
+        amount: a.monthly,
+        interval_unit: "month",
+        interval_count: 1,
+        num_payments: null,
+        is_default: true,
+        sort_order: 0,
+      }];
+    case "custom": {
+      const cAmount = num(form.custom_amount);
+      if (cAmount <= 0) return [];
+      const cN = intOrNull(form.custom_num_payments);
+      return [{
         kind: cN !== null ? "instalments" : "recurring",
         label: form.custom_label.trim() || null,
         amount: round2(cAmount),
         interval_unit: form.custom_interval_unit,
         interval_count: intOrNull(form.custom_interval_count) ?? 1,
         num_payments: cN,
-        is_default: form.default_method === "custom",
-        sort_order: sortIdx++,
-      });
+        is_default: true,
+        sort_order: 0,
+      }];
     }
   }
+};
 
-  // Ensure exactly one default row.
-  if (out.length > 0 && !out.some(r => r.is_default)) {
-    out[0].is_default = true;
-  }
-  return out;
+export interface SimpleHydrateResult {
+  form: SimplePricingForm;
+  /** Count of additional active schedules that the simplified single-method form cannot represent. */
+  extraScheduleCount: number;
+}
+
+const classifySchedule = (s: PaymentSchedule): SimplePaymentMethod => {
+  if (s.kind === "upfront") return "upfront";
+  if (s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 1 && s.num_payments == null) return "weekly";
+  if (s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 2 && s.num_payments == null) return "fortnightly";
+  if (s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 1 && s.num_payments == null) return "monthly";
+  return "custom";
 };
 
 /** Hydrate a SimplePricingForm from existing schedules. */
@@ -320,80 +335,59 @@ export const simpleFromPayload = (
   durationValue: number,
   durationUnit: IntervalUnit,
   label?: string | null,
-): SimplePricingForm => {
+): SimpleHydrateResult => {
   const f = emptySimplePricingForm();
   f.duration_value = String(durationValue || "");
   f.duration_unit = durationUnit;
   f.label = label ?? "";
-  // Start with nothing ticked — we'll set flags from data.
-  f.pay_upfront = false;
-  f.pay_weekly = false;
-  f.pay_fortnightly = false;
-  f.pay_monthly = false;
-  f.default_method = "monthly";
 
   const active = schedules
     .filter(s => !s.archived_at)
     .sort((a, b) => a.sort_order - b.sort_order);
 
+  // Pick the schedule the form will represent: prefer the row flagged
+  // is_default, fall back to the first sort_order.
+  const chosen = active.find(s => s.is_default) ?? active[0];
+  if (!chosen) {
+    return { form: f, extraScheduleCount: 0 };
+  }
+
+  const method = classifySchedule(chosen);
+  f.payment_method = method;
+
   const { months, weeks, fortnights } = durationParts(durationValue, durationUnit);
   let total = 0;
-  let pickedDefault = false;
-
-  for (const s of active) {
-    const isWeeklyOpen = s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 1 && s.num_payments == null;
-    const isFortnightlyOpen = s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 2 && s.num_payments == null;
-    const isMonthlyOpen = s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 1 && s.num_payments == null;
-
-    if (s.kind === "upfront") {
-      f.pay_upfront = true;
-      if (total === 0 || s.amount > total) total = s.amount;
-      if (s.is_default) { f.default_method = "upfront"; pickedDefault = true; }
-    } else if (isWeeklyOpen) {
-      f.pay_weekly = true;
-      if (total === 0 && weeks > 0) total = s.amount * weeks;
-      if (s.is_default) { f.default_method = "weekly"; pickedDefault = true; }
-    } else if (isFortnightlyOpen) {
-      f.pay_fortnightly = true;
-      if (total === 0 && fortnights > 0) total = s.amount * fortnights;
-      if (s.is_default) { f.default_method = "fortnightly"; pickedDefault = true; }
-    } else if (isMonthlyOpen) {
-      f.pay_monthly = true;
-      if (total === 0 && months > 0) total = s.amount * months;
-      if (s.is_default) { f.default_method = "monthly"; pickedDefault = true; }
-    } else if (!f.use_custom) {
-      // First non-standard row becomes the visible custom plan.
-      f.use_custom = true;
-      f.custom_label = s.label ?? "";
-      f.custom_amount = String(s.amount);
-      f.custom_interval_unit = (s.interval_unit as IntervalUnit) ?? "month";
-      f.custom_interval_count = String(s.interval_count ?? 1);
-      f.custom_num_payments = s.num_payments != null ? String(s.num_payments) : "";
-      if (total === 0 && s.num_payments && s.num_payments > 0) total = s.amount * s.num_payments;
-      if (s.is_default) { f.default_method = "custom"; pickedDefault = true; }
-    }
+  switch (method) {
+    case "upfront":
+      total = chosen.amount;
+      break;
+    case "weekly":
+      total = chosen.amount * weeks;
+      break;
+    case "fortnightly":
+      total = chosen.amount * fortnights;
+      break;
+    case "monthly":
+      total = chosen.amount * months;
+      break;
+    case "custom":
+      f.custom_label = chosen.label ?? "";
+      f.custom_amount = String(chosen.amount);
+      f.custom_interval_unit = (chosen.interval_unit as IntervalUnit) ?? "month";
+      f.custom_interval_count = String(chosen.interval_count ?? 1);
+      f.custom_num_payments = chosen.num_payments != null ? String(chosen.num_payments) : "";
+      if (chosen.num_payments && chosen.num_payments > 0) {
+        total = chosen.amount * chosen.num_payments;
+      }
+      break;
   }
 
   if (total > 0) {
     f.total_price = round2(total).toFixed(2);
   }
 
-  // If nothing was ticked at all, leave monthly as the default ticked option
-  // so the form renders sensibly. Otherwise honour whatever the data said.
-  const anyTicked = f.pay_upfront || f.pay_weekly || f.pay_fortnightly || f.pay_monthly || f.use_custom;
-  if (!anyTicked) {
-    f.pay_monthly = true;
-    f.default_method = "monthly";
-  } else if (!pickedDefault) {
-    // Pick the first ticked option as default.
-    if (f.pay_upfront) f.default_method = "upfront";
-    else if (f.pay_weekly) f.default_method = "weekly";
-    else if (f.pay_fortnightly) f.default_method = "fortnightly";
-    else if (f.pay_monthly) f.default_method = "monthly";
-    else if (f.use_custom) f.default_method = "custom";
-  }
-
-  return f;
+  const extraScheduleCount = Math.max(0, active.length - 1);
+  return { form: f, extraScheduleCount };
 };
 
 /** Hydrate a form from existing schedule rows returned by the API. */

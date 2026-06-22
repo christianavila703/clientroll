@@ -536,8 +536,8 @@ function inferTotalPrice(
   durationValue: number,
   durationUnit: "week" | "month",
 ): number {
-  const f = simpleFromPayload(schedules, durationValue, durationUnit, null);
-  const n = Number(f.total_price);
+  const { form } = simpleFromPayload(schedules, durationValue, durationUnit, null);
+  const n = Number(form.total_price);
   return Number.isFinite(n) ? n : 0;
 }
 

@@ -16,7 +16,7 @@ interface Props {
   onSaved?: () => void;
 }
 
-const initialFormFromTermOption = (to: TermOption): SimplePricingForm => {
+const initialFormFromTermOption = (to: TermOption) => {
   return simpleFromPayload(
     to.payment_schedules ?? [],
     to.duration_value ?? to.duration_months ?? 0,
@@ -31,7 +31,9 @@ export default function PaymentSchedulesEditor({
   mtId,
   onSaved,
 }: Props) {
-  const [form, setForm] = useState<SimplePricingForm>(() => initialFormFromTermOption(termOption));
+  const hydrated = initialFormFromTermOption(termOption);
+  const [form, setForm] = useState<SimplePricingForm>(() => hydrated.form);
+  const [extraScheduleCount, setExtraScheduleCount] = useState<number>(hydrated.extraScheduleCount);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -39,7 +41,9 @@ export default function PaymentSchedulesEditor({
 
   // Reset when a different term option is opened or its server-side fields change.
   useEffect(() => {
-    setForm(initialFormFromTermOption(termOption));
+    const fresh = initialFormFromTermOption(termOption);
+    setForm(fresh.form);
+    setExtraScheduleCount(fresh.extraScheduleCount);
     setError("");
     setMessage("");
     setDirty(false);
@@ -73,7 +77,7 @@ export default function PaymentSchedulesEditor({
       return;
     }
     if (schedules.length === 0) {
-      setError("Pick at least one way the member can pay.");
+      setError("Choose how this term option is paid.");
       return;
     }
 
@@ -88,6 +92,7 @@ export default function PaymentSchedulesEditor({
       });
       await api.replacePaymentSchedules(termOption.id, schedules);
       setDirty(false);
+      setExtraScheduleCount(0);
       setMessage("Saved.");
       onSaved?.();
     } catch (e: unknown) {
@@ -114,7 +119,12 @@ export default function PaymentSchedulesEditor({
       {error && <div className="bg-red-50 text-red-700 text-[12px] px-2 py-1 rounded">{error}</div>}
       {message && <div className="bg-green-50 text-green-700 text-[12px] px-2 py-1 rounded">{message}</div>}
 
-      <SimplePricingFields form={form} setForm={setFormWrapped} currencyCode={currencyCode} />
+      <SimplePricingFields
+        form={form}
+        setForm={setFormWrapped}
+        currencyCode={currencyCode}
+        extraScheduleCount={extraScheduleCount}
+      />
     </div>
   );
 }

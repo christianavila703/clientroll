@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 
 import api from "../../api/client";
 import {
-  derivedSimpleAmounts,
   emptySimplePricingForm,
   payloadFromSimple,
   type SimplePricingForm,
@@ -22,7 +21,6 @@ export default function TermOptionAddForm({ mtId, currencyCode, onCancel, onCrea
   const [error, setError] = useState("");
 
   const schedules = useMemo(() => payloadFromSimple(form), [form]);
-  const amounts = useMemo(() => derivedSimpleAmounts(form), [form]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +37,7 @@ export default function TermOptionAddForm({ mtId, currencyCode, onCancel, onCrea
       return;
     }
     if (schedules.length === 0) {
-      setError("Pick at least one way the member can pay.");
+      setError("Choose how this term option is paid.");
       return;
     }
 
@@ -53,8 +51,8 @@ export default function TermOptionAddForm({ mtId, currencyCode, onCancel, onCrea
         duration_unit: form.duration_unit,
         duration_months: legacyDurationMonths,
         label: form.label.trim() || null,
-        fee_total: amounts.upfront || total,
-        allow_upfront: form.pay_upfront,
+        fee_total: total,
+        allow_upfront: form.payment_method === "upfront",
         fee_weekly: null,
         fee_fortnightly: null,
         fee_monthly: null,
