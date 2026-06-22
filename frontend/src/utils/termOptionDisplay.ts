@@ -60,11 +60,15 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
     const unit = s.interval_unit ?? null;
     const count = s.interval_count ?? null;
     if (s.num_payments && s.num_payments > 0) {
-      // Fixed-count instalment plan. The contract total IS amount × num_payments
-      // — don't trust fee_total here, it can be stale from legacy admin paths.
-      // Wording is explicit so it can't be misread as a recurring pattern:
-      //   "3 payments total · every 3 months"
-      const total = Math.round(s.amount * s.num_payments * 100) / 100;
+      // Fixed-count instalment plan. Prefer the stored contract total
+      // (fee_total) when it's within rounding distance of amount × N — that
+      // avoids "$5,000.01" type drift caused by repeated 2dp rounding of a
+      // per-payment figure that doesn't divide evenly. If fee_total is way
+      // off (legacy admin set them independently), trust the schedule.
+      const derived = Math.round(s.amount * s.num_payments * 100) / 100;
+      const total = feeTotal > 0 && Math.abs(feeTotal - derived) <= Math.max(1, s.num_payments)
+        ? Math.round(feeTotal * 100) / 100
+        : derived;
       const noun = s.num_payments === 1 ? "payment" : "payments";
       const phrase = `${s.num_payments} ${noun} total · ${everyPhrase(unit, count)}`;
       return { amount: s.amount, suffix: phrase, total };
