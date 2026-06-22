@@ -28,6 +28,7 @@ import PlatformTenantCreatePage from "./components/platform/PlatformTenantCreate
 import PlatformBillingPage from "./components/platform/PlatformBillingPage";
 import PlatformTenantBillingDetailPage from "./components/platform/PlatformTenantBillingDetailPage";
 import PaymentMonitoringPage from "./components/monitoring/PaymentMonitoringPage";
+import ReacceptPage from "./components/reaccept/ReacceptPage";
 
 function App() {
   return (
@@ -43,6 +44,8 @@ function App() {
         {/* Public membership signup */}
         <Route path="/join/:tenantSlug/invite/:inviteToken" element={<SignupPage />} />
         <Route path="/join/:tenantSlug" element={<SignupPage />} />
+        {/* Public T&C re-acceptance flow (tokenised, no login) */}
+        <Route path="/reaccept/:tenantSlug/:token" element={<ReacceptPage />} />
         <Route path="/:tenantSlug/:membershipSlug" element={<SignupPage />} />
 
         {/* Authenticated tenant routes */}

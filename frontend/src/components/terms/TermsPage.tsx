@@ -1,36 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import api from "../../api/client";
 import RichTextEditor from "../common/RichTextEditor";
 import type { Editor } from "@tiptap/react";
-import { normalizeTermsEditorContent } from "../../utils/termsContent";
+import {
+  formatTermsContentForDisplay,
+  normalizeTermsEditorContent,
+  substituteTermsVariables,
+  type TermsSubstitutionContext,
+} from "../../utils/termsContent";
+import { TERMS_VARIABLES } from "../../utils/termsVariables.generated";
 
-const TC_VARIABLES = [
-  { key: "client_name", label: "Client Name", desc: "Full name of the member" },
-  { key: "client_email", label: "Client Email", desc: "Member's email address" },
-  { key: "client_phone", label: "Client Phone", desc: "Member's phone number" },
-  { key: "client_address", label: "Client Address", desc: "Member's full address" },
-  { key: "client_dob", label: "Date of Birth", desc: "Member's date of birth" },
-  { key: "client_gender", label: "Gender", desc: "Member's gender" },
-  { key: "emergency_contact_name", label: "Emergency Contact Name", desc: "Member's emergency contact name" },
-  { key: "emergency_contact_phone", label: "Emergency Contact Phone", desc: "Member's emergency contact phone" },
-  { key: "membership_title", label: "Membership Title", desc: "Name of the membership type" },
-  { key: "term_months", label: "Term (Months)", desc: "Duration in months (e.g. 6, 12)" },
-  { key: "term_weeks", label: "Term (Weeks)", desc: "Duration in weeks (e.g. 26, 52)" },
-  { key: "total_fee", label: "Total Fee", desc: "Total contract value" },
-  { key: "payment_amount", label: "Payment Amount", desc: "Per-period payment amount" },
-  { key: "payment_frequency", label: "Payment Frequency", desc: "Weekly, fortnightly, or monthly" },
-  { key: "start_date", label: "Start Date", desc: "When the membership begins" },
-  { key: "end_date", label: "End Date", desc: "When the minimum term ends" },
-  { key: "payment_method", label: "Payment Method", desc: "Card, direct debit, etc." },
-  { key: "company_name", label: "Company Name", desc: "Your business name" },
-  { key: "company_trading_name", label: "Trading Name", desc: "Your business trading name" },
-  { key: "company_abn", label: "ABN", desc: "Australian Business Number" },
-  { key: "company_unit_number", label: "Company Unit Number", desc: "Unit or suite (member business address)" },
-  { key: "company_address", label: "Company Street Address", desc: "Street line only (member business address)" },
-  { key: "company_email", label: "Company Email", desc: "Your business email" },
-  { key: "company_phone", label: "Company Phone", desc: "Your business phone" },
-  { key: "today_date", label: "Today's Date", desc: "Date the agreement is signed" },
-];
+const TC_VARIABLES = TERMS_VARIABLES;
 
 interface Terms {
   id: string;
@@ -174,6 +154,55 @@ export default function TermsPage() {
   );
 }
 
+// Sample values used by TermsPreview so admins can see the substituted text
+// before saving. Mirrors the keys exposed in TC_VARIABLES above.
+const PREVIEW_SAMPLE: TermsSubstitutionContext = {
+  client_name: "Alex Member",
+  client_email: "alex.member@example.com",
+  client_phone: "0400 000 000",
+  client_address: "12 Sample Street, Sydney NSW 2000",
+  client_dob: "1990-01-15",
+  client_gender: "Other",
+  emergency_contact_name: "Jamie Member",
+  emergency_contact_phone: "0400 111 111",
+  membership_title: "12-Month All Access",
+  term_months: "12",
+  term_weeks: "52",
+  total_fee: "1,200.00",
+  payment_amount: "25.00",
+  payment_frequency: "Weekly",
+  start_date: "2026-07-01",
+  end_date: "2027-06-30",
+  payment_method: "Direct Debit",
+  company_name: "Sample Studios Pty Ltd",
+  company_trading_name: "Sample Studios",
+  company_abn: "12 345 678 901",
+  company_address: "1 Business Way, Sydney NSW 2000",
+  company_email: "hello@samplestudios.com",
+  company_phone: "02 0000 0000",
+  today_date: new Date().toLocaleDateString(),
+};
+
+function TermsPreview({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  const rendered = useMemo(() => {
+    if (!open) return "";
+    const substituted = substituteTermsVariables(content, PREVIEW_SAMPLE);
+    return formatTermsContentForDisplay(substituted);
+  }, [content, open]);
+  return (
+    <details className="rounded-lg bg-gray-50 border border-gray-200" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer px-4 py-2 text-[12px] font-semibold text-gray-700 select-none">
+        Preview with sample variables
+      </summary>
+      <div className="px-4 py-3 prose prose-sm max-w-none text-[13px]" dangerouslySetInnerHTML={{ __html: rendered }} />
+      <p className="px-4 pb-3 text-[10px] text-gray-400">
+        Shown values are placeholders. The signup flow substitutes real client, membership, and organisation data.
+      </p>
+    </details>
+  );
+}
+
 function TermsForm({ initial, onSaved, onCancel }: {
   initial: Terms | null;
   onSaved: () => void;
@@ -182,17 +211,30 @@ function TermsForm({ initial, onSaved, onCancel }: {
   const [title, setTitle] = useState(initial?.title || "");
   const [content, setContent] = useState(() => normalizeTermsEditorContent(initial?.content || ""));
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [changeNote, setChangeNote] = useState("");
+  const [requiresReacceptance, setRequiresReacceptance] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [reacceptanceMessage, setReacceptanceMessage] = useState("");
   const editorRef = useRef<Editor | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !content) { setError("Title and content are required"); return; }
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setReacceptanceMessage("");
     try {
       if (initial) {
-        await api.updateTerms(initial.id, { title, content, is_active: isActive });
+        const resp = (await api.updateTerms(initial.id, {
+          title,
+          content,
+          is_active: isActive,
+          change_note: changeNote.trim() || undefined,
+          requires_reacceptance: requiresReacceptance,
+        })) as { reacceptance_flagged?: number } | undefined;
+        const flagged = resp?.reacceptance_flagged ?? 0;
+        if (requiresReacceptance && flagged > 0) {
+          setReacceptanceMessage(`${flagged} member${flagged === 1 ? "" : "s"} will be prompted to re-accept this update.`);
+        }
       } else {
         await api.createTerms({ title, content });
       }
@@ -268,20 +310,118 @@ function TermsForm({ initial, onSaved, onCancel }: {
             }}
           />
         </div>
+        <TermsPreview content={content} />
         {initial && (
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="tc-active"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            <label htmlFor="tc-active" className="text-[13px] text-gray-700">Active</label>
-            {initial.version > 1 && <span className="text-[11px] text-gray-400 ml-2">Saving will create version {initial.version + 1}</span>}
-          </div>
+          <>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="tc-active"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <label htmlFor="tc-active" className="text-[13px] text-gray-700">Active</label>
+              {initial.version >= 1 && <span className="text-[11px] text-gray-400 ml-2">Saving will create version {initial.version + 1}</span>}
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium text-gray-700 mb-1">
+                Change note <span className="text-gray-400">(optional, saved in history)</span>
+              </label>
+              <input
+                type="text"
+                value={changeNote}
+                onChange={(e) => setChangeNote(e.target.value)}
+                placeholder="What changed in this version?"
+                className="input-field text-[13px]"
+              />
+            </div>
+            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+              <label className="flex items-start gap-2 text-[13px] text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={requiresReacceptance}
+                  onChange={(e) => setRequiresReacceptance(e.target.checked)}
+                  className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500 mt-0.5"
+                />
+                <span>
+                  <strong>Require existing members to re-accept this version.</strong>
+                  <span className="block text-[11px] text-amber-700 mt-0.5">
+                    Use this only for material changes (price-affecting clauses, cancellation policy, liability). Every active membership that previously accepted this T&amp;C will be flagged with a re-acceptance prompt.
+                  </span>
+                </span>
+              </label>
+            </div>
+            {reacceptanceMessage && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[13px] text-green-700">
+                {reacceptanceMessage}
+              </div>
+            )}
+            <TermsVersionHistory termsId={initial.id} />
+          </>
         )}
       </form>
     </div>
+  );
+}
+
+interface VersionRow {
+  id: string;
+  version: number;
+  title: string;
+  content: string;
+  is_active: boolean;
+  change_note?: string;
+  effective_from: string;
+}
+
+function TermsVersionHistory({ termsId }: { termsId: string }) {
+  const [open, setOpen] = useState(false);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setError("");
+    (async () => {
+      try {
+        const data = (await api.listTermsVersions(termsId)) as { versions: VersionRow[] };
+        setVersions(data.versions || []);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load history");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [open, termsId]);
+
+  return (
+    <details className="rounded-lg bg-gray-50 border border-gray-200" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer px-4 py-2 text-[12px] font-semibold text-gray-700 select-none">
+        Version history
+      </summary>
+      <div className="px-4 py-3 space-y-3 text-[13px]">
+        {loading && <p className="text-gray-500 text-[12px]">Loading...</p>}
+        {error && <p className="text-red-600 text-[12px]">{error}</p>}
+        {!loading && !error && versions.length === 0 && (
+          <p className="text-gray-500 text-[12px]">No history yet.</p>
+        )}
+        {versions.map((v) => (
+          <div key={v.id} className="border border-gray-200 rounded-md p-2 bg-white">
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="font-semibold text-gray-800">Version {v.version}</span>
+              <span className="text-gray-500">{new Date(v.effective_from).toLocaleString()}</span>
+            </div>
+            {v.change_note && <p className="text-[12px] text-gray-600 italic mt-1">{v.change_note}</p>}
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[11px] text-indigo-600">Show content</summary>
+              <div className="mt-2 prose prose-sm max-w-none text-[12px]" dangerouslySetInnerHTML={{ __html: formatTermsContentForDisplay(v.content) }} />
+            </details>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }

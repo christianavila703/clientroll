@@ -103,3 +103,61 @@ func deriveCanonicalMembershipPricing(term *models.TermOption, frequency string)
 	}
 	return result, nil
 }
+
+// derivePricingFromSchedule converts a stored PaymentSchedule row into the
+// same canonical pricing shape used downstream. Returned `frequency` is the
+// legacy string ('upfront', 'weekly', 'fortnightly', 'monthly', 'quarterly',
+// or 'custom_schedule') so existing rules (CHECK constraints, snapshot fields,
+// invite payloads) keep working during the v2 soak.
+func derivePricingFromSchedule(s *models.PaymentSchedule) (*canonicalMembershipPricing, error) {
+	if s == nil {
+		return nil, fmt.Errorf("payment schedule is required")
+	}
+	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
+	result := &canonicalMembershipPricing{
+		Amount:      round2(s.Amount),
+		NumPayments: s.NumPayments,
+	}
+	switch s.Kind {
+	case "upfront":
+		result.Frequency = "upfront"
+		result.IntervalCount = 1
+	case "recurring":
+		if s.IntervalUnit == nil || s.IntervalCount == nil {
+			return nil, fmt.Errorf("recurring schedule missing interval")
+		}
+		unit := *s.IntervalUnit
+		count := *s.IntervalCount
+		result.IntervalUnit = &unit
+		result.IntervalCount = count
+		switch {
+		case unit == "week" && count == 1:
+			result.Frequency = "weekly"
+		case unit == "week" && count == 2:
+			result.Frequency = "fortnightly"
+		case unit == "month" && count == 1:
+			result.Frequency = "monthly"
+		case unit == "month" && count == 3:
+			result.Frequency = "quarterly"
+		default:
+			// Non-standard recurring cadence — fall back to the catch-all
+			// 'custom_schedule' frequency so legacy CHECKs accept it.
+			result.Frequency = "custom_schedule"
+		}
+	case "instalments":
+		if s.IntervalUnit == nil || s.IntervalCount == nil {
+			return nil, fmt.Errorf("instalments schedule missing interval")
+		}
+		unit := *s.IntervalUnit
+		count := *s.IntervalCount
+		result.IntervalUnit = &unit
+		result.IntervalCount = count
+		result.Frequency = "custom_schedule"
+	default:
+		return nil, fmt.Errorf("unsupported schedule kind %q", s.Kind)
+	}
+	if result.Amount <= 0 {
+		return nil, fmt.Errorf("schedule amount is not configured")
+	}
+	return result, nil
+}

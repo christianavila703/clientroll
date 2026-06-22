@@ -143,8 +143,11 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	tenantRepo := repository.NewTenantRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
 	bonusRepo := repository.NewBonusRepo(db)
-	mtRepo := repository.NewMembershipTypeRepo(db)
 	termsRepo := repository.NewTermsRepo(db)
+	scheduleRepo := repository.NewPaymentScheduleRepo(db)
+	mtRepo := repository.NewMembershipTypeRepo(db).
+		WithSchedules(scheduleRepo).
+		WithTerms(termsRepo)
 	clientRepo := repository.NewClientRepo(db)
 	memberRepo := repository.NewMembershipRepo(db)
 	paymentRepo := repository.NewPaymentRepo(db)
@@ -173,15 +176,17 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	settingsHandler := handlers.NewSettingsHandler(settingsRepo, tenantRepo, tenantEmailTemplateRepo)
 	staffHandler := handlers.NewStaffHandler(userRepo)
 	bonusHandler := handlers.NewBonusHandler(bonusRepo)
-	mtHandler := handlers.NewMembershipTypeHandler(mtRepo, termsRepo)
-	termsHandler := handlers.NewTermsHandler(termsRepo)
+	mtHandler := handlers.NewMembershipTypeHandler(mtRepo, termsRepo).WithSchedules(scheduleRepo)
+	reacceptInviteRepo := repository.NewTermsReacceptanceInviteRepo(db)
+	termsHandler := handlers.NewTermsHandler(termsRepo).WithReacceptanceInvites(reacceptInviteRepo)
+	reacceptHandler := handlers.NewReacceptanceHandler(tenantRepo, termsRepo, reacceptInviteRepo, db)
 	redirectFlowRepo := repository.NewRedirectFlowSessionRepo(db)
 	bankDetailsRepo := repository.NewBankDetailsRepo(db)
 	_ = bankDetailsRepo // used later
 	clientHandler := handlers.NewClientHandler(clientRepo, memberRepo, mtRepo, credRepo, redirectFlowRepo, enc, emailSvc)
 	agreementRepo := repository.NewAgreementSnapshotRepo(db)
 	membershipSetupInviteRepo := repository.NewMembershipSetupInviteRepo(db)
-	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, platformBillingConfigRepo, bankDetailsRepo, agreementRepo, membershipSetupInviteRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg)
+	signupHandler := handlers.NewSignupHandler(tenantRepo, mtRepo, bonusRepo, termsRepo, clientRepo, memberRepo, settingsRepo, credRepo, platformBillingConfigRepo, bankDetailsRepo, agreementRepo, membershipSetupInviteRepo, tenantEmailTemplateRepo, enc, emailSvc, cfg).WithSchedules(scheduleRepo)
 	agreementHandler := handlers.NewAgreementHandler(agreementRepo)
 	emailVerifier := handlers.NewEmailVerifyHandler(db, emailSvc, cfg.AppURL)
 	registrationHandler := handlers.NewTenantRegistrationHandler(tenantRepo, userRepo, jwtMgr, sessionMgr, emailSvc, emailVerifier, cfg.AppURL)
@@ -239,6 +244,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 		r.Group(func(r chi.Router) {
 			r.Use(signupLimiter.Limit)
 			signupHandler.RegisterPublicRoutes(r)
+			reacceptHandler.RegisterPublicRoutes(r)
 		})
 
 		// GoCardless OAuth callback and webhook (no auth)
@@ -350,6 +356,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 				bonusHandler.RegisterRoutes(r)
 				mtHandler.RegisterRoutes(r)
 				termsHandler.RegisterRoutes(r)
+				reacceptHandler.RegisterTenantRoutes(r)
 				clientHandler.RegisterRoutes(r)
 				signupHandler.RegisterTenantRoutes(r)
 

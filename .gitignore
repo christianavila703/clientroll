@@ -38,3 +38,4 @@ uploads/tenants/
 
 # Docker
 .docker/
+/verify-term-options

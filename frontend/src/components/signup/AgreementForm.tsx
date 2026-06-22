@@ -10,11 +10,12 @@ import {
   signupPriceSuffix,
   termHasExplicitFee,
 } from "../../utils/signupPricing";
-import { formatTermsContentForDisplay } from "../../utils/termsContent";
-import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc } from "./SignupPage";
+import { formatTermsContentForDisplay, substituteTermsVariables, type TermsSubstitutionContext } from "../../utils/termsContent";
+import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc, OrgPayload } from "./SignupPage";
 
 interface Props {
   tenant: Tenant;
+  org?: OrgPayload | null;
   membership: MembershipType;
   termOption: TermOption;
   tenantSlug: string;
@@ -44,6 +45,29 @@ function positiveNumber(value: unknown): number | null {
 
 function resolveFrequencyAmount(termOption: TermOption, frequency: string): number {
   return explicitFrequencyAmount(termOption, frequency) || termOption.fee_total;
+}
+
+/**
+ * For a given legacy frequency string ("weekly", "monthly", ...) find the
+ * matching PaymentSchedule row that the admin defined on the term option in v2.
+ * Returns the schedule ID, or empty string when no match exists (the server
+ * will fall back to the legacy fee_* fields in that case).
+ */
+function findScheduleIdForFrequency(termOption: TermOption, frequency: string): string {
+  const schedules = termOption.payment_schedules ?? [];
+  if (schedules.length === 0) return "";
+  const active = schedules.filter(s => !s.archived_at);
+  const want = String(frequency || "").toLowerCase();
+  const match = active.find(s => {
+    if (want === "upfront") return s.kind === "upfront";
+    if (want === "weekly") return s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 1;
+    if (want === "fortnightly") return s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 2;
+    if (want === "monthly") return s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 1;
+    if (want === "quarterly") return s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 3;
+    if (want === "custom_schedule") return s.kind === "instalments" || (s.kind === "recurring" && s.num_payments != null);
+    return false;
+  });
+  return match?.id ?? "";
 }
 
 /** 2-letter code for form + API; maps common full names / variants from saved client records. */
@@ -132,7 +156,7 @@ function collectSignupMemberMissing(
   return required.filter(({ key }) => !String(data[key] ?? "").trim());
 }
 
-export default function AgreementForm({ tenant, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
+export default function AgreementForm({ tenant, org, membership, termOption, tenantSlug, paymentProviders, terms = [], inviteContext, inviteClient, onComplete, onBack }: Props) {
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
   const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
@@ -291,6 +315,10 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
       const paymentAmount = isCustomSchedule
         ? (termOption.custom_schedule_amount || termOption.fee_total)
         : resolveFrequencyAmount(termOption, payment.payment_frequency);
+      // v2: if the term option has structured payment_schedules, find the one
+      // that matches the selected legacy frequency and pin its ID. The server
+      // prefers payment_schedule_id over the legacy fields when both arrive.
+      const matchedScheduleId = findScheduleIdForFrequency(termOption, payment.payment_frequency);
       const submitParams = new URLSearchParams(window.location.search);
       if (inviteContext?.token) submitParams.set("invite", inviteContext.token);
       const submitQS = submitParams.toString();
@@ -306,6 +334,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           },
           invite_token: inviteContext?.token || undefined,
           membership_type_id: membership.id, term_option_id: termOption.id,
+          payment_schedule_id: matchedScheduleId || undefined,
           start_date: payment.start_date ? payment.start_date + "T00:00:00Z" : new Date().toISOString(),
           payment_method: payment.payment_method,
           payment_frequency: payment.payment_frequency,
@@ -463,7 +492,7 @@ export default function AgreementForm({ tenant, membership, termOption, tenantSl
           )}
           {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} currencyCode={currencyCode} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} paymentMethodLocked={paymentMethodLocked} paymentFrequencyLocked={paymentFrequencyLocked} startDateLocked={startDateLocked} useExistingPayment={useExistingPayment} />}
           {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
-          {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
+          {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} substitutionContext={buildTermsSubstitutionContext({ member, payment, membership, termOption, org: org ?? null })} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
           {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
         </div>
       </div>
@@ -959,10 +988,78 @@ function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<
 }
 
 /* ─── Section D: Terms & Conditions ─── */
-function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
+function buildTermsSubstitutionContext(args: {
+  member: Record<string, string>;
+  payment: { payment_method: string; payment_frequency: string; start_date: string };
+  membership: MembershipType;
+  termOption: TermOption;
+  org: OrgPayload | null;
+}): TermsSubstitutionContext {
+  const { member, payment, membership, termOption, org } = args;
+  const months = Number(termOption.duration_months) || 0;
+  const startDate = payment.start_date || "";
+  let endDate = "";
+  if (startDate && months > 0) {
+    const d = new Date(startDate);
+    if (!Number.isNaN(d.getTime())) {
+      d.setMonth(d.getMonth() + months);
+      endDate = d.toISOString().split("T")[0];
+    }
+  }
+  const addressParts = [member.address, member.suburb, member.state, member.postcode, member.country]
+    .map((p) => String(p || "").trim())
+    .filter(Boolean);
+  const unit = String(member.unit_number || "").trim();
+  const clientAddress = (unit ? `Unit ${unit}, ` : "") + addressParts.join(", ");
+  const paymentAmount = resolveFrequencyAmount(termOption, payment.payment_frequency);
+  const paymentMethodLabel = (() => {
+    switch ((payment.payment_method || "").toLowerCase()) {
+      case "direct_debit": return "Direct debit";
+      case "card": return "Card";
+      case "manual": return "Manual";
+      default: return payment.payment_method || "";
+    }
+  })();
+  const membershipTitle = (() => {
+    const m = membership as unknown as Record<string, unknown>;
+    const name = String(m.membership_name || "").trim();
+    const level = String(m.membership_level || "").trim();
+    if (name && level) return `${name} - ${level}`;
+    if (name) return name;
+    return membership.title || "";
+  })();
+  return {
+    client_name: member.name,
+    client_email: member.email,
+    client_phone: member.phone,
+    client_address: clientAddress,
+    client_dob: member.birth_date,
+    client_gender: member.gender,
+    emergency_contact_name: member.emergency_contact_name,
+    emergency_contact_phone: member.emergency_contact_phone,
+    membership_title: membershipTitle,
+    term_months: months || "",
+    term_weeks: months > 0 ? Math.round((months * 52) / 12) : "",
+    total_fee: termOption.fee_total,
+    payment_amount: paymentAmount,
+    payment_frequency: payment.payment_frequency,
+    payment_method: paymentMethodLabel,
+    start_date: startDate,
+    end_date: endDate,
+    company_name: org?.company_name,
+    company_trading_name: org?.company_trading_name,
+    company_abn: org?.company_abn,
+    company_address: org?.company_address,
+    company_email: org?.company_email,
+    company_phone: org?.company_phone,
+  };
+}
+
+function TermsSection({ terms, accepted, onAcceptChange, substitutionContext, onNext, onBack }: {
   terms: TermsDoc[];
   accepted: Set<string>;
   onAcceptChange: (s: Set<string>) => void;
+  substitutionContext: TermsSubstitutionContext;
   onNext: () => void;
   onBack: () => void;
 }) {
@@ -974,6 +1071,9 @@ function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
     else next.add(id);
     onAcceptChange(next);
   };
+
+  const renderContent = (raw: string) =>
+    formatTermsContentForDisplay(substituteTermsVariables(raw, substitutionContext));
 
   return (
     <div>
@@ -993,7 +1093,7 @@ function TermsSection({ terms, accepted, onAcceptChange, onNext, onBack }: {
             </div>
             <div
               className="px-6 py-5 max-h-[400px] overflow-y-auto text-[13px] text-gray-700 leading-relaxed break-words tc-content"
-              dangerouslySetInnerHTML={{ __html: formatTermsContentForDisplay(t.content) }}
+              dangerouslySetInnerHTML={{ __html: renderContent(t.content) }}
             />
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
               <label className="flex items-start gap-3 cursor-pointer">

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
 import AdminPaymentAmounts from "../common/AdminPaymentAmounts";
+import ReacceptanceLinksPanel from "../memberships/ReacceptanceLinksPanel";
 import StripeTransactionPanel, { hasStripeDetails } from "../payments/StripeTransactionPanel";
 import { organisationSubtotal, fmtMoney, customerCharged, estimateStripeProcessingFeeCents, formatFailedPaymentMessage } from "../../utils/paymentLabels";
 import type { MembershipRecord } from "../../types/memberships";
@@ -995,6 +996,13 @@ function MembershipCard({ m, fmtShort, tenantTimezone, onCancel, onToggleContinu
               style={{ width: `${Math.min(paidPct, 100)}%` }}
             />
           </div>
+        </div>
+
+        {/* Outstanding re-acceptance signing links. Renders nothing when no
+            links exist, so this section only shows up when admin-flagged T&C
+            updates are awaiting the member's signature. */}
+        <div className="mt-3">
+          <ReacceptanceLinksPanel membershipId={m.membership_id} hideWhenEmpty />
         </div>
       </div>
     </div>

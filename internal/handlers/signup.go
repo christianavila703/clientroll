@@ -25,6 +25,7 @@ import (
 	"clientroll/internal/payment"
 	pdfpkg "clientroll/internal/pdf"
 	"clientroll/internal/repository"
+	"clientroll/internal/terms"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -54,11 +55,19 @@ type SignupHandler struct {
 	agreementRepo     *repository.AgreementSnapshotRepo
 	inviteRepo        *repository.MembershipSetupInviteRepo
 	emailTemplateRepo *repository.TenantEmailTemplateRepo
+	scheduleRepo      *repository.PaymentScheduleRepo
 	encryptor         *database.Encryptor
 	emailSvc          email.Provider
 	dispatcher        *events.Dispatcher
 	signupWebhookSvc  *events.SignupWebhookService
 	cfg               *config.Config
+}
+
+// WithSchedules wires the payment schedule repo into the signup handler so
+// SubmitSignup can accept the v2 payment_schedule_id field.
+func (h *SignupHandler) WithSchedules(s *repository.PaymentScheduleRepo) *SignupHandler {
+	h.scheduleRepo = s
+	return h
 }
 
 // SetSignupWebhookService wires optional signup completion webhooks.
@@ -181,6 +190,49 @@ func (h *SignupHandler) GetTenantMemberships(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// publicOrgPayload builds the org/agreement-settings fragment that public
+// signup endpoints expose so the client can substitute {{company_*}} variables
+// in attached T&C documents at display time (matching what the PDF substitutes
+// server-side at snapshot time).
+func (h *SignupHandler) publicOrgPayload(ctx context.Context, tenantID uuid.UUID) map[string]interface{} {
+	if h.settingsRepo == nil {
+		return nil
+	}
+	settings, err := h.settingsRepo.GetAgreementSettings(ctx, tenantID)
+	if err != nil || settings == nil {
+		return nil
+	}
+	deref := func(s *string) string {
+		if s == nil {
+			return ""
+		}
+		return strings.TrimSpace(*s)
+	}
+	companyName := deref(settings.CompanyName)
+	if companyName == "" {
+		companyName = deref(settings.BusinessName)
+	}
+	addressParts := []string{}
+	if a := deref(settings.Address); a != "" {
+		addressParts = append(addressParts, a)
+	}
+	if s := deref(settings.State); s != "" {
+		addressParts = append(addressParts, s)
+	}
+	if p := deref(settings.Postcode); p != "" {
+		addressParts = append(addressParts, p)
+	}
+	address := strings.Join(addressParts, ", ")
+	return map[string]interface{}{
+		"company_name":         companyName,
+		"company_trading_name": deref(settings.TradingName),
+		"company_abn":          deref(settings.ABN),
+		"company_address":      address,
+		"company_email":        deref(settings.Email),
+		"company_phone":        deref(settings.Phone),
+	}
+}
+
 // GetMembershipDetail returns full details for a membership type (public).
 func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Request) {
 	tenantSlug := chi.URLParam(r, "tenantSlug")
@@ -209,8 +261,8 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 		mt.TermOptions[i].Bonuses = bonuses
 	}
 
-	// Load attached T&Cs
-	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	// Load attached T&Cs (active only — retired docs never appear in signup)
+	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID, true)
 	if termsErr != nil {
 		log.Printf("signup GetMembershipDetail terms: tenant=%s mt=%s err=%v", tenant.ID, mt.ID, termsErr)
 	}
@@ -220,6 +272,7 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 	// lose it under response size limits when combined with invite payloads elsewhere.
 	writeJSON(w, http.StatusOK, struct {
 		Tenant           map[string]interface{}      `json:"tenant"`
+		Org              map[string]interface{}      `json:"org"`
 		Terms            []models.TermsAndConditions `json:"terms"`
 		PaymentProviders []string                    `json:"payment_providers"`
 		Membership       *models.MembershipType      `json:"membership"`
@@ -237,6 +290,7 @@ func (h *SignupHandler) GetMembershipDetail(w http.ResponseWriter, r *http.Reque
 			"ask_birth_date":              tenant.AskBirthDate,
 			"google_places_api_key":       h.googlePlacesAPIKey(r.Context()),
 		},
+		Org:              h.publicOrgPayload(r.Context(), tenant.ID),
 		Terms:            terms,
 		PaymentProviders: h.availablePaymentProviders(r.Context(), tenant.ID),
 		Membership:       mt,
@@ -634,10 +688,80 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "term_option_id does not belong to membership_type_id")
 		return
 	}
-	canonical, err := deriveCanonicalMembershipPricing(termForCreate, input.PaymentFrequency)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	// v2: if the client picked a payment_schedule_id, validate it belongs to
+	// this term option and use it to derive the canonical pricing instead of
+	// the legacy frequency string.
+	var resolvedSchedule *models.PaymentSchedule
+	if strings.TrimSpace(input.PaymentScheduleID) != "" {
+		if h.scheduleRepo == nil {
+			writeError(w, http.StatusInternalServerError, "Payment schedule repository unavailable")
+			return
+		}
+		schedID, schedErr := uuid.Parse(input.PaymentScheduleID)
+		if schedErr != nil {
+			writeError(w, http.StatusBadRequest, "Invalid payment_schedule_id")
+			return
+		}
+		schedules, schedListErr := h.scheduleRepo.ListForTermOption(r.Context(), toID, tenant.ID)
+		if schedListErr != nil {
+			log.Printf("signup SubmitSignup schedules load: tenant=%s term=%s err=%v", tenant.ID, toID, schedListErr)
+			writeError(w, http.StatusInternalServerError, "Failed to load payment schedules")
+			return
+		}
+		for i := range schedules {
+			if schedules[i].ID == schedID && schedules[i].ArchivedAt == nil {
+				resolvedSchedule = &schedules[i]
+				break
+			}
+		}
+		if resolvedSchedule == nil {
+			writeError(w, http.StatusBadRequest, "payment_schedule_id does not belong to selected term option")
+			return
+		}
+	}
+	// Server-side enforcement of T&C acceptance: the client must have ticked
+	// every active T&C attached to this term option / membership type. The UI
+	// already gates this; the server check closes the loophole and rejects
+	// any unexpected IDs.
+	attachedTerms := loadTermsForSnapshot(r.Context(), h.termsRepo, mtID, toID, tenant.ID)
+	attachedSet := map[string]struct{}{}
+	for _, t := range attachedTerms {
+		attachedSet[t.ID.String()] = struct{}{}
+	}
+	acceptedSet := map[string]struct{}{}
+	for _, raw := range input.AcceptedTermsIDs {
+		if id := strings.TrimSpace(raw); id != "" {
+			acceptedSet[id] = struct{}{}
+		}
+	}
+	for id := range attachedSet {
+		if _, ok := acceptedSet[id]; !ok {
+			writeError(w, http.StatusBadRequest, "All terms and conditions must be accepted")
+			return
+		}
+	}
+	for id := range acceptedSet {
+		if _, ok := attachedSet[id]; !ok {
+			writeError(w, http.StatusBadRequest, "Accepted terms include an entry not attached to this membership")
+			return
+		}
+	}
+	var canonical *canonicalMembershipPricing
+	if resolvedSchedule != nil {
+		canonical, err = derivePricingFromSchedule(resolvedSchedule)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Echo the resolved values back into the input so all subsequent
+		// snapshot / membership write code sees a consistent picture.
+		input.PaymentFrequency = canonical.Frequency
+	} else {
+		canonical, err = deriveCanonicalMembershipPricing(termForCreate, input.PaymentFrequency)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if input.PaymentAmount > 0 && math.Abs(input.PaymentAmount-canonical.Amount) > 0.01 {
 		writeError(w, http.StatusBadRequest, "payment_amount does not match selected term option")
@@ -695,6 +819,16 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error creating membership during signup: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create membership")
 		return
+	}
+	// v2: stamp the resolved payment_schedule_id onto the membership so future
+	// reads can look up amount/interval directly from the schedule row.
+	if resolvedSchedule != nil && h.memberRepo != nil {
+		if err := h.memberRepo.SetPaymentScheduleID(r.Context(), membership.ID, tenant.ID, resolvedSchedule.ID); err != nil {
+			// Non-fatal: the membership exists; the payment_schedule_id is purely
+			// a forward-looking index. Log and continue.
+			log.Printf("signup set payment_schedule_id failed membership=%s schedule=%s err=%v",
+				membership.ID, resolvedSchedule.ID, err)
+		}
 	}
 	markInviteCompleted := func() {
 		if invite != nil && h.inviteRepo != nil {
@@ -1309,7 +1443,7 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 		bonuses, _ := h.bonusRepo.GetBonusesForTermOption(r.Context(), to.ID, tenant.ID)
 		mt.TermOptions[i].Bonuses = bonuses
 	}
-	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID)
+	terms, termsErr := h.termsRepo.GetForMembershipType(r.Context(), mt.ID, tenant.ID, true)
 	if termsErr != nil {
 		log.Printf("signup GetInviteDetail terms: tenant=%s mt=%s err=%v", tenant.ID, mt.ID, termsErr)
 	}
@@ -1319,6 +1453,7 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 	// — map keys are sorted alphabetically and put `terms` last, which risked truncation on invite payloads.
 	writeJSON(w, http.StatusOK, struct {
 		Tenant           map[string]interface{}      `json:"tenant"`
+		Org              map[string]interface{}      `json:"org"`
 		Terms            []models.TermsAndConditions `json:"terms"`
 		Invite           map[string]interface{}      `json:"invite"`
 		PaymentProviders []string                    `json:"payment_providers"`
@@ -1342,6 +1477,7 @@ func (h *SignupHandler) GetInviteDetail(w http.ResponseWriter, r *http.Request) 
 			"ask_birth_date":                tenant.AskBirthDate,
 			"google_places_api_key":         h.googlePlacesAPIKey(r.Context()),
 		},
+		Org:   h.publicOrgPayload(r.Context(), tenant.ID),
 		Terms: terms,
 		Invite: map[string]interface{}{
 			"token":                   invite.Token.String(),
@@ -1464,6 +1600,12 @@ type SignupSubmission struct {
 	GoCardlessMandateID  string        `json:"gocardless_mandate_id,omitempty"`
 	MemberSignature      string        `json:"member_signature"`
 	AcceptedTermsIDs     []string      `json:"accepted_terms_ids,omitempty"`
+	// PaymentScheduleID is the v2 source of truth for the chosen payment plan.
+	// When set, the server reads the schedule row and ignores the legacy
+	// PaymentFrequency / PaymentAmount fields for canonicalisation purposes
+	// (it still echoes the resolved values back into the membership for soak
+	// compatibility).
+	PaymentScheduleID string `json:"payment_schedule_id,omitempty"`
 	SendAgreementEmail   bool          `json:"send_agreement_email,omitempty"`
 	StaffUserID          string        `json:"staff_user_id,omitempty"`
 	StaffSignature       string        `json:"staff_signature,omitempty"`
@@ -3013,8 +3155,54 @@ func replaceKnownTermsPlaceholders(raw string, snap *repository.AgreementSnapsho
 		clientAddress = "Client address"
 	}
 
-	pairs := []string{
-		// Legacy dotted placeholders (backwards compat)
+	// values resolves a value for every registered variable key. New entries
+	// must also be added to internal/terms/variables.go so the admin picker
+	// and client-side preview pick them up.
+	values := map[string]string{
+		"client_name":              clientName,
+		"client_email":             deref(snap.ClientEmail),
+		"client_phone":             deref(snap.ClientPhone),
+		"client_address":           clientAddress,
+		"client_dob":               deref(snap.ClientDateOfBirth),
+		"client_gender":            deref(snap.ClientGender),
+		"emergency_contact_name":   deref(snap.ClientEmergencyContactName),
+		"emergency_contact_phone":  deref(snap.ClientEmergencyContactPhone),
+		"membership_title":         snap.MembershipTypeTitle,
+		"term_months":              fmt.Sprintf("%d", snap.TermMonths),
+		"term_weeks":               fmt.Sprintf("%d", snap.TermMonths*52/12),
+		"total_fee":                fmt.Sprintf("%.2f", snap.TotalFee),
+		"start_date":               snap.StartDate,
+		"end_date":                 deref(snap.EndDate),
+		"payment_frequency":        deref(snap.PaymentFrequency),
+		"payment_method":           deref(snap.PaymentMethod),
+		"company_name":             deref(snap.OrgCompanyName),
+		"company_trading_name":     deref(snap.OrgTradingName),
+		"company_abn":              deref(snap.OrgABN),
+		"company_address":          deref(snap.OrgAddress),
+		"company_email":            deref(snap.OrgEmail),
+		"company_phone":            deref(snap.OrgPhone),
+		"today_date":               time.Now().Format("2 January 2006"),
+	}
+	if snap.PaymentAmount != nil {
+		values["payment_amount"] = fmt.Sprintf("%.2f", *snap.PaymentAmount)
+	} else {
+		values["payment_amount"] = ""
+	}
+
+	// Build the replacer dynamically from the canonical registry so the Go
+	// resolver and the frontend "Variables" picker never drift. Each key gets
+	// both braced and spaced-braced forms.
+	pairs := make([]string, 0, len(terms.All)*4+8)
+	for _, v := range terms.All {
+		val := values[v.Key]
+		pairs = append(pairs,
+			"{{"+v.Key+"}}", val,
+			"{{ "+v.Key+" }}", val,
+		)
+	}
+	// Legacy dotted placeholders kept for backwards compat with any documents
+	// stored before the snake_case naming.
+	pairs = append(pairs,
 		"{{client.name}}", clientName,
 		"{{ client.name }}", clientName,
 		"{{contact.name}}", clientName,
@@ -3023,40 +3211,7 @@ func replaceKnownTermsPlaceholders(raw string, snap *repository.AgreementSnapsho
 		"{{ member.name }}", clientName,
 		"{{client.address}}", clientAddress,
 		"{{ client.address }}", clientAddress,
-
-		// Standard snake_case placeholders
-		"{{client_name}}", clientName,
-		"{{client_email}}", deref(snap.ClientEmail),
-		"{{client_phone}}", deref(snap.ClientPhone),
-		"{{client_address}}", clientAddress,
-		"{{client_dob}}", deref(snap.ClientDateOfBirth),
-		"{{client_gender}}", deref(snap.ClientGender),
-		"{{emergency_contact_name}}", deref(snap.ClientEmergencyContactName),
-		"{{emergency_contact_phone}}", deref(snap.ClientEmergencyContactPhone),
-
-		"{{membership_title}}", snap.MembershipTypeTitle,
-		"{{term_months}}", fmt.Sprintf("%d", snap.TermMonths),
-		"{{term_weeks}}", fmt.Sprintf("%d", snap.TermMonths*52/12),
-		"{{total_fee}}", fmt.Sprintf("%.2f", snap.TotalFee),
-		"{{start_date}}", snap.StartDate,
-		"{{end_date}}", deref(snap.EndDate),
-		"{{payment_frequency}}", deref(snap.PaymentFrequency),
-		"{{payment_method}}", deref(snap.PaymentMethod),
-
-		"{{company_name}}", deref(snap.OrgCompanyName),
-		"{{company_trading_name}}", deref(snap.OrgTradingName),
-		"{{company_abn}}", deref(snap.OrgABN),
-		"{{company_address}}", deref(snap.OrgAddress),
-		"{{company_email}}", deref(snap.OrgEmail),
-		"{{company_phone}}", deref(snap.OrgPhone),
-
-		"{{today_date}}", time.Now().Format("2 January 2006"),
-	}
-
-	if snap.PaymentAmount != nil {
-		pairs = append(pairs, "{{payment_amount}}", fmt.Sprintf("%.2f", *snap.PaymentAmount))
-	}
-
+	)
 	return strings.NewReplacer(pairs...).Replace(raw)
 }
 

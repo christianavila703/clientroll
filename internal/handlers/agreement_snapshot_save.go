@@ -40,7 +40,11 @@ func SaveAgreementSnapshotIfMissing(
 	}
 
 	agreementSettings, _ := settingsRepo.GetAgreementSettings(ctx, tenant.ID)
-	termsDocs, _ := termsRepo.GetForMembershipType(ctx, mt.ID, tenant.ID)
+
+	// Prefer the v2 per-term-option attachments when there are any; otherwise
+	// fall back to the legacy membership-type-level attachments so older
+	// memberships that pre-date the per-term split still snapshot correctly.
+	termsDocs := loadTermsForSnapshot(ctx, termsRepo, mt.ID, termOption.ID, tenant.ID)
 
 	snap := &repository.AgreementSnapshot{
 		TenantID:                    tenant.ID,
@@ -167,6 +171,35 @@ func SaveAgreementSnapshotIfMissing(
 	if _, err := agreementRepo.Create(ctx, snap, termsInputs); err != nil {
 		log.Printf("agreement snapshot (staff) create failed membership=%s tenant=%s err=%v", membership.ID, tenant.ID, err)
 	}
+}
+
+// loadTermsForSnapshot returns the T&C documents that should be baked into a
+// new agreement snapshot. v2 stores per-term-option attachments in
+// term_option_terms; older memberships only have type-level attachments. We
+// look at the per-term set first and only fall back to the type-level set if
+// the per-term set is empty.
+func loadTermsForSnapshot(
+	ctx context.Context,
+	termsRepo *repository.TermsRepo,
+	membershipTypeID, termOptionID, tenantID uuid.UUID,
+) []models.TermsAndConditions {
+	if termsRepo == nil {
+		return nil
+	}
+	if attached, err := termsRepo.AttachedTermsForTermOption(ctx, termOptionID, tenantID); err == nil && len(attached) > 0 {
+		out := make([]models.TermsAndConditions, 0, len(attached))
+		for _, a := range attached {
+			if !a.IsActive {
+				continue
+			}
+			out = append(out, a.TermsAndConditions)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	docs, _ := termsRepo.GetForMembershipType(ctx, membershipTypeID, tenantID, true)
+	return docs
 }
 
 // EnsureSignupTenantDBContext sets Postgres RLS session tenant for public signup requests.

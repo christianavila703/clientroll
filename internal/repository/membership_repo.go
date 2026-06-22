@@ -24,6 +24,18 @@ func NewMembershipRepo(db *database.Postgres) *MembershipRepo {
 	return &MembershipRepo{db: db}
 }
 
+// SetPaymentScheduleID stamps the v2 payment_schedule_id onto a membership.
+// Safe to call when the column does not yet exist (migrations not applied):
+// the UPDATE returns a "column does not exist" error which the caller can
+// log as non-fatal during the soak window.
+func (r *MembershipRepo) SetPaymentScheduleID(ctx context.Context, membershipID, tenantID, scheduleID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx, `
+		UPDATE memberships SET payment_schedule_id = $3, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2`,
+		membershipID, tenantID, scheduleID)
+	return err
+}
+
 // Create inserts a new membership from a signup submission.
 func (r *MembershipRepo) Create(
 	ctx context.Context,

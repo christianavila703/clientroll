@@ -73,13 +73,21 @@ func customScheduleMatchesContractTotal(feeTotal float64, amount *float64, numPa
 
 // MembershipTypeHandler handles membership type CRUD.
 type MembershipTypeHandler struct {
-	mtRepo    *repository.MembershipTypeRepo
-	termsRepo *repository.TermsRepo
+	mtRepo       *repository.MembershipTypeRepo
+	termsRepo    *repository.TermsRepo
+	scheduleRepo *repository.PaymentScheduleRepo
 }
 
 // NewMembershipTypeHandler creates a new handler.
 func NewMembershipTypeHandler(mt *repository.MembershipTypeRepo, tr *repository.TermsRepo) *MembershipTypeHandler {
 	return &MembershipTypeHandler{mtRepo: mt, termsRepo: tr}
+}
+
+// WithSchedules wires in the payment schedule repo. Enables the new admin
+// endpoints for replacing payment schedules on a term option.
+func (h *MembershipTypeHandler) WithSchedules(s *repository.PaymentScheduleRepo) *MembershipTypeHandler {
+	h.scheduleRepo = s
+	return h
 }
 
 // RegisterRoutes registers membership type routes.
@@ -94,7 +102,12 @@ func (h *MembershipTypeHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/membership-types/{mtID}/duplicate", h.Duplicate)
 	r.Post("/membership-types/{mtID}/term-options", h.CreateTermOption)
 	r.Put("/membership-types/{mtID}/term-options/{toID}", h.UpdateTermOption)
+	r.Patch("/membership-types/{mtID}/term-options/{toID}/meta", h.UpdateTermOptionMeta)
 	r.Delete("/term-options/{toID}", h.DeleteTermOption)
+	r.Put("/term-options/{toID}/payment-schedules", h.ReplacePaymentSchedules)
+	r.Get("/term-options/{toID}/payment-schedules", h.ListPaymentSchedules)
+	r.Put("/term-options/{toID}/terms", h.ReplaceTermOptionTerms)
+	r.Get("/term-options/{toID}/terms", h.GetTermOptionTerms)
 	r.Post("/membership-types/{mtID}/terms/{termsID}", h.AttachTerms)
 	r.Delete("/membership-types/{mtID}/terms/{termsID}", h.DetachTerms)
 	r.Get("/membership-types/{mtID}/terms", h.GetTerms)
@@ -646,10 +659,147 @@ func (h *MembershipTypeHandler) DetachTerms(w http.ResponseWriter, r *http.Reque
 func (h *MembershipTypeHandler) GetTerms(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	mtID, _ := uuid.Parse(chi.URLParam(r, "mtID"))
-	terms, err := h.termsRepo.GetForMembershipType(r.Context(), mtID, tenantID)
+	terms, err := h.termsRepo.GetForMembershipType(r.Context(), mtID, tenantID, false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get terms")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"terms": terms})
+}
+
+// UpdateTermOptionMeta updates the v2-only metadata on a term option
+// (duration_value, duration_unit, label, sort_order). It does NOT touch
+// the legacy fee_* fields or payment schedules — for those the admin still
+// uses Update / ReplacePaymentSchedules.
+func (h *MembershipTypeHandler) UpdateTermOptionMeta(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	var input struct {
+		DurationValue *int    `json:"duration_value"`
+		DurationUnit  *string `json:"duration_unit"`
+		Label         *string `json:"label"`
+		SortOrder     *int    `json:"sort_order"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if input.DurationUnit != nil && *input.DurationUnit != "week" && *input.DurationUnit != "month" {
+		writeError(w, http.StatusBadRequest, "duration_unit must be 'week' or 'month'")
+		return
+	}
+	if input.DurationValue != nil && *input.DurationValue <= 0 {
+		writeError(w, http.StatusBadRequest, "duration_value must be > 0")
+		return
+	}
+	if err := h.mtRepo.UpdateTermOptionMeta(r.Context(), toID, tenantID,
+		input.DurationValue, input.DurationUnit, input.Label, input.SortOrder); err != nil {
+		log.Printf("Error updating term option meta: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to update term option")
+		return
+	}
+	to, err := h.mtRepo.GetTermOption(r.Context(), toID, tenantID)
+	if err != nil || to == nil {
+		writeError(w, http.StatusNotFound, "Term option not found after update")
+		return
+	}
+	writeJSON(w, http.StatusOK, to)
+}
+
+// ListPaymentSchedules returns the payment schedules attached to a term option.
+func (h *MembershipTypeHandler) ListPaymentSchedules(w http.ResponseWriter, r *http.Request) {
+	if h.scheduleRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Schedule repository unavailable")
+		return
+	}
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	scheds, err := h.scheduleRepo.ListForTermOption(r.Context(), toID, tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load schedules")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"payment_schedules": scheds})
+}
+
+// ReplacePaymentSchedules atomically replaces the payment schedules attached
+// to a term option. Body: { "payment_schedules": [...] }.
+func (h *MembershipTypeHandler) ReplacePaymentSchedules(w http.ResponseWriter, r *http.Request) {
+	if h.scheduleRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Schedule repository unavailable")
+		return
+	}
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	var input struct {
+		PaymentSchedules []repository.PaymentScheduleInput `json:"payment_schedules"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := repository.ValidateScheduleInputs(input.PaymentSchedules); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	scheds, err := h.scheduleRepo.ReplaceForTermOption(r.Context(), tenantID, toID, input.PaymentSchedules)
+	if err != nil {
+		log.Printf("Error replacing payment schedules: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to replace payment schedules")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"payment_schedules": scheds})
+}
+
+// GetTermOptionTerms returns T&C documents attached to a specific term option.
+func (h *MembershipTypeHandler) GetTermOptionTerms(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	attached, err := h.termsRepo.AttachedTermsForTermOption(r.Context(), toID, tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load attached terms")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"attached_terms": attached})
+}
+
+// ReplaceTermOptionTerms replaces the full set of T&Cs attached to a term
+// option. Body: { "terms": [{ "terms_id":"...", "is_required":true, "sort_order":0 }] }.
+func (h *MembershipTypeHandler) ReplaceTermOptionTerms(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
+	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid term option ID")
+		return
+	}
+	var input struct {
+		Terms []repository.AttachedTermInput `json:"terms"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := h.termsRepo.ReplaceForTermOption(r.Context(), tenantID, toID, input.Terms); err != nil {
+		log.Printf("Error replacing per-term attachments: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to replace attached terms")
+		return
+	}
+	attached, _ := h.termsRepo.AttachedTermsForTermOption(r.Context(), toID, tenantID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"attached_terms": attached})
 }

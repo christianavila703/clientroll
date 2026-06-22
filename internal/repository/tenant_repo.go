@@ -39,7 +39,7 @@ func NewTenantRepo(db *database.Postgres) *TenantRepo {
 // FindByID returns a tenant by ID.
 func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -71,7 +71,7 @@ func (r *TenantRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant
 // FindBySlug returns a tenant by slug.
 func (r *TenantRepo) FindBySlug(ctx context.Context, slug string) (*models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -105,7 +105,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 	query := `
 		INSERT INTO tenants (name, slug, timezone)
 		VALUES ($1, $2, $3)
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
@@ -133,7 +133,7 @@ func (r *TenantRepo) Create(ctx context.Context, input models.CreateTenantInput)
 // List returns all tenants (for platform admin).
 func (r *TenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	query := `
-		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		SELECT id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		       default_thankyou_heading, default_thankyou_body,
 		       default_thankyou_image_url, default_thankyou_redirect_url,
 		       setup_completed_at, created_at, updated_at
@@ -202,7 +202,7 @@ func (r *TenantRepo) Update(ctx context.Context, id uuid.UUID, input models.Upda
 			signup_webhook_enabled = COALESCE($23, signup_webhook_enabled),
 			updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`
@@ -252,7 +252,7 @@ func (r *TenantRepo) CompleteSetup(ctx context.Context, id uuid.UUID) (*models.T
 	query := `
 		UPDATE tenants SET setup_completed_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND setup_completed_at IS NULL
-		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
+		RETURNING id, name, slug, timezone, sales_tax_name, sales_tax_percent, enabled_currencies, enabled_payment_frequencies, ask_emergency_contact, ask_company_information, ask_birth_date, signup_webhook_url, COALESCE(signup_webhook_secret_encrypted, '') AS signup_webhook_secret_encrypted, signup_webhook_enabled, is_active, logo_url, primary_colour, secondary_colour, signup_price_display_mode,
 		          default_thankyou_heading, default_thankyou_body,
 		          default_thankyou_image_url, default_thankyou_redirect_url,
 		          setup_completed_at, created_at, updated_at`

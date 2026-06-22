@@ -250,6 +250,32 @@ export const api = {
     request(`/tenant/membership-types/${mtId}/term-options/${toId}`, { method: "PUT", body: data }),
   deleteTermOption: (id: string) =>
     request(`/tenant/term-options/${id}`, { method: "DELETE" }),
+  updateTermOptionMeta: (mtId: string, toId: string, data: unknown) =>
+    request(`/tenant/membership-types/${mtId}/term-options/${toId}/meta`, { method: "PATCH", body: data }),
+  listPaymentSchedules: (termOptionId: string) =>
+    request(`/tenant/term-options/${termOptionId}/payment-schedules`),
+  replacePaymentSchedules: (termOptionId: string, paymentSchedules: unknown[]) =>
+    request(`/tenant/term-options/${termOptionId}/payment-schedules`, {
+      method: "PUT",
+      body: { payment_schedules: paymentSchedules },
+    }),
+  getTermOptionTerms: (termOptionId: string) =>
+    request(`/tenant/term-options/${termOptionId}/terms`),
+  replaceTermOptionTerms: (termOptionId: string, terms: unknown[]) =>
+    request(`/tenant/term-options/${termOptionId}/terms`, {
+      method: "PUT",
+      body: { terms },
+    }),
+  listTermsVersions: (termsId: string) =>
+    request(`/tenant/terms/${termsId}/versions`),
+  getPendingReacceptance: (membershipId: string) =>
+    request(`/tenant/memberships/${membershipId}/pending-reacceptance`),
+  acknowledgeReacceptance: (membershipId: string, termsId: string) =>
+    request(`/tenant/memberships/${membershipId}/terms/${termsId}/acknowledge`, {
+      method: "POST",
+    }),
+  listReacceptanceLinks: (membershipId: string) =>
+    request(`/tenant/memberships/${membershipId}/reacceptance-links`),
 
   // Bonuses
   listBonuses: () => request("/tenant/bonuses"),

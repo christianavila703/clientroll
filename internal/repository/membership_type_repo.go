@@ -15,7 +15,9 @@ import (
 
 // MembershipTypeRepo handles database operations for membership types.
 type MembershipTypeRepo struct {
-	db *database.Postgres
+	db           *database.Postgres
+	scheduleRepo *PaymentScheduleRepo
+	termsRepo    *TermsRepo
 }
 
 func decodeMembershipEnabledPaymentFrequencies(raw []byte) []string {
@@ -30,8 +32,24 @@ func decodeMembershipEnabledPaymentFrequencies(raw []byte) []string {
 }
 
 // NewMembershipTypeRepo creates a new membership type repository.
+// scheduleRepo and termsRepo are optional — if set, term options returned
+// from FindByID/FindBySlug/List include eager-loaded PaymentSchedules and
+// AttachedTerms. When nil (e.g. in older call sites that haven't been wired
+// yet) the term option is returned with the legacy columns only.
 func NewMembershipTypeRepo(db *database.Postgres) *MembershipTypeRepo {
 	return &MembershipTypeRepo{db: db}
+}
+
+// WithSchedules wires a PaymentScheduleRepo for eager loading.
+func (r *MembershipTypeRepo) WithSchedules(s *PaymentScheduleRepo) *MembershipTypeRepo {
+	r.scheduleRepo = s
+	return r
+}
+
+// WithTerms wires a TermsRepo for per-term-option T&C eager loading.
+func (r *MembershipTypeRepo) WithTerms(t *TermsRepo) *MembershipTypeRepo {
+	r.termsRepo = t
+	return r
 }
 
 // List returns all membership types for a tenant, with term options attached.
@@ -67,32 +85,50 @@ func (r *MembershipTypeRepo) List(ctx context.Context, tenantID uuid.UUID) ([]mo
 
 // allTermOptionsForTenant fetches every term option for a tenant in one query, keyed by membership_type_id.
 func (r *MembershipTypeRepo) allTermOptionsForTenant(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID][]models.TermOption, error) {
-	query := `
-		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
-		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
-		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
-		FROM membership_term_options
-		WHERE tenant_id = $1
-		ORDER BY duration_months`
-	rows, err := r.db.Pool.Query(ctx, query, tenantID)
+	rows, err := r.db.Pool.Query(ctx, termOptionsListSQL+` WHERE tenant_id = $1 ORDER BY sort_order, duration_months`, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	m := make(map[uuid.UUID][]models.TermOption)
+	var ids []uuid.UUID
 	for rows.Next() {
-		var to models.TermOption
-		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
-			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
-			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
-			&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
-			&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments); err != nil {
+		to, err := scanTermOption(rows)
+		if err != nil {
 			return nil, err
 		}
 		m[to.MembershipTypeID] = append(m[to.MembershipTypeID], to)
+		ids = append(ids, to.ID)
 	}
-	return m, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	r.attachEnrichment(ctx, m, tenantID)
+	return m, nil
+}
+
+// attachEnrichment loads payment schedules and per-term attached T&Cs in
+// batch and stitches them into the term options in the provided map. Safe to
+// call with a nil scheduleRepo / termsRepo (just returns without enrichment).
+func (r *MembershipTypeRepo) attachEnrichment(ctx context.Context, byMT map[uuid.UUID][]models.TermOption, tenantID uuid.UUID) {
+	if r.scheduleRepo != nil {
+		if scheds, err := r.scheduleRepo.ListForTenant(ctx, tenantID); err == nil {
+			for mt := range byMT {
+				for i := range byMT[mt] {
+					byMT[mt][i].PaymentSchedules = scheds[byMT[mt][i].ID]
+				}
+			}
+		}
+	}
+	if r.termsRepo != nil {
+		if attached, err := r.termsRepo.AttachedTermsForTenant(ctx, tenantID); err == nil {
+			for mt := range byMT {
+				for i := range byMT[mt] {
+					byMT[mt][i].AttachedTerms = attached[byMT[mt][i].ID]
+				}
+			}
+		}
+	}
 }
 
 // FindByID returns a membership type with its term options.
@@ -189,28 +225,47 @@ func (r *MembershipTypeRepo) CreateTermOption(
 ) (*models.TermOption, error) {
 	query := `
 		INSERT INTO membership_term_options (tenant_id, membership_type_id, duration_months,
+		    duration_value, duration_unit,
 		    fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments,
 		    continue_after_term,
 		    custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
 		    custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
-		          custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
-		          custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments`
+		VALUES ($1, $2, $3, $3, 'month', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		RETURNING ` + termOptionReturningCols
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, tenantID, membershipTypeID, durationMonths,
 		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments,
 		continueAfterTerm, customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
-		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
-		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
-		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
+		termOptionScanArgs(&to)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating term option: %w", err)
 	}
+	r.syncSchedulesFromLegacy(ctx, &to)
 	return &to, nil
+}
+
+// syncSchedulesFromLegacy converts the legacy fee_* / custom_schedule_* values
+// on the term option into payment_schedule rows and replaces the existing set.
+// Called by Create/Update so the new schema stays in lock-step with the old.
+// No-op if scheduleRepo isn't wired.
+func (r *MembershipTypeRepo) syncSchedulesFromLegacy(ctx context.Context, to *models.TermOption) {
+	if r.scheduleRepo == nil || to == nil {
+		return
+	}
+	inputs := LegacyFeesToSchedules(
+		to.DurationMonths, to.FeeTotal,
+		to.FeeWeekly, to.FeeFortnightly, to.FeeMonthly, to.FeeQuarterly,
+		to.AllowUpfront, to.ContinueAfterTerm,
+		to.CustomScheduleEnabled, to.CustomScheduleLabel, to.CustomScheduleAmount,
+		to.CustomScheduleIntervalUnit, to.CustomScheduleIntervalCount, to.CustomScheduleNumPayments,
+	)
+	if _, err := r.scheduleRepo.ReplaceForTermOption(ctx, to.TenantID, to.ID, inputs); err != nil {
+		// Soak-window failure here means the new schedule rows are out of date,
+		// but legacy code paths still work. Log loudly and keep going.
+		fmt.Printf("WARN syncSchedulesFromLegacy term_option=%s tenant=%s err=%v\n",
+			to.ID, to.TenantID, err)
+	}
 }
 
 // UpdateTermOption updates a term option.
@@ -230,31 +285,54 @@ func (r *MembershipTypeRepo) UpdateTermOption(
 	customScheduleIntervalCount *int,
 	customScheduleNumPayments *int,
 ) (*models.TermOption, error) {
+	// Update both the legacy duration_months and the new duration_value so the
+	// two representations stay in lock-step. duration_unit isn't touched here
+	// — the new admin API drives it explicitly.
 	query := `
-		UPDATE membership_term_options SET duration_months=$3, fee_total=$4,
+		UPDATE membership_term_options SET duration_months=$3, duration_value=$3, fee_total=$4,
 		    fee_weekly=$5, fee_fortnightly=$6, fee_monthly=$7, fee_quarterly=$8,
 		    allow_upfront=$9, num_payments=$10, continue_after_term=$11, custom_schedule_enabled=$12,
 		    custom_schedule_label=$13, custom_schedule_amount=$14,
 		    custom_schedule_interval_unit=$15, custom_schedule_interval_count=$16,
 		    custom_schedule_num_payments=$17, updated_at=NOW()
 		WHERE id=$1 AND tenant_id=$2
-		RETURNING id, tenant_id, membership_type_id, duration_months,
-		          fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
-		          custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
-		          custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments`
+		RETURNING ` + termOptionReturningCols
 
 	var to models.TermOption
 	err := r.db.Pool.QueryRow(ctx, query, id, tenantID, durationMonths,
 		feeTotal, feeWeekly, feeFortnightly, feeMonthly, feeQuarterly, allowUpfront, numPayments,
 		continueAfterTerm, customScheduleEnabled, customScheduleLabel, customScheduleAmount, customScheduleIntervalUnit, customScheduleIntervalCount, customScheduleNumPayments).Scan(
-		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
-		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
-		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
+		termOptionScanArgs(&to)...)
 	if err != nil {
 		return nil, fmt.Errorf("updating term option: %w", err)
 	}
+	r.syncSchedulesFromLegacy(ctx, &to)
 	return &to, nil
+}
+
+// UpdateTermOptionMeta updates the v2-only metadata on a term option
+// (duration_value, duration_unit, label, sort_order). Any nil pointer leaves
+// the existing column unchanged. duration_value mirrors back into
+// duration_months when set (so legacy code stays in sync during the soak).
+func (r *MembershipTypeRepo) UpdateTermOptionMeta(
+	ctx context.Context,
+	id, tenantID uuid.UUID,
+	durationValue *int,
+	durationUnit *string,
+	label *string,
+	sortOrder *int,
+) error {
+	_, err := r.db.Pool.Exec(ctx, `
+		UPDATE membership_term_options SET
+			duration_value  = COALESCE($3, duration_value),
+			duration_months = COALESCE($3, duration_months),
+			duration_unit   = COALESCE($4, duration_unit),
+			label           = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE label END,
+			sort_order      = COALESCE($6, sort_order),
+			updated_at      = NOW()
+		WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID, durationValue, durationUnit, label, sortOrder)
+	return err
 }
 
 // SoftDelete marks a membership type as deleted. It disappears from listings but
@@ -308,38 +386,33 @@ func (r *MembershipTypeRepo) DeleteTermOption(ctx context.Context, id, tenantID 
 	return err
 }
 
-// GetTermOption returns a single term option by ID.
+// GetTermOption returns a single term option by ID, including its payment
+// schedules and per-term attached T&Cs (when the repos are wired).
 func (r *MembershipTypeRepo) GetTermOption(ctx context.Context, termOptionID, tenantID uuid.UUID) (*models.TermOption, error) {
-	query := `
-		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
-		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
-		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
-		FROM membership_term_options
-		WHERE id = $1 AND tenant_id = $2`
-	var to models.TermOption
-	err := r.db.Pool.QueryRow(ctx, query, termOptionID, tenantID).Scan(
-		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
-		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
-		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
-		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments)
+	row := r.db.Pool.QueryRow(ctx,
+		termOptionsListSQL+` WHERE id = $1 AND tenant_id = $2`,
+		termOptionID, tenantID)
+	to, err := scanTermOption(row)
 	if err != nil {
 		return nil, err
+	}
+	if r.scheduleRepo != nil {
+		if scheds, err := r.scheduleRepo.ListForTermOption(ctx, to.ID, tenantID); err == nil {
+			to.PaymentSchedules = scheds
+		}
+	}
+	if r.termsRepo != nil {
+		if attached, err := r.termsRepo.AttachedTermsForTermOption(ctx, to.ID, tenantID); err == nil {
+			to.AttachedTerms = attached
+		}
 	}
 	return &to, nil
 }
 
 func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeID, tenantID uuid.UUID) ([]models.TermOption, error) {
-	query := `
-		SELECT id, tenant_id, membership_type_id, duration_months,
-		       fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly, allow_upfront, num_payments, continue_after_term,
-		       custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
-		       custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments
-		FROM membership_term_options
-		WHERE membership_type_id = $1 AND tenant_id = $2
-		ORDER BY duration_months`
-
-	rows, err := r.db.Pool.Query(ctx, query, membershipTypeID, tenantID)
+	rows, err := r.db.Pool.Query(ctx,
+		termOptionsListSQL+` WHERE membership_type_id = $1 AND tenant_id = $2 ORDER BY sort_order, duration_months`,
+		membershipTypeID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -347,17 +420,54 @@ func (r *MembershipTypeRepo) getTermOptions(ctx context.Context, membershipTypeI
 
 	var opts []models.TermOption
 	for rows.Next() {
-		var to models.TermOption
-		if err := rows.Scan(&to.ID, &to.TenantID, &to.MembershipTypeID,
-			&to.DurationMonths, &to.FeeTotal, &to.FeeWeekly,
-			&to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly, &to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
-			&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
-			&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments); err != nil {
+		to, err := scanTermOption(rows)
+		if err != nil {
 			return nil, err
 		}
 		opts = append(opts, to)
 	}
-	return opts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if r.scheduleRepo != nil || r.termsRepo != nil {
+		byMT := map[uuid.UUID][]models.TermOption{membershipTypeID: opts}
+		r.attachEnrichment(ctx, byMT, tenantID)
+		opts = byMT[membershipTypeID]
+	}
+	return opts, nil
+}
+
+// Shared column list + scanner so the legacy and new-shape selects stay in sync.
+const termOptionReturningCols = `id, tenant_id, membership_type_id, duration_months,
+		duration_value, duration_unit, label, sort_order, archived_at,
+		fee_total, fee_weekly, fee_fortnightly, fee_monthly, fee_quarterly,
+		allow_upfront, num_payments, continue_after_term,
+		custom_schedule_enabled, custom_schedule_label, custom_schedule_amount,
+		custom_schedule_interval_unit, custom_schedule_interval_count, custom_schedule_num_payments`
+
+const termOptionsListSQL = `SELECT ` + termOptionReturningCols + ` FROM membership_term_options`
+
+// scanTermOption reads one row in the standard column order. Accepts either
+// pgx.Row (single-row) or pgx.Rows (rows.Scan) via the interface.
+type rowScanner interface{ Scan(dest ...any) error }
+
+func scanTermOption(row rowScanner) (models.TermOption, error) {
+	var to models.TermOption
+	if err := row.Scan(termOptionScanArgs(&to)...); err != nil {
+		return to, err
+	}
+	return to, nil
+}
+
+func termOptionScanArgs(to *models.TermOption) []any {
+	return []any{
+		&to.ID, &to.TenantID, &to.MembershipTypeID, &to.DurationMonths,
+		&to.DurationValue, &to.DurationUnit, &to.Label, &to.SortOrder, &to.ArchivedAt,
+		&to.FeeTotal, &to.FeeWeekly, &to.FeeFortnightly, &to.FeeMonthly, &to.FeeQuarterly,
+		&to.AllowUpfront, &to.NumPayments, &to.ContinueAfterTerm,
+		&to.CustomScheduleEnabled, &to.CustomScheduleLabel, &to.CustomScheduleAmount,
+		&to.CustomScheduleIntervalUnit, &to.CustomScheduleIntervalCount, &to.CustomScheduleNumPayments,
+	}
 }
 
 func (r *MembershipTypeRepo) findOne(ctx context.Context, where string, args ...interface{}) (*models.MembershipType, error) {

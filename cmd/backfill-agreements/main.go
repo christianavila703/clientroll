@@ -200,7 +200,21 @@ func backfillOne(
 		return errors.New("term option lookup: not found")
 	}
 	agreementSettings, _ := settingsRepo.GetAgreementSettings(ctx, row.TenantID)
-	termsDocs, _ := termsRepo.GetForMembershipType(ctx, row.MembershipTypeID, row.TenantID)
+
+	// Prefer per-term-option T&C attachments when present (v2). Memberships
+	// that pre-date the per-term split fall back to type-level attachments.
+	var termsDocs []models.TermsAndConditions
+	if attached, err := termsRepo.AttachedTermsForTermOption(ctx, row.TermOptionID, row.TenantID); err == nil && len(attached) > 0 {
+		for _, a := range attached {
+			if !a.IsActive {
+				continue
+			}
+			termsDocs = append(termsDocs, a.TermsAndConditions)
+		}
+	}
+	if len(termsDocs) == 0 {
+		termsDocs, _ = termsRepo.GetForMembershipType(ctx, row.MembershipTypeID, row.TenantID, true)
+	}
 
 	snap := &repository.AgreementSnapshot{
 		TenantID:                    row.TenantID,

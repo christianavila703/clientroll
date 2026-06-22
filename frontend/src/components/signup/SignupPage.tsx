@@ -15,6 +15,15 @@ interface TermsDoc {
   is_active: boolean;
 }
 
+interface OrgPayload {
+  company_name?: string;
+  company_trading_name?: string;
+  company_abn?: string;
+  company_address?: string;
+  company_email?: string;
+  company_phone?: string;
+}
+
 type Step = "select" | "detail" | "form" | "thankyou";
 type Tenant = TenantBranding;
 
@@ -27,6 +36,7 @@ export default function SignupPage() {
   const [selected, setSelected] = useState<MembershipType | null>(null);
   const [selectedTerm, setSelectedTerm] = useState<TermOption | null>(null);
   const [terms, setTerms] = useState<TermsDoc[]>([]);
+  const [org, setOrg] = useState<OrgPayload | null>(null);
   const [step, setStep] = useState<Step>("select");
   const [thankyou, setThankyou] = useState<Record<string, unknown>>({});
   const [inviteContext, setInviteContext] = useState<Record<string, unknown> | null>(null);
@@ -54,6 +64,7 @@ export default function SignupPage() {
         setTenant(data.tenant);
         setSelected(data.membership);
         setTerms(data.terms || []);
+        setOrg((data.org as OrgPayload) || null);
         setInviteContext(data.invite || null);
         setInviteClient(data.invite_client || null);
         const termsForMembership = data.membership?.term_options || [];
@@ -72,6 +83,7 @@ export default function SignupPage() {
         setTenant(data.tenant);
         setSelected(data.membership);
         setTerms(data.terms || []);
+        setOrg((data.org as OrgPayload) || null);
         if (data.payment_providers && data.tenant) {
           setTenant({ ...data.tenant, payment_providers: data.payment_providers });
         }
@@ -166,6 +178,7 @@ export default function SignupPage() {
       if (!res.ok) throw new Error(data.error || "Unable to load membership details.");
       setSelected((data.membership as MembershipType) || mt);
       setTerms(data.terms || []);
+      setOrg((data.org as OrgPayload) || null);
       if (data.tenant) {
         setTenant({
           ...(data.tenant as Tenant),
@@ -251,11 +264,24 @@ export default function SignupPage() {
         {step === "form" && selected && selectedTerm && tenant && (
           <AgreementForm
             tenant={tenant}
+            org={org}
             membership={selected}
             termOption={selectedTerm}
             tenantSlug={tenantSlug || ""}
             paymentProviders={tenant.payment_providers || []}
-            terms={terms}
+            // v2: prefer the per-term-option T&Cs when the admin attached any;
+            // fall back to the type-level set for older memberships.
+            terms={
+              selectedTerm.attached_terms && selectedTerm.attached_terms.length > 0
+                ? selectedTerm.attached_terms.map(a => ({
+                    id: a.id,
+                    title: a.title,
+                    content: a.content,
+                    version: a.version,
+                    is_active: a.is_active,
+                  }))
+                : terms
+            }
             inviteContext={inviteContext || undefined}
             inviteClient={inviteClient || undefined}
             onComplete={(ty) => { setThankyou(ty); setStep("thankyou"); }}
@@ -268,4 +294,4 @@ export default function SignupPage() {
   );
 }
 
-export type { Tenant, MembershipType, TermOption, Bonus, TermsDoc };
+export type { Tenant, MembershipType, TermOption, Bonus, TermsDoc, OrgPayload };

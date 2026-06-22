@@ -6,9 +6,41 @@ export interface Bonus {
   value: number;
 }
 
+export interface PaymentSchedule {
+  id: string;
+  tenant_id: string;
+  term_option_id: string;
+  kind: "upfront" | "recurring" | "instalments";
+  label?: string | null;
+  amount: number;
+  interval_unit?: "week" | "month" | null;
+  interval_count?: number | null;
+  num_payments?: number | null;
+  is_default: boolean;
+  sort_order: number;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttachedTerms {
+  id: string;
+  title: string;
+  content: string;
+  version: number;
+  is_active: boolean;
+  is_required: boolean;
+  attach_sort_order: number;
+}
+
 export interface TermOption {
   id: string;
   duration_months: number;
+  // v2 metadata. Optional during the migration soak; defaults to month-based.
+  duration_value?: number;
+  duration_unit?: "week" | "month";
+  label?: string | null;
+  sort_order?: number;
   fee_total: number;
   fee_weekly?: number;
   fee_fortnightly?: number;
@@ -24,6 +56,8 @@ export interface TermOption {
   custom_schedule_interval_count?: number;
   custom_schedule_num_payments?: number;
   bonuses?: Bonus[];
+  payment_schedules?: PaymentSchedule[];
+  attached_terms?: AttachedTerms[];
 }
 
 export interface MembershipType {
