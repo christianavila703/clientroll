@@ -209,11 +209,6 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
                         {processingFeeLabelForTerm(term)}
                       </p>
                     )}
-                    {(term as any).num_payments && (
-                      <p className="text-xs font-medium mt-1" style={{ color: "var(--brandPrimary)" }}>
-                        {(term as any).num_payments} payments then membership stays active
-                      </p>
-                    )}
                   </button>
                 ))}
               </div>

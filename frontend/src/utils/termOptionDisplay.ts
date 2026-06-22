@@ -77,7 +77,10 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
     const count = s.interval_count ?? null;
     const adverb = standardCadenceAdverb(unit, count);
     if (s.num_payments && s.num_payments > 0) {
-      const total = feeTotal > 0 ? feeTotal : Math.round(s.amount * s.num_payments * 100) / 100;
+      // For fixed-count plans, the contract total IS amount × num_payments.
+      // Don't trust fee_total here — it can be stale from legacy admin paths
+      // and disagree with what the schedule actually bills.
+      const total = Math.round(s.amount * s.num_payments * 100) / 100;
       const noun = s.num_payments === 1 ? "payment" : "payments";
       // "3 monthly payments" reads better than "3 payments, every month"
       // when the cadence is standard; fall back to the "every N units"
