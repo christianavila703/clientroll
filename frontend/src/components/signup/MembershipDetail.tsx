@@ -192,13 +192,13 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
                       const pricing = pricingForTerm(term);
                       return (
                         <>
-                          <div className="mt-1 text-[15px] font-semibold text-gray-900 tabular-nums">
+                          <div className="mt-1.5 text-[20px] font-bold text-gray-900 tabular-nums leading-tight">
                             {moneyWithCurrency(pricing.amount)}
                           </div>
-                          <p className="text-[12px] text-gray-500 mt-1">{pricing.suffix}</p>
+                          <p className="text-[14px] font-medium text-gray-800 mt-1">{pricing.suffix}</p>
                           {pricing.total && pricing.total !== pricing.amount && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">
-                              total {moneyWithCurrency(pricing.total)}
+                            <p className="text-[12px] text-gray-500 mt-0.5">
+                              Total {moneyWithCurrency(pricing.total)}
                             </p>
                           )}
                         </>

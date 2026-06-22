@@ -35,16 +35,29 @@ const cadenceWord = (
   return "period";
 };
 
-const cadenceAdverb = (
+/** Returns a single-word adverb ("weekly" | "fortnightly" | "monthly") when
+ * the cadence matches a standard preset, or null when it doesn't (e.g.
+ * "every 3 months" — caller should use a phrase like "every 3 months"
+ * instead of inventing "quarterly").
+ */
+const standardCadenceAdverb = (
   unit: "week" | "month" | null | undefined,
   count: number | null | undefined,
-): string => {
+): string | null => {
   const c = count ?? 1;
   if (unit === "week" && c === 1) return "weekly";
   if (unit === "week" && c === 2) return "fortnightly";
   if (unit === "month" && c === 1) return "monthly";
-  if (unit === "month" && c === 3) return "quarterly";
-  return `every ${cadenceWord(unit, count)}`;
+  return null;
+};
+
+const everyPhrase = (
+  unit: "week" | "month" | null | undefined,
+  count: number | null | undefined,
+): string => {
+  const c = count ?? 1;
+  if (c === 1) return `every ${unit ?? "period"}`;
+  return `every ${c} ${unit ?? "period"}s`;
 };
 
 const defaultSchedule = (term: TermOption): PaymentSchedule | undefined => {
@@ -58,20 +71,24 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
 
   if (s) {
     if (s.kind === "upfront") {
-      return { amount: s.amount, suffix: "pay in full" };
+      return { amount: s.amount, suffix: "Pay in full" };
     }
-    const adverb = cadenceAdverb(s.interval_unit ?? null, s.interval_count ?? null);
+    const unit = s.interval_unit ?? null;
+    const count = s.interval_count ?? null;
+    const adverb = standardCadenceAdverb(unit, count);
     if (s.num_payments && s.num_payments > 0) {
-      // Fixed-count instalment plan (e.g. "× 3 monthly payments").
       const total = feeTotal > 0 ? feeTotal : Math.round(s.amount * s.num_payments * 100) / 100;
-      return {
-        amount: s.amount,
-        suffix: `× ${s.num_payments} ${adverb} payment${s.num_payments === 1 ? "" : "s"}`,
-        total,
-      };
+      const noun = s.num_payments === 1 ? "payment" : "payments";
+      // "3 monthly payments" reads better than "3 payments, every month"
+      // when the cadence is standard; fall back to the "every N units"
+      // phrasing for exotic intervals (e.g. every 3 months, every 6 weeks).
+      const phrase = adverb
+        ? `${s.num_payments} ${adverb} ${noun}`
+        : `${s.num_payments} ${noun}, ${everyPhrase(unit, count)}`;
+      return { amount: s.amount, suffix: phrase, total };
     }
     // Open-ended recurring subscription.
-    const word = cadenceWord(s.interval_unit ?? null, s.interval_count ?? null);
+    const word = cadenceWord(unit, count);
     return {
       amount: s.amount,
       suffix: `per ${word}`,
@@ -82,7 +99,7 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
   // No payment_schedules — fall back to legacy fee fields. We only do this
   // for terms that genuinely have no schedule rows; new terms always have one.
   if (term.allow_upfront && (!term.fee_monthly || term.fee_monthly <= 0) && (!term.fee_weekly || term.fee_weekly <= 0) && (!term.fee_fortnightly || term.fee_fortnightly <= 0)) {
-    return { amount: feeTotal, suffix: "pay in full" };
+    return { amount: feeTotal, suffix: "Pay in full" };
   }
   if (term.fee_monthly && term.fee_monthly > 0) {
     return { amount: term.fee_monthly, suffix: "per month", total: feeTotal };
@@ -93,5 +110,5 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
   if (term.fee_fortnightly && term.fee_fortnightly > 0) {
     return { amount: term.fee_fortnightly, suffix: "per fortnight", total: feeTotal };
   }
-  return { amount: feeTotal, suffix: "pay in full" };
+  return { amount: feeTotal, suffix: "Pay in full" };
 };
