@@ -35,22 +35,6 @@ const cadenceWord = (
   return "period";
 };
 
-/** Returns a single-word adverb ("weekly" | "fortnightly" | "monthly") when
- * the cadence matches a standard preset, or null when it doesn't (e.g.
- * "every 3 months" — caller should use a phrase like "every 3 months"
- * instead of inventing "quarterly").
- */
-const standardCadenceAdverb = (
-  unit: "week" | "month" | null | undefined,
-  count: number | null | undefined,
-): string | null => {
-  const c = count ?? 1;
-  if (unit === "week" && c === 1) return "weekly";
-  if (unit === "week" && c === 2) return "fortnightly";
-  if (unit === "month" && c === 1) return "monthly";
-  return null;
-};
-
 const everyPhrase = (
   unit: "week" | "month" | null | undefined,
   count: number | null | undefined,
@@ -75,19 +59,14 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
     }
     const unit = s.interval_unit ?? null;
     const count = s.interval_count ?? null;
-    const adverb = standardCadenceAdverb(unit, count);
     if (s.num_payments && s.num_payments > 0) {
-      // For fixed-count plans, the contract total IS amount × num_payments.
-      // Don't trust fee_total here — it can be stale from legacy admin paths
-      // and disagree with what the schedule actually bills.
+      // Fixed-count instalment plan. The contract total IS amount × num_payments
+      // — don't trust fee_total here, it can be stale from legacy admin paths.
+      // Wording is explicit so it can't be misread as a recurring pattern:
+      //   "3 payments total · every 3 months"
       const total = Math.round(s.amount * s.num_payments * 100) / 100;
       const noun = s.num_payments === 1 ? "payment" : "payments";
-      // "3 monthly payments" reads better than "3 payments, every month"
-      // when the cadence is standard; fall back to the "every N units"
-      // phrasing for exotic intervals (e.g. every 3 months, every 6 weeks).
-      const phrase = adverb
-        ? `${s.num_payments} ${adverb} ${noun}`
-        : `${s.num_payments} ${noun}, ${everyPhrase(unit, count)}`;
+      const phrase = `${s.num_payments} ${noun} total · ${everyPhrase(unit, count)}`;
       return { amount: s.amount, suffix: phrase, total };
     }
     // Open-ended recurring subscription.
