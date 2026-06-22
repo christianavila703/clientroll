@@ -31,9 +31,7 @@ export default function PaymentSchedulesEditor({
   mtId,
   onSaved,
 }: Props) {
-  const hydrated = initialFormFromTermOption(termOption);
-  const [form, setForm] = useState<SimplePricingForm>(() => hydrated.form);
-  const [extraScheduleCount, setExtraScheduleCount] = useState<number>(hydrated.extraScheduleCount);
+  const [form, setForm] = useState<SimplePricingForm>(() => initialFormFromTermOption(termOption).form);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -41,9 +39,7 @@ export default function PaymentSchedulesEditor({
 
   // Reset when a different term option is opened or its server-side fields change.
   useEffect(() => {
-    const fresh = initialFormFromTermOption(termOption);
-    setForm(fresh.form);
-    setExtraScheduleCount(fresh.extraScheduleCount);
+    setForm(initialFormFromTermOption(termOption).form);
     setError("");
     setMessage("");
     setDirty(false);
@@ -92,7 +88,6 @@ export default function PaymentSchedulesEditor({
       });
       await api.replacePaymentSchedules(termOption.id, schedules);
       setDirty(false);
-      setExtraScheduleCount(0);
       setMessage("Saved.");
       onSaved?.();
     } catch (e: unknown) {
@@ -119,12 +114,7 @@ export default function PaymentSchedulesEditor({
       {error && <div className="bg-red-50 text-red-700 text-[12px] px-2 py-1 rounded">{error}</div>}
       {message && <div className="bg-green-50 text-green-700 text-[12px] px-2 py-1 rounded">{message}</div>}
 
-      <SimplePricingFields
-        form={form}
-        setForm={setFormWrapped}
-        currencyCode={currencyCode}
-        extraScheduleCount={extraScheduleCount}
-      />
+      <SimplePricingFields form={form} setForm={setFormWrapped} currencyCode={currencyCode} />
     </div>
   );
 }

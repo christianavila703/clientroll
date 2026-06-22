@@ -17,7 +17,6 @@ interface Props {
   form: SimplePricingForm;
   setForm: (updater: (prev: SimplePricingForm) => SimplePricingForm) => void;
   currencyCode: string;
-  extraScheduleCount?: number;
 }
 
 const fmtMoney = (n: number, currency: string) => {
@@ -25,7 +24,7 @@ const fmtMoney = (n: number, currency: string) => {
   return `${currency} $${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-export default function SimplePricingFields({ form, setForm, currencyCode, extraScheduleCount = 0 }: Props) {
+export default function SimplePricingFields({ form, setForm, currencyCode }: Props) {
   const amounts = derivedSimpleAmounts(form);
   const update = <K extends keyof SimplePricingForm>(key: K, value: SimplePricingForm[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -47,14 +46,6 @@ export default function SimplePricingFields({ form, setForm, currencyCode, extra
 
   return (
     <div className="space-y-5">
-      {extraScheduleCount > 0 && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800">
-          This term option used to offer {extraScheduleCount + 1} payment cadences. In the new model each term option offers just one.
-          The one shown below is what your members currently see by default; saving will keep only this one.
-          To offer the other cadences, add a separate term option for each.
-        </div>
-      )}
-
       {/* Term length + label */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
