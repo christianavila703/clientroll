@@ -466,6 +466,9 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	}
 	var input struct {
 		DurationMonths              int      `json:"duration_months"`
+		DurationValue               *int     `json:"duration_value"`
+		DurationUnit                *string  `json:"duration_unit"`
+		Label                       *string  `json:"label"`
 		FeeTotal                    float64  `json:"fee_total"`
 		FeeWeekly                   *float64 `json:"fee_weekly"`
 		FeeFortnightly              *float64 `json:"fee_fortnightly"`
@@ -486,6 +489,10 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 	}
 	if input.DurationMonths <= 0 {
 		writeError(w, http.StatusBadRequest, "Duration must be a whole number of months")
+		return
+	}
+	if input.DurationUnit != nil && *input.DurationUnit != "week" && *input.DurationUnit != "month" {
+		writeError(w, http.StatusBadRequest, "duration_unit must be 'week' or 'month'")
 		return
 	}
 	if input.CustomScheduleEnabled {
@@ -532,6 +539,22 @@ func (h *MembershipTypeHandler) CreateTermOption(w http.ResponseWriter, r *http.
 		log.Printf("Error creating term option: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create term option")
 		return
+	}
+	// Persist new-schema fields (duration_value, duration_unit, label) that the
+	// repo's Create path doesn't yet take as args. Soak-window compatibility:
+	// the repo defaults duration_value to duration_months and duration_unit to
+	// 'month', which is wrong if the caller wanted weeks or a custom label.
+	if input.DurationValue != nil || input.DurationUnit != nil || input.Label != nil {
+		if err := h.mtRepo.UpdateTermOptionMeta(
+			r.Context(), to.ID, tenantID,
+			input.DurationValue, input.DurationUnit, input.Label, nil, nil,
+		); err != nil {
+			log.Printf("Error persisting term option meta after create id=%s err=%v", to.ID, err)
+		} else {
+			if refreshed, err := h.mtRepo.GetTermOption(r.Context(), to.ID, tenantID); err == nil && refreshed != nil {
+				to = refreshed
+			}
+		}
 	}
 	writeJSON(w, http.StatusCreated, to)
 }

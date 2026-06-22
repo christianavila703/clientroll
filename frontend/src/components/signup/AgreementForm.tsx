@@ -210,17 +210,19 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
 
   const usesBankStep = false;
   const hasTerms = terms.length > 0;
+  const requiresSignature = hasTerms;
   const steps: { key: FormStep; label: string; icon: string }[] = [
     { key: "member", label: "Your Details", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
     { key: "payment", label: "Payment", icon: "M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" },
-    { key: "sign", label: "Sign", icon: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 17.07a4.5 4.5 0 01-1.897 1.13L2.25 19.5l1.245-4.28a4.5 4.5 0 011.13-1.897L16.862 4.487z" },
   ];
   if (usesBankStep) {
-    steps.splice(2, 0, { key: "bank", label: "Bank Details", icon: "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" })
+    steps.push({ key: "bank", label: "Bank Details", icon: "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" });
   }
   if (hasTerms) {
-    const signIdx = steps.findIndex((s) => s.key === "sign");
-    steps.splice(signIdx, 0, { key: "terms", label: "Terms", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" });
+    steps.push(
+      { key: "terms", label: "Terms", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+      { key: "sign", label: "Sign", icon: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 17.07a4.5 4.5 0 01-1.897 1.13L2.25 19.5l1.245-4.28a4.5 4.5 0 011.13-1.897L16.862 4.487z" },
+    );
   }
 
   const currentIdx = steps.findIndex((s) => s.key === formStep);
@@ -295,7 +297,7 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
   }, [termOption, tenantSlug, membership.slug]);
 
   const handleSubmit = async () => {
-    if (!memberSignature) {
+    if (requiresSignature && !memberSignature) {
       setError("Please provide your signature");
       setTimeout(() => document.getElementById("signup-error")?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
       return;
@@ -344,7 +346,7 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
           num_payments: isCustomSchedule
             ? termOption.custom_schedule_num_payments
             : ((termOption as any).continue_after_term ? undefined : termOption.num_payments),
-          member_signature: memberSignature,
+          member_signature: requiresSignature ? memberSignature : "",
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
           payment_method_id: useExistingPayment ? (inviteContext?.payment_method_id || undefined) : undefined,
@@ -490,10 +492,43 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
               onNext={() => setFormStep("payment")}
             />
           )}
-          {formStep === "payment" && <PaymentSection data={payment} onChange={(next) => setPayment(next as typeof payment)} termOption={termOption} paymentProviders={paymentProviders} currencyCode={currencyCode} enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies} onNext={() => setFormStep(usesBankStep ? "bank" : (hasTerms ? "terms" : "sign"))} onBack={() => setFormStep("member")} paymentMethodLocked={paymentMethodLocked} paymentFrequencyLocked={paymentFrequencyLocked} startDateLocked={startDateLocked} useExistingPayment={useExistingPayment} />}
-          {formStep === "bank" && usesBankStep && <BankSection data={bank} onChange={(next) => setBank(next as typeof bank)} tenant={tenant} onNext={() => setFormStep(hasTerms ? "terms" : "sign")} onBack={() => setFormStep("payment")} />}
+          {formStep === "payment" && (
+            <PaymentSection
+              data={payment}
+              onChange={(next) => setPayment(next as typeof payment)}
+              termOption={termOption}
+              paymentProviders={paymentProviders}
+              currencyCode={currencyCode}
+              enabledPaymentFrequencies={effectiveEnabledPaymentFrequencies}
+              onNext={() => {
+                if (usesBankStep) setFormStep("bank");
+                else if (hasTerms) setFormStep("terms");
+                else handleSubmit();
+              }}
+              onBack={() => setFormStep("member")}
+              paymentMethodLocked={paymentMethodLocked}
+              paymentFrequencyLocked={paymentFrequencyLocked}
+              startDateLocked={startDateLocked}
+              useExistingPayment={useExistingPayment}
+              nextLabel={!usesBankStep && !hasTerms ? (submitting ? "Submitting..." : "Complete signup") : "Continue"}
+              isSubmit={!usesBankStep && !hasTerms}
+              nextDisabled={submitting}
+            />
+          )}
+          {formStep === "bank" && usesBankStep && (
+            <BankSection
+              data={bank}
+              onChange={(next) => setBank(next as typeof bank)}
+              tenant={tenant}
+              onNext={() => (hasTerms ? setFormStep("terms") : handleSubmit())}
+              onBack={() => setFormStep("payment")}
+              nextLabel={!hasTerms ? (submitting ? "Submitting..." : "Complete signup") : "Continue"}
+              isSubmit={!hasTerms}
+              nextDisabled={submitting}
+            />
+          )}
           {formStep === "terms" && hasTerms && <TermsSection terms={terms} accepted={acceptedTerms} onAcceptChange={setAcceptedTerms} substitutionContext={buildTermsSubstitutionContext({ member, payment, membership, termOption, org: org ?? null })} onNext={() => setFormStep("sign")} onBack={() => setFormStep(usesBankStep ? "bank" : "payment")} />}
-          {formStep === "sign" && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep(hasTerms ? "terms" : (usesBankStep ? "bank" : "payment"))} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
+          {formStep === "sign" && hasTerms && <SignSection signature={memberSignature} onSign={setMemberSignature} onSubmit={handleSubmit} onBack={() => setFormStep("terms")} submitting={submitting} sendEmail={sendAgreementEmail} onSendEmailChange={setSendAgreementEmail} />}
         </div>
       </div>
     </div>
@@ -795,7 +830,7 @@ function MemberSection({ data, onChange, onNext, googlePlacesApiKey, askEmergenc
 }
 
 /* ─── Section B: Payment Details ─── */
-function PaymentSection({ data, onChange, termOption, paymentProviders, currencyCode, enabledPaymentFrequencies, onNext, onBack, paymentMethodLocked, paymentFrequencyLocked, startDateLocked, useExistingPayment }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; currencyCode: string; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void; paymentMethodLocked: boolean; paymentFrequencyLocked: boolean; startDateLocked: boolean; useExistingPayment: boolean }) {
+function PaymentSection({ data, onChange, termOption, paymentProviders, currencyCode, enabledPaymentFrequencies, onNext, onBack, paymentMethodLocked, paymentFrequencyLocked, startDateLocked, useExistingPayment, nextLabel = "Continue", isSubmit = false, nextDisabled = false }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; termOption: TermOption; paymentProviders: string[]; currencyCode: string; enabledPaymentFrequencies: string[]; onNext: () => void; onBack: () => void; paymentMethodLocked: boolean; paymentFrequencyLocked: boolean; startDateLocked: boolean; useExistingPayment: boolean; nextLabel?: string; isSubmit?: boolean; nextDisabled?: boolean }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
@@ -950,13 +985,13 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         )}
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Continue" />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel={nextLabel} isSubmit={isSubmit} disabled={nextDisabled} />
     </div>
   );
 }
 
 /* ─── Section C: Bank Details ─── */
-function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; tenant: Tenant; onNext: () => void; onBack: () => void }) {
+function BankSection({ data, onChange, tenant, onNext, onBack, nextLabel = "Continue", isSubmit = false, nextDisabled = false }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void; tenant: Tenant; onNext: () => void; onBack: () => void; nextLabel?: string; isSubmit?: boolean; nextDisabled?: boolean }) {
   const set = (k: string, v: string) => onChange({ ...data, [k]: v });
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
 
@@ -982,7 +1017,7 @@ function BankSection({ data, onChange, tenant, onNext, onBack }: { data: Record<
         </p>
       </div>
 
-      <NavButtons onBack={onBack} onNext={onNext} nextLabel="Continue" />
+      <NavButtons onBack={onBack} onNext={onNext} nextLabel={nextLabel} isSubmit={isSubmit} disabled={nextDisabled} />
     </div>
   );
 }

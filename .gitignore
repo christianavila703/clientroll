@@ -23,7 +23,9 @@ server
 server_new
 server_linux_amd64
 migrate_linux_amd64
-# (Playwright E2E suite removed; keep in case reintroduced)
+# E2E test artifacts
+e2e/artifacts/
+e2e/node_modules/
 tests/test-results/
 
 # Uploads (user data)

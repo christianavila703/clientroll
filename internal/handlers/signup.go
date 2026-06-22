@@ -848,13 +848,26 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		}))
 	}
 
+	// Compute the effective subscription end time for Stripe. For fixed-count
+	// instalment plans (num_payments > 0), derive the end from the payment
+	// cadence rather than the membership term length. This ensures Stripe
+	// stops billing after exactly N payments, matching GoCardless behaviour.
+	stripeTermEndTime := membership.MinTermEndDate
+	if input.NumPayments != nil && *input.NumPayments > 0 && !termForCreate.ContinueAfterTerm {
+		interval, count := stripeRecurringInterval(input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount)
+		computed := subscriptionEndDateFromNumPayments(membership.StartDate, interval, int(count), *input.NumPayments)
+		if computed.Before(stripeTermEndTime) || stripeTermEndTime.IsZero() {
+			stripeTermEndTime = computed
+		}
+	}
+
 	// --- Stripe card path ---
 	if input.PaymentMethod == "card" {
 		pmID := strings.TrimSpace(input.PaymentMethodID)
 		// Invite + reuse saved card + recurring: create subscription off-session (no Checkout).
 		// Checkout often fails for saved PMs missing billing fields Stripe requires for the hosted page.
 		if invite != nil && inviteStrategy == "use_existing" && pmID != "" && input.PaymentFrequency != "upfront" {
-			if err := h.signupStripeCardSubscriptionWithSavedPM(r.Context(), tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, pmID); err != nil {
+			if err := h.signupStripeCardSubscriptionWithSavedPM(r.Context(), tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, pmID); err != nil {
 				log.Printf("signup saved-card stripe subscription tenant=%s membership=%s err=%v", tenant.ID, membership.ID, err)
 				writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
 				return
@@ -875,7 +888,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		if invite != nil {
 			signupInviteID = &invite.ID
 		}
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, input.PaymentMethodID, signupInviteID)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
@@ -956,7 +969,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			if invite != nil {
 				signupInviteID = &invite.ID
 			}
-			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, membership.MinTermEndDate, membership.StartDate, input.PaymentMethodID, signupInviteID)
+			checkoutURL, err := h.createStripeBECSCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, input.PaymentMethodID, signupInviteID)
 			if err != nil {
 				log.Printf("Error creating Stripe direct debit checkout session during signup: %v", err)
 				writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Direct debit payment setup failed"))

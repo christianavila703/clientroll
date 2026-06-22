@@ -399,9 +399,21 @@ func (h *ActiveMembershipsHandler) CreateMembership(w http.ResponseWriter, r *ht
 				}
 				if stripeCustomerID != "" {
 					applySalesTax := mt.ApplySalesTax
+					staffTermEnd := m.MinTermEndDate
+					if input.NumPayments != nil && *input.NumPayments > 0 && !term.ContinueAfterTerm {
+						var iu *string
+						if input.PaymentIntervalUnit != "" {
+							iu = &input.PaymentIntervalUnit
+						}
+						interval, count := stripeRecurringInterval(input.PaymentFrequency, iu, input.PaymentIntervalCount)
+						computed := subscriptionEndDateFromNumPayments(startDate, interval, int(count), *input.NumPayments)
+						if computed.Before(staffTermEnd) || staffTermEnd.IsZero() {
+							staffTermEnd = computed
+						}
+					}
 					if err := h.createStripeSubscription(r.Context(), tenant, client, m, stripeCustomerID, input.PaymentMethodID,
 						membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount,
-						input.PaymentAmount, applySalesTax, term.ContinueAfterTerm, m.MinTermEndDate, startDate); err != nil {
+						input.PaymentAmount, applySalesTax, term.ContinueAfterTerm, staffTermEnd, startDate); err != nil {
 						log.Printf("membership.create stripe_subscription_failed tenant=%s membership=%s err=%v", tenantID, m.ID, err)
 					}
 				}
@@ -700,10 +712,24 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 		// Stripe rejects requests that include both parameters in a single update call.
 		params.AddExtra("cancel_at", "")
 	} else {
+		effectiveEnd := m.MinTermEndDate
+		// For fixed-count instalment plans, derive the end from num_payments so
+		// Stripe stops billing after the correct number of charges.
+		if m.NumPayments != nil && *m.NumPayments > 0 {
+			freq := ""
+			if m.PaymentFrequency != nil {
+				freq = *m.PaymentFrequency
+			}
+			interval, count := stripeRecurringInterval(freq, m.PaymentIntervalUnit, m.PaymentIntervalCount)
+			computed := subscriptionEndDateFromNumPayments(m.StartDate, interval, int(count), *m.NumPayments)
+			if computed.Before(effectiveEnd) || effectiveEnd.IsZero() {
+				effectiveEnd = computed
+			}
+		}
 		cancelAt := time.Date(
-			m.MinTermEndDate.Year(),
-			m.MinTermEndDate.Month(),
-			m.MinTermEndDate.Day(),
+			effectiveEnd.Year(),
+			effectiveEnd.Month(),
+			effectiveEnd.Day(),
 			0, 0, 0, 0,
 			time.UTC,
 		).Unix()
