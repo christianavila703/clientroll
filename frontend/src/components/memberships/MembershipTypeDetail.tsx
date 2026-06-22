@@ -484,7 +484,7 @@ function TermOptionCard({
   const defaultSchedule = schedules.find(s => s.is_default) ?? schedules[0];
   const attachedCount = to.attached_terms?.length ?? 0;
   const bonusCount = to.bonuses?.length ?? 0;
-  const totalPrice = inferTotalPrice(schedules, durationValue, durationUnit);
+  const totalPrice = inferTotalPrice(schedules, durationValue, durationUnit, to.fee_total);
 
   return (
     <div className="card overflow-hidden">
@@ -535,8 +535,9 @@ function inferTotalPrice(
   schedules: PaymentSchedule[],
   durationValue: number,
   durationUnit: "week" | "month",
+  feeTotal?: number | null,
 ): number {
-  const { form } = simpleFromPayload(schedules, durationValue, durationUnit, null);
+  const { form } = simpleFromPayload(schedules, durationValue, durationUnit, null, feeTotal);
   const n = Number(form.total_price);
   return Number.isFinite(n) ? n : 0;
 }

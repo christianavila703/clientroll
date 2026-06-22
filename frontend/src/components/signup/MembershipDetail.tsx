@@ -1,12 +1,7 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
-import {
-  effectiveSignupDisplayMode,
-  signupDisplayAmount,
-  signupPriceSuffix,
-  termHasExplicitFee,
-} from "../../utils/signupPricing";
+import { describeTermPricing } from "../../utils/termOptionDisplay";
 
 interface Props {
   membership: MembershipType;
@@ -18,7 +13,7 @@ interface Props {
   onBack: () => void;
 }
 
-export default function MembershipDetail({ membership, tenantSlug, priceDisplayMode, enabledPaymentFrequencies, paymentProviders, onSelectTerm, onBack }: Props) {
+export default function MembershipDetail({ membership, tenantSlug, paymentProviders, onSelectTerm, onBack }: Props) {
   const membershipName = (mt: MembershipType) => (mt.membership_name || "").trim();
   const membershipLevel = (mt: MembershipType) => (mt.membership_level || "").trim();
   const fallbackTitle = (mt: MembershipType) => mt.title;
@@ -31,20 +26,12 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
     value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const currencyCode = ((membership as any).currency_code || "AUD").toUpperCase();
   const moneyWithCurrency = (value: number) => `${currencyCode} $${formatMoney(value)}`;
-  const enabledFrequencies = membership.enabled_payment_frequencies?.length
-    ? membership.enabled_payment_frequencies
-    : enabledPaymentFrequencies;
-  const displayModeForTerm = (term: TermOption) =>
-    effectiveSignupDisplayMode(priceDisplayMode, term, { enabledPaymentFrequencies: enabledFrequencies });
-  const resolvedDisplayMode = currentTerm ? displayModeForTerm(currentTerm) : "total";
-  const showWeekly = resolvedDisplayMode === "weekly";
-  const showMonthly = resolvedDisplayMode === "monthly";
   const normalizedProviders = (paymentProviders || []).map((p) => String(p).toLowerCase().trim());
   const hasProviderHints = normalizedProviders.length > 0;
   const supportsStripe = normalizedProviders.some((p) => p.includes("stripe")) || !hasProviderHints;
   const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
-  const displayAmountForTerm = (term: TermOption): number =>
-    signupDisplayAmount(term, displayModeForTerm(term));
+  const pricingForTerm = (term: TermOption) => describeTermPricing(term);
+  const displayAmountForTerm = (term: TermOption): number => pricingForTerm(term).amount;
   const processingFeeForDisplay = (amount: number, method: "card" | "direct_debit") =>
     estimateStripeProcessingFeeCents(Math.round(amount * 100), method) / 100;
   const processingFeeLabelForTerm = (term: TermOption): string | null => {
@@ -201,25 +188,25 @@ export default function MembershipDetail({ membership, tenantSlug, priceDisplayM
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 text-[15px] font-semibold text-gray-900 tabular-nums">
-                      {moneyWithCurrency(signupDisplayAmount(term, displayModeForTerm(term)))}
-                    </div>
-                    {(showWeekly || showMonthly || resolvedDisplayMode === "total") && (
-                      <p className="text-[12px] text-gray-500 mt-1">{signupPriceSuffix(displayModeForTerm(term))}</p>
-                    )}
-                    {displayModeForTerm(term) === "total" && termHasExplicitFee(term, "monthly") && term.fee_monthly && (
-                      <p className="text-[12px] text-gray-500 mt-1">
-                        or {currencyCode} ${term.fee_monthly.toLocaleString()}/month
-                      </p>
-                    )}
+                    {(() => {
+                      const pricing = pricingForTerm(term);
+                      return (
+                        <>
+                          <div className="mt-1 text-[15px] font-semibold text-gray-900 tabular-nums">
+                            {moneyWithCurrency(pricing.amount)}
+                          </div>
+                          <p className="text-[12px] text-gray-500 mt-1">{pricing.suffix}</p>
+                          {pricing.total && pricing.total !== pricing.amount && (
+                            <p className="text-[11px] text-gray-400 mt-0.5">
+                              total {moneyWithCurrency(pricing.total)}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                     {processingFeeLabelForTerm(term) && (
                       <p className="text-[11px] text-gray-500 mt-1">
                         {processingFeeLabelForTerm(term)}
-                      </p>
-                    )}
-                    {term.custom_schedule_enabled && term.custom_schedule_amount && term.custom_schedule_num_payments && term.custom_schedule_interval_count && (
-                      <p className="text-xs font-medium mt-1" style={{ color: "var(--brandPrimary)" }}>
-                        {term.custom_schedule_label || `${term.custom_schedule_num_payments} payments every ${term.custom_schedule_interval_count} ${term.custom_schedule_interval_unit || "month"}${term.custom_schedule_interval_count === 1 ? "" : "s"}`} ({currencyCode} ${term.custom_schedule_amount.toLocaleString()} each)
                       </p>
                     )}
                     {(term as any).num_payments && (

@@ -349,12 +349,19 @@ const classifySchedule = (s: PaymentSchedule): SimplePaymentMethod => {
   return "custom";
 };
 
-/** Hydrate a SimplePricingForm from existing schedules. */
+/** Hydrate a SimplePricingForm from existing schedules.
+ *
+ * `feeTotal` (the term option's `fee_total` column) is preferred as the
+ * canonical total when it's positive. This avoids the 1¢ rounding drift you
+ * get from re-multiplying the per-period amount back to a total (e.g.
+ * $5,000 ÷ 3 = $1,666.67 each → $1,666.67 × 3 = $5,000.01).
+ */
 export const simpleFromPayload = (
   schedules: PaymentSchedule[],
   durationValue: number,
   durationUnit: IntervalUnit,
   label?: string | null,
+  feeTotal?: number | null,
 ): SimpleHydrateResult => {
   const f = emptySimplePricingForm();
   f.duration_value = String(durationValue || "");
@@ -369,37 +376,46 @@ export const simpleFromPayload = (
   // is_default, fall back to the first sort_order.
   const chosen = active.find(s => s.is_default) ?? active[0];
   if (!chosen) {
+    if (feeTotal && feeTotal > 0) f.total_price = round2(feeTotal).toFixed(2);
     return { form: f, extraScheduleCount: 0 };
   }
 
   const method = classifySchedule(chosen);
   f.payment_method = method;
 
-  const { months, weeks, fortnights } = durationParts(durationValue, durationUnit);
-  let total = 0;
-  switch (method) {
-    case "upfront":
-      total = chosen.amount;
-      break;
-    case "weekly":
-      total = chosen.amount * weeks;
-      break;
-    case "fortnightly":
-      total = chosen.amount * fortnights;
-      break;
-    case "monthly":
-      total = chosen.amount * months;
-      break;
-    case "custom":
-      f.custom_label = chosen.label ?? "";
-      f.custom_amount = String(chosen.amount);
-      f.custom_interval_unit = (chosen.interval_unit as IntervalUnit) ?? "month";
-      f.custom_interval_count = String(chosen.interval_count ?? 1);
-      f.custom_num_payments = chosen.num_payments != null ? String(chosen.num_payments) : "";
-      if (chosen.num_payments && chosen.num_payments > 0) {
-        total = chosen.amount * chosen.num_payments;
-      }
-      break;
+  // For custom plans we still need to surface the cadence fields.
+  if (method === "custom") {
+    f.custom_label = chosen.label ?? "";
+    f.custom_amount = String(chosen.amount);
+    f.custom_interval_unit = (chosen.interval_unit as IntervalUnit) ?? "month";
+    f.custom_interval_count = String(chosen.interval_count ?? 1);
+    f.custom_num_payments = chosen.num_payments != null ? String(chosen.num_payments) : "";
+  }
+
+  // Prefer the term option's stored fee_total (what the admin typed). Fall
+  // back to amount × periods when fee_total is missing (e.g. legacy data).
+  let total = feeTotal && feeTotal > 0 ? feeTotal : 0;
+  if (total <= 0) {
+    const { months, weeks, fortnights } = durationParts(durationValue, durationUnit);
+    switch (method) {
+      case "upfront":
+        total = chosen.amount;
+        break;
+      case "weekly":
+        total = chosen.amount * weeks;
+        break;
+      case "fortnightly":
+        total = chosen.amount * fortnights;
+        break;
+      case "monthly":
+        total = chosen.amount * months;
+        break;
+      case "custom":
+        if (chosen.num_payments && chosen.num_payments > 0) {
+          total = chosen.amount * chosen.num_payments;
+        }
+        break;
+    }
   }
 
   if (total > 0) {

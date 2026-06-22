@@ -321,6 +321,7 @@ func (r *MembershipTypeRepo) UpdateTermOptionMeta(
 	durationUnit *string,
 	label *string,
 	sortOrder *int,
+	feeTotal *float64,
 ) error {
 	_, err := r.db.Pool.Exec(ctx, `
 		UPDATE membership_term_options SET
@@ -329,9 +330,10 @@ func (r *MembershipTypeRepo) UpdateTermOptionMeta(
 			duration_unit   = COALESCE($4, duration_unit),
 			label           = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE label END,
 			sort_order      = COALESCE($6, sort_order),
+			fee_total       = COALESCE($7, fee_total),
 			updated_at      = NOW()
 		WHERE id = $1 AND tenant_id = $2`,
-		id, tenantID, durationValue, durationUnit, label, sortOrder)
+		id, tenantID, durationValue, durationUnit, label, sortOrder, feeTotal)
 	return err
 }
 

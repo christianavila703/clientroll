@@ -1,8 +1,5 @@
 import type { MembershipType } from "./SignupPage";
-import {
-  membershipHeadlinePrice,
-  signupPriceSuffix,
-} from "../../utils/signupPricing";
+import { describeTermPricing } from "../../utils/termOptionDisplay";
 
 interface Props {
   memberships: MembershipType[];
@@ -119,22 +116,23 @@ export default function MembershipSelect({ memberships, priceDisplayMode, onSele
               )}
               <div className="mt-4 flex items-baseline gap-2">
                 {(() => {
-                  const headline = membershipHeadlinePrice(
-                    mt.term_options || [],
-                    priceDisplayMode,
-                    mt.enabled_payment_frequencies,
-                  );
                   const opts = mt.term_options || [];
-                  const totals = opts.map((o) => o.fee_total).filter((v) => v > 0).sort((a, b) => a - b);
-                  const showRange = totals.length > 1 && totals[0] !== totals[totals.length - 1] && headline.suffix === signupPriceSuffix("total");
+                  const priced = opts
+                    .map((t) => ({ term: t, ...describeTermPricing(t) }))
+                    .filter((p) => p.amount > 0)
+                    .sort((a, b) => a.amount - b.amount);
+                  if (priced.length === 0) return null;
+                  const cheapest = priced[0];
+                  const dearest = priced[priced.length - 1];
+                  const showRange = priced.length > 1 && cheapest.amount !== dearest.amount && cheapest.suffix === dearest.suffix;
                   return (
                     <>
                       <span className="text-[22px] font-medium tabular-nums" style={{ color: "var(--brandPrimary)" }}>
                         {showRange
-                          ? `${currencyCode(mt)} $${totals[0].toLocaleString()} – ${currencyCode(mt)} $${totals[totals.length - 1].toLocaleString()}`
-                          : moneyWithCurrency(mt, headline.amount)}
+                          ? `${currencyCode(mt)} $${cheapest.amount.toLocaleString()} – ${currencyCode(mt)} $${dearest.amount.toLocaleString()}`
+                          : moneyWithCurrency(mt, cheapest.amount)}
                       </span>
-                      <span className="text-[12px] text-gray-400">{headline.suffix}</span>
+                      <span className="text-[12px] text-gray-400">{cheapest.suffix}</span>
                     </>
                   );
                 })()}

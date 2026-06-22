@@ -22,6 +22,7 @@ const initialFormFromTermOption = (to: TermOption) => {
     to.duration_value ?? to.duration_months ?? 0,
     to.duration_unit ?? "month",
     to.label,
+    to.fee_total,
   );
 };
 
@@ -79,12 +80,14 @@ export default function PaymentSchedulesEditor({
 
     setSaving(true);
     try {
-      // Save metadata (duration/label) and schedules in one logical save. The
-      // server stores them separately, so we issue two requests in sequence.
+      // Save metadata (duration/label/total) and schedules in one logical
+      // save. The server stores them separately, so we issue two requests
+      // in sequence.
       await api.updateTermOptionMeta(mtId, termOption.id, {
         duration_value: durationValue,
         duration_unit: form.duration_unit,
         label: form.label.trim() ? form.label.trim() : null,
+        fee_total: total,
       });
       await api.replacePaymentSchedules(termOption.id, schedules);
       setDirty(false);

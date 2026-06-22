@@ -667,10 +667,11 @@ func (h *MembershipTypeHandler) GetTerms(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"terms": terms})
 }
 
-// UpdateTermOptionMeta updates the v2-only metadata on a term option
-// (duration_value, duration_unit, label, sort_order). It does NOT touch
-// the legacy fee_* fields or payment schedules — for those the admin still
-// uses Update / ReplacePaymentSchedules.
+// UpdateTermOptionMeta updates the v2 metadata on a term option:
+// duration, label, sort_order, and (optionally) the contract total. The total
+// is the admin's "what's the membership cost" number — we store it on the
+// legacy fee_total column so the public signup display + reports keep working.
+// Payment schedules are still updated separately via ReplacePaymentSchedules.
 func (h *MembershipTypeHandler) UpdateTermOptionMeta(w http.ResponseWriter, r *http.Request) {
 	tenantID, _ := uuid.Parse(middleware.GetTenantID(r.Context()))
 	toID, err := uuid.Parse(chi.URLParam(r, "toID"))
@@ -679,10 +680,11 @@ func (h *MembershipTypeHandler) UpdateTermOptionMeta(w http.ResponseWriter, r *h
 		return
 	}
 	var input struct {
-		DurationValue *int    `json:"duration_value"`
-		DurationUnit  *string `json:"duration_unit"`
-		Label         *string `json:"label"`
-		SortOrder     *int    `json:"sort_order"`
+		DurationValue *int     `json:"duration_value"`
+		DurationUnit  *string  `json:"duration_unit"`
+		Label         *string  `json:"label"`
+		SortOrder     *int     `json:"sort_order"`
+		FeeTotal      *float64 `json:"fee_total"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -696,8 +698,12 @@ func (h *MembershipTypeHandler) UpdateTermOptionMeta(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "duration_value must be > 0")
 		return
 	}
+	if input.FeeTotal != nil && *input.FeeTotal < 0 {
+		writeError(w, http.StatusBadRequest, "fee_total must be >= 0")
+		return
+	}
 	if err := h.mtRepo.UpdateTermOptionMeta(r.Context(), toID, tenantID,
-		input.DurationValue, input.DurationUnit, input.Label, input.SortOrder); err != nil {
+		input.DurationValue, input.DurationUnit, input.Label, input.SortOrder, input.FeeTotal); err != nil {
 		log.Printf("Error updating term option meta: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to update term option")
 		return
