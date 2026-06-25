@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
-import { describeTermPricing } from "../../utils/termOptionDisplay";
+import { describeTermPricing, termDurationLabel } from "../../utils/termOptionDisplay";
 
 interface Props {
   membership: MembershipType;
@@ -89,7 +89,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
             )}
             {bonuses.length > 0 && (
               <p className="text-[12px] text-gray-400 mt-1">
-                Includes {currencyCode} ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm?.duration_months}-month term
+                Includes {currencyCode} ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm ? termDurationLabel(currentTerm) : ""} term
               </p>
             )}
           </div>
@@ -128,7 +128,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
           {bonuses.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Exclusive Bonuses with {currentTerm?.duration_months}-Month Term
+                Exclusive Bonuses with {currentTerm ? termDurationLabel(currentTerm) : ""} Term
               </h2>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 {bonuses.map((bonus) => (
@@ -176,7 +176,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-semibold text-gray-900 text-[17px]">
-                        {term.duration_months} Months
+                        {termDurationLabel(term)}
                       </span>
                       {term.bonuses && term.bonuses.length > 0 && (
                         <span className={`badge ${

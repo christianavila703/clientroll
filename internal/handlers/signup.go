@@ -2031,8 +2031,7 @@ func (h *SignupHandler) signupStripeCardSubscriptionWithSavedPM(
 
 	if !continueAfterTerm && termEndTime.Unix() > 0 {
 		if _, caErr := subscription.Update(sub.ID, &stripe.SubscriptionParams{
-			CancelAt:          stripe.Int64(termEndTime.Unix()),
-			CancelAtPeriodEnd: stripe.Bool(false),
+			CancelAt: stripe.Int64(termEndTime.Unix()),
 		}); caErr != nil {
 			return fmt.Errorf("set subscription cancel_at: %w", caErr)
 		}

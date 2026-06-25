@@ -62,6 +62,20 @@ export function defaultPaymentFrequencyForTerm(
   term: TermOption,
   enabledPaymentFrequencies?: string[],
 ): string {
+  // v2: prefer payment_schedules when available
+  const activeSchedules = (term.payment_schedules ?? []).filter((s: any) => !s.archived_at);
+  if (activeSchedules.length > 0) {
+    const defaultSched = activeSchedules.find((s: any) => s.is_default) ?? activeSchedules[0];
+    if (defaultSched.kind === "upfront") return "upfront";
+    if (defaultSched.num_payments && defaultSched.num_payments > 0) return "custom_schedule";
+    const unit = defaultSched.interval_unit ?? "month";
+    const count = defaultSched.interval_count ?? 1;
+    if (unit === "week" && count === 1) return "weekly";
+    if (unit === "week" && count === 2) return "fortnightly";
+    if (unit === "month" && count === 1) return "monthly";
+    if (unit === "month" && count === 3) return "quarterly";
+    return "custom_schedule";
+  }
   const available = availableTermPaymentFrequencies(term, enabledPaymentFrequencies);
   if (available.includes("upfront")) return "upfront";
   return available[0] || "upfront";

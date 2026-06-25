@@ -1991,7 +1991,7 @@ function LabeledInput({
 interface MembershipTypeOption {
   id: string; title: string; slug: string; is_active: boolean;
   term_options?: {
-    id: string; duration_months: number; fee_total: number;
+    id: string; duration_months: number; duration_value?: number; duration_unit?: "week" | "month"; fee_total: number;
     fee_weekly?: number; fee_fortnightly?: number; fee_monthly?: number; fee_quarterly?: number;
     allow_upfront: boolean; num_payments?: number;
     custom_schedule_enabled?: boolean;
@@ -2260,7 +2260,7 @@ function SetupMembershipModal({ clientId, clientName, tenantTimezone, onClose, o
                       className="w-full text-left rounded-xl border-2 border-gray-200 px-5 py-4 hover:border-indigo-400 hover:bg-indigo-50/30 transition-all">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-[14px] font-semibold text-gray-900">{to.duration_months} months</p>
+                          <p className="text-[14px] font-semibold text-gray-900">{to.duration_value ?? to.duration_months} {(to.duration_unit ?? "month") === "week" ? "weeks" : "months"}</p>
                           {to.fee_monthly && <p className="text-[12px] text-gray-400">${to.fee_monthly}/month</p>}
                           {to.num_payments && <p className="text-[11px] text-indigo-600">{to.num_payments} payments then active</p>}
                         </div>
@@ -2288,7 +2288,7 @@ function SetupMembershipModal({ clientId, clientName, tenantTimezone, onClose, o
 
                 <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-5 py-3 mb-5">
                   <p className="text-[14px] font-semibold text-gray-900">{selectedType.title}</p>
-                  <p className="text-[12px] text-gray-500">{selectedTerm.duration_months} months · ${selectedTerm.fee_total.toLocaleString()} total</p>
+                  <p className="text-[12px] text-gray-500">{selectedTerm.duration_value ?? selectedTerm.duration_months} {(selectedTerm.duration_unit ?? "month") === "week" ? "weeks" : "months"} · ${selectedTerm.fee_total.toLocaleString()} total</p>
                 </div>
 
                 <div className="space-y-5">

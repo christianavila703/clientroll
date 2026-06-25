@@ -903,8 +903,7 @@ func (h *StripeWebhookHandler) setSubscriptionCancelAtFromCheckout(ctx context.C
 	}
 	stripe.Key = secretKey
 	_, err = subscription.Update(subID, &stripe.SubscriptionParams{
-		CancelAt:          stripe.Int64(cancelAt),
-		CancelAtPeriodEnd: stripe.Bool(false),
+		CancelAt: stripe.Int64(cancelAt),
 	})
 	return err
 }

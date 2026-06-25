@@ -4,13 +4,11 @@ import AddressAutocompleteInput from "../common/AddressAutocompleteInput";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 import {
   defaultPaymentFrequencyForTerm,
-  effectiveSignupDisplayMode,
   explicitFrequencyAmount,
-  signupDisplayAmount,
-  signupPriceSuffix,
   termHasExplicitFee,
 } from "../../utils/signupPricing";
 import { formatTermsContentForDisplay, substituteTermsVariables, type TermsSubstitutionContext } from "../../utils/termsContent";
+import { describeTermPricing, termDurationLabel } from "../../utils/termOptionDisplay";
 import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc, OrgPayload } from "./SignupPage";
 
 interface Props {
@@ -313,14 +311,60 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
     }
     setSubmitting(true); setError("");
     try {
-      const isCustomSchedule = payment.payment_frequency === "custom_schedule";
-      const paymentAmount = isCustomSchedule
-        ? (termOption.custom_schedule_amount || termOption.fee_total)
-        : resolveFrequencyAmount(termOption, payment.payment_frequency);
-      // v2: if the term option has structured payment_schedules, find the one
-      // that matches the selected legacy frequency and pin its ID. The server
-      // prefers payment_schedule_id over the legacy fields when both arrive.
-      const matchedScheduleId = findScheduleIdForFrequency(termOption, payment.payment_frequency);
+      // Resolve the actual payment schedule and amount from payment_schedules
+      // (v2) or fall back to legacy fields.
+      const activeScheds = (termOption.payment_schedules ?? []).filter(s => !s.archived_at);
+      let matchedScheduleId = "";
+      let paymentAmount = 0;
+      let submitFrequency = payment.payment_frequency;
+      let submitIntervalUnit: string | undefined;
+      let submitIntervalCount: number | undefined;
+      let submitNumPayments: number | undefined;
+      if (activeScheds.length > 0) {
+        // Find the schedule matching the selected frequency key. For terms
+        // with a single schedule, always use that one.
+        const matched = activeScheds.length === 1
+          ? activeScheds[0]
+          : activeScheds.find(s => {
+              if (payment.payment_frequency === "upfront") return s.kind === "upfront";
+              if (payment.payment_frequency === "custom_schedule") return s.kind === "instalments" || (s.num_payments != null && s.num_payments > 0);
+              if (payment.payment_frequency === "weekly") return s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 1 && !s.num_payments;
+              if (payment.payment_frequency === "fortnightly") return s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 2 && !s.num_payments;
+              if (payment.payment_frequency === "monthly") return s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 1 && !s.num_payments;
+              if (payment.payment_frequency === "quarterly") return s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 3 && !s.num_payments;
+              return false;
+            }) ?? activeScheds.find(s => s.is_default) ?? activeScheds[0];
+        if (matched) {
+          matchedScheduleId = matched.id;
+          paymentAmount = matched.amount;
+          if (matched.kind === "upfront") {
+            submitFrequency = "upfront";
+          } else if (matched.num_payments && matched.num_payments > 0) {
+            submitFrequency = "custom_schedule";
+            submitIntervalUnit = matched.interval_unit ?? undefined;
+            submitIntervalCount = matched.interval_count ?? undefined;
+            submitNumPayments = matched.num_payments;
+          } else {
+            submitIntervalUnit = matched.interval_unit ?? undefined;
+            submitIntervalCount = matched.interval_count ?? undefined;
+          }
+        }
+      }
+      if (!paymentAmount) {
+        const isCustomSchedule = payment.payment_frequency === "custom_schedule";
+        paymentAmount = isCustomSchedule
+          ? (termOption.custom_schedule_amount || termOption.fee_total)
+          : resolveFrequencyAmount(termOption, payment.payment_frequency);
+        matchedScheduleId = findScheduleIdForFrequency(termOption, payment.payment_frequency);
+        if (isCustomSchedule) {
+          submitIntervalUnit = termOption.custom_schedule_interval_unit ?? undefined;
+          submitIntervalCount = termOption.custom_schedule_interval_count ?? undefined;
+          submitNumPayments = termOption.custom_schedule_num_payments ?? undefined;
+        }
+      }
+      if (!submitNumPayments && !(termOption as any).continue_after_term && termOption.num_payments) {
+        submitNumPayments = termOption.num_payments;
+      }
       const submitParams = new URLSearchParams(window.location.search);
       if (inviteContext?.token) submitParams.set("invite", inviteContext.token);
       const submitQS = submitParams.toString();
@@ -339,13 +383,11 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
           payment_schedule_id: matchedScheduleId || undefined,
           start_date: payment.start_date ? payment.start_date + "T00:00:00Z" : new Date().toISOString(),
           payment_method: payment.payment_method,
-          payment_frequency: payment.payment_frequency,
+          payment_frequency: submitFrequency,
           payment_amount: paymentAmount,
-          payment_interval_unit: isCustomSchedule ? termOption.custom_schedule_interval_unit : undefined,
-          payment_interval_count: isCustomSchedule ? termOption.custom_schedule_interval_count : undefined,
-          num_payments: isCustomSchedule
-            ? termOption.custom_schedule_num_payments
-            : ((termOption as any).continue_after_term ? undefined : termOption.num_payments),
+          payment_interval_unit: submitIntervalUnit,
+          payment_interval_count: submitIntervalCount,
+          num_payments: submitNumPayments,
           member_signature: requiresSignature ? memberSignature : "",
           accepted_terms_ids: terms.length > 0 ? Array.from(acceptedTerms) : undefined,
           send_agreement_email: sendAgreementEmail,
@@ -424,30 +466,17 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
               {(membership.membership_level || "").trim() && (
                 <p className="text-[12px] font-medium" style={{ color: "var(--brandPrimary)" }}>{membership.membership_level}</p>
               )}
-              <p className="text-[13px] text-gray-500">{termOption.duration_months} month term</p>
+              <p className="text-[13px] text-gray-500">{termDurationLabel(termOption)} term</p>
             </div>
           </div>
           <div className="text-right">
             {(() => {
-              const lockedFrequency = paymentFrequencyLocked ? String(payment.payment_frequency || "").toLowerCase() : "";
-              const resolvedMode = effectiveSignupDisplayMode(tenant.signup_price_display_mode, termOption, {
-                lockedFrequency,
-                enabledPaymentFrequencies: effectiveEnabledPaymentFrequencies,
-              });
-              const amount = signupDisplayAmount(termOption, resolvedMode);
+              const pricing = describeTermPricing(termOption);
               const fmt = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-              if (resolvedMode === "custom_schedule" && termOption.custom_schedule_label) {
-                return (
-                  <>
-                    <p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(amount)}</p>
-                    <p className="text-[11px] text-gray-400">{termOption.custom_schedule_label}</p>
-                  </>
-                );
-              }
               return (
                 <>
-                  <p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(amount)}</p>
-                  <p className="text-[11px] text-gray-400">{signupPriceSuffix(resolvedMode)}</p>
+                  <p className="text-[15px] font-semibold tabular-nums text-gray-900">{currencyCode} ${fmt(pricing.amount)}</p>
+                  <p className="text-[11px] text-gray-400">{pricing.suffix}</p>
                 </>
               );
             })()}
@@ -566,7 +595,7 @@ function MembershipOverview({ membership, termOption, bonuses, currencyCode }: {
       {bonuses.length > 0 && (
         <div className="mt-6 border-t border-gray-200 pt-5">
           <h4 className="text-[12px] font-semibold uppercase tracking-wide text-gray-500">
-            Bonuses ({termOption.duration_months}-Month Term)
+            Bonuses ({termDurationLabel(termOption)} Term)
           </h4>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {bonuses.map((bonus) => (
@@ -835,31 +864,48 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
   const inputCls = "block w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-[14px] text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none transition-all brand-focus";
   const supportsStripe = paymentProviders.includes("stripe");
 
-  const weeklyAmount = explicitFrequencyAmount(termOption, "weekly");
-  const fortnightlyAmount = explicitFrequencyAmount(termOption, "fortnightly");
-  const monthlyAmount = explicitFrequencyAmount(termOption, "monthly");
-  const quarterlyAmount = explicitFrequencyAmount(termOption, "quarterly");
-  const enabledSet = new Set(
-    (enabledPaymentFrequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES).map((f) => String(f).toLowerCase())
-  );
+  const activeSchedules = (termOption.payment_schedules ?? []).filter(s => !s.archived_at);
+  const useSchedules = activeSchedules.length > 0;
 
-  const frequencies = [
-    { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termHasExplicitFee(termOption, "upfront"), amount: explicitFrequencyAmount(termOption, "upfront") },
-    { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "weekly"), amount: weeklyAmount },
-    { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "fortnightly"), amount: fortnightlyAmount },
-    { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "monthly"), amount: monthlyAmount },
-    { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "quarterly"), amount: quarterlyAmount },
-    {
-      value: "custom_schedule",
-      label: termOption.custom_schedule_label || `${termOption.custom_schedule_num_payments || 0} instalments`,
-      desc: termOption.custom_schedule_interval_count && termOption.custom_schedule_interval_unit
-        ? `${termOption.custom_schedule_num_payments || 0} payments every ${termOption.custom_schedule_interval_count} ${termOption.custom_schedule_interval_unit}${termOption.custom_schedule_interval_count === 1 ? "" : "s"}`
-        : "Custom instalment plan",
-      icon: "📆",
-      enabled: termHasExplicitFee(termOption, "custom_schedule"),
-      amount: explicitFrequencyAmount(termOption, "custom_schedule"),
-    },
-  ].filter((f) => f.enabled && enabledSet.has(f.value));
+  const frequencies = (() => {
+    if (useSchedules) {
+      return activeSchedules.map(s => {
+        const unit = s.interval_unit ?? "month";
+        const count = s.interval_count ?? 1;
+        const unitWord = unit === "week" ? (count === 1 ? "week" : count === 2 ? "fortnight" : `${count} weeks`) : (count === 1 ? "month" : count === 3 ? "quarter" : `${count} months`);
+        if (s.kind === "upfront") {
+          return { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: true, amount: s.amount, scheduleId: s.id };
+        }
+        if (s.num_payments && s.num_payments > 0) {
+          const noun = s.num_payments === 1 ? "payment" : "payments";
+          return { value: "custom_schedule", label: `${s.num_payments} ${noun} of $${s.amount.toLocaleString()}`, desc: `${s.num_payments} ${noun} every ${unitWord}`, icon: "📆", enabled: true, amount: s.amount, scheduleId: s.id };
+        }
+        const freqKey = unit === "week" && count === 1 ? "weekly" : unit === "week" && count === 2 ? "fortnightly" : unit === "month" && count === 1 ? "monthly" : unit === "month" && count === 3 ? "quarterly" : "custom_schedule";
+        return { value: freqKey, label: `Per ${unitWord}`, desc: `Paid every ${unitWord}`, icon: "📅", enabled: true, amount: s.amount, scheduleId: s.id };
+      });
+    }
+    const enabledSet = new Set(
+      (enabledPaymentFrequencies || DEFAULT_ENABLED_PAYMENT_FREQUENCIES).map((f) => String(f).toLowerCase())
+    );
+    return [
+      { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: termHasExplicitFee(termOption, "upfront"), amount: explicitFrequencyAmount(termOption, "upfront"), scheduleId: "" },
+      { value: "weekly", label: "Weekly", desc: "Paid weekly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "weekly"), amount: explicitFrequencyAmount(termOption, "weekly"), scheduleId: "" },
+      { value: "fortnightly", label: "Fortnightly", desc: "Paid fortnightly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "fortnightly"), amount: explicitFrequencyAmount(termOption, "fortnightly"), scheduleId: "" },
+      { value: "monthly", label: "Monthly", desc: "Paid monthly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "monthly"), amount: explicitFrequencyAmount(termOption, "monthly"), scheduleId: "" },
+      { value: "quarterly", label: "Quarterly", desc: "Paid quarterly in advance", icon: "📅", enabled: termHasExplicitFee(termOption, "quarterly"), amount: explicitFrequencyAmount(termOption, "quarterly"), scheduleId: "" },
+      {
+        value: "custom_schedule",
+        label: termOption.custom_schedule_label || `${termOption.custom_schedule_num_payments || 0} instalments`,
+        desc: termOption.custom_schedule_interval_count && termOption.custom_schedule_interval_unit
+          ? `${termOption.custom_schedule_num_payments || 0} payments every ${termOption.custom_schedule_interval_count} ${termOption.custom_schedule_interval_unit}${termOption.custom_schedule_interval_count === 1 ? "" : "s"}`
+          : "Custom instalment plan",
+        icon: "📆",
+        enabled: termHasExplicitFee(termOption, "custom_schedule"),
+        amount: explicitFrequencyAmount(termOption, "custom_schedule"),
+        scheduleId: "",
+      },
+    ].filter((f) => f.enabled && enabledSet.has(f.value));
+  })();
 
   const selectedFrequency = frequencies.find((f) => f.value === data.payment_frequency);
   const selectedAmount = selectedFrequency?.amount || 0;
@@ -1031,13 +1077,20 @@ function buildTermsSubstitutionContext(args: {
   org: OrgPayload | null;
 }): TermsSubstitutionContext {
   const { member, payment, membership, termOption, org } = args;
-  const months = Number(termOption.duration_months) || 0;
+  const durationValue = Number(termOption.duration_value) || Number(termOption.duration_months) || 0;
+  const durationUnit = termOption.duration_unit ?? "month";
+  const months = durationUnit === "month" ? durationValue : 0;
+  const weeks = durationUnit === "week" ? durationValue : (months > 0 ? Math.round((months * 52) / 12) : 0);
   const startDate = payment.start_date || "";
   let endDate = "";
-  if (startDate && months > 0) {
+  if (startDate && durationValue > 0) {
     const d = new Date(startDate);
     if (!Number.isNaN(d.getTime())) {
-      d.setMonth(d.getMonth() + months);
+      if (durationUnit === "week") {
+        d.setDate(d.getDate() + durationValue * 7);
+      } else {
+        d.setMonth(d.getMonth() + durationValue);
+      }
       endDate = d.toISOString().split("T")[0];
     }
   }
@@ -1074,7 +1127,7 @@ function buildTermsSubstitutionContext(args: {
     emergency_contact_phone: member.emergency_contact_phone,
     membership_title: membershipTitle,
     term_months: months || "",
-    term_weeks: months > 0 ? Math.round((months * 52) / 12) : "",
+    term_weeks: weeks || "",
     total_fee: termOption.fee_total,
     payment_amount: paymentAmount,
     payment_frequency: payment.payment_frequency,

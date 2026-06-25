@@ -737,7 +737,6 @@ func (h *ActiveMembershipsHandler) UpdateContinueAfterTerm(w http.ResponseWriter
 			writeError(w, http.StatusBadRequest, "Membership term end date is invalid")
 			return
 		}
-		params.CancelAtPeriodEnd = stripe.Bool(false)
 		params.CancelAt = stripe.Int64(cancelAt)
 	}
 	if _, err := subscription.Update(subID, params); err != nil {
@@ -898,8 +897,7 @@ func (h *ActiveMembershipsHandler) createStripeSubscription(
 
 	if !continueAfterTerm && !termEndTime.IsZero() && termEndTime.Unix() > 0 {
 		if _, caErr := subscription.Update(sub.ID, &stripe.SubscriptionParams{
-			CancelAt:          stripe.Int64(termEndTime.Unix()),
-			CancelAtPeriodEnd: stripe.Bool(false),
+			CancelAt: stripe.Int64(termEndTime.Unix()),
 		}); caErr != nil {
 			return fmt.Errorf("set subscription cancel_at: %w", caErr)
 		}

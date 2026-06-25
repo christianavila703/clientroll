@@ -105,6 +105,17 @@ func (r *PaymentScheduleRepo) replaceWithinTx(
 	tenantID, termOptionID uuid.UUID,
 	inputs []PaymentScheduleInput,
 ) error {
+	// Clear any membership FK references to these schedule rows so the
+	// DELETE doesn't violate the memberships_payment_schedule_id_fkey constraint.
+	if _, err := tx.Exec(ctx,
+		`UPDATE memberships SET payment_schedule_id = NULL
+		 WHERE payment_schedule_id IN (
+		   SELECT id FROM term_option_payment_schedules
+		   WHERE term_option_id = $1 AND tenant_id = $2
+		 )`,
+		termOptionID, tenantID); err != nil {
+		return fmt.Errorf("clear membership schedule refs: %w", err)
+	}
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM term_option_payment_schedules
 		 WHERE term_option_id = $1 AND tenant_id = $2`,

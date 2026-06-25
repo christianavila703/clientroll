@@ -49,6 +49,18 @@ const defaultSchedule = (term: TermOption): PaymentSchedule | undefined => {
   return active.find(s => s.is_default) ?? active[0];
 };
 
+/**
+ * Human-readable duration label, e.g. "12 Months", "6 Weeks".
+ * Prefers the v2 duration_value/duration_unit fields; falls back to
+ * legacy duration_months.
+ */
+export const termDurationLabel = (term: TermOption): string => {
+  const value = term.duration_value ?? term.duration_months ?? 0;
+  const unit = term.duration_unit ?? "month";
+  const noun = unit === "week" ? (value === 1 ? "Week" : "Weeks") : (value === 1 ? "Month" : "Months");
+  return `${value} ${noun}`;
+};
+
 export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
   const s = defaultSchedule(term);
   const feeTotal = Number(term.fee_total) || 0;

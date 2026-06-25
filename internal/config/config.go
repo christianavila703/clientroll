@@ -69,7 +69,7 @@ func Load() (*Config, error) {
 		XeroCreditNotesEnabled:        getEnvBool("XERO_CREDIT_NOTES_ENABLED", true),
 		SignupLinkSigningSecret:       getEnv("SIGNUP_LINK_SIGNING_SECRET", ""),
 		SignupLinksRequireSignature:   getEnv("SIGNUP_LINKS_REQUIRE_SIGNATURE", "") == "1" || strings.EqualFold(getEnv("SIGNUP_LINKS_REQUIRE_SIGNATURE", ""), "true"),
-		SignupLinkTTLMinutes:          getEnvInt("SIGNUP_LINK_TTL_MINUTES", 10080),
+		SignupLinkTTLMinutes:          getEnvInt("SIGNUP_LINK_TTL_MINUTES", 5256000),
 	}
 
 	if err := cfg.validate(); err != nil {
