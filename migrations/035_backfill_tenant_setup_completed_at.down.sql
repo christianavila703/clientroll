@@ -1,0 +1,1 @@
+-- No-op rollback: cannot safely infer previous NULL values after backfill.

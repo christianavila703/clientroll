@@ -1,0 +1,43 @@
+# Binaries
+bin/
+*.exe
+
+# Environment
+.env
+
+# Go
+vendor/
+
+# Frontend
+frontend/node_modules/
+frontend/.cache/
+
+# Build output
+web/assets/*.js
+web/assets/*.css
+web/assets/*.map
+web/index.html
+
+# Server build artifacts (deploy scripts)
+server
+server_new
+server_linux_amd64
+migrate_linux_amd64
+# E2E test artifacts
+e2e/artifacts/
+e2e/node_modules/
+tests/test-results/
+
+# Uploads (user data)
+uploads/tenants/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.docker/
+/verify-term-options
