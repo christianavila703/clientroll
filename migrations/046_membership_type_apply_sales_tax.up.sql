@@ -1,2 +1,0 @@
-ALTER TABLE membership_types
-ADD COLUMN apply_sales_tax BOOLEAN NOT NULL DEFAULT TRUE;
