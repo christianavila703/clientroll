@@ -3,11 +3,15 @@ package billing
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/billingportal/session"
 	"github.com/stripe/stripe-go/v82/customer"
+	"github.com/stripe/stripe-go/v82/price"
+	"github.com/stripe/stripe-go/v82/product"
 	"github.com/stripe/stripe-go/v82/subscription"
 )
 
@@ -159,6 +163,187 @@ func (s *StripeBillingProvider) CancelSubscription(ctx context.Context, subscrip
 		return fmt.Errorf("canceling Stripe subscription: %w", err)
 	}
 	return nil
+}
+
+// PlatformProductSyncInput configures create/update of the platform billing Stripe product + price.
+type PlatformProductSyncInput struct {
+	ProductName       string
+	PricePerMember    float64
+	Currency          string
+	ExistingProductID string
+	ExistingPriceID   string
+}
+
+// PlatformProductSyncResult is returned after syncing the Stripe product and price.
+type PlatformProductSyncResult struct {
+	ProductID       string `json:"product_id"`
+	PriceID         string `json:"price_id"`
+	CreatedProduct  bool   `json:"created_product"`
+	CreatedPrice    bool   `json:"created_price"`
+	ArchivedPriceID string `json:"archived_price_id,omitempty"`
+}
+
+// SyncPlatformProduct creates or updates the Stripe product and recurring per-member price.
+// Stripe prices are immutable; when the amount changes a new price is created and the old one archived.
+func (s *StripeBillingProvider) SyncPlatformProduct(ctx context.Context, in PlatformProductSyncInput) (PlatformProductSyncResult, error) {
+	if s.secretKey == "" {
+		return PlatformProductSyncResult{}, fmt.Errorf("stripe secret key is required")
+	}
+	if in.PricePerMember <= 0 {
+		return PlatformProductSyncResult{}, fmt.Errorf("price per member must be greater than zero")
+	}
+
+	currency := strings.ToLower(strings.TrimSpace(in.Currency))
+	if currency == "" {
+		currency = "usd"
+	}
+	productName := strings.TrimSpace(in.ProductName)
+	if productName == "" {
+		productName = "Clientroll Platform — Per Active Member"
+	}
+
+	unitAmount := int64(math.Round(in.PricePerMember * 100))
+	if unitAmount <= 0 {
+		return PlatformProductSyncResult{}, fmt.Errorf("price per member is too small")
+	}
+
+	stripe.Key = s.secretKey
+
+	var result PlatformProductSyncResult
+	productID := strings.TrimSpace(in.ExistingProductID)
+
+	if productID == "" {
+		pParams := &stripe.ProductParams{
+			Name: stripe.String(productName),
+			Metadata: map[string]string{
+				"clientroll": "platform_billing",
+			},
+		}
+		pParams.Context = ctx
+		prod, err := product.New(pParams)
+		if err != nil {
+			return PlatformProductSyncResult{}, fmt.Errorf("creating Stripe product: %w", err)
+		}
+		productID = prod.ID
+		result.CreatedProduct = true
+	} else {
+		uParams := &stripe.ProductParams{
+			Name: stripe.String(productName),
+		}
+		uParams.Context = ctx
+		if _, err := product.Update(productID, uParams); err != nil {
+			return PlatformProductSyncResult{}, fmt.Errorf("updating Stripe product: %w", err)
+		}
+	}
+	result.ProductID = productID
+
+	existingPriceID := strings.TrimSpace(in.ExistingPriceID)
+	needNewPrice := true
+	if existingPriceID != "" {
+		getParams := &stripe.PriceParams{}
+		getParams.Context = ctx
+		existing, err := price.Get(existingPriceID, getParams)
+		if err == nil &&
+			existing.UnitAmount == unitAmount &&
+			strings.EqualFold(string(existing.Currency), currency) &&
+			existing.Recurring != nil &&
+			existing.Recurring.Interval == stripe.PriceRecurringIntervalMonth {
+			needNewPrice = false
+			result.PriceID = existingPriceID
+		}
+	}
+
+	if needNewPrice {
+		prParams := &stripe.PriceParams{
+			Currency:   stripe.String(currency),
+			Product:    stripe.String(productID),
+			UnitAmount: stripe.Int64(unitAmount),
+			Recurring: &stripe.PriceRecurringParams{
+				Interval:  stripe.String(string(stripe.PriceRecurringIntervalMonth)),
+				UsageType: stripe.String(string(stripe.PriceRecurringUsageTypeLicensed)),
+			},
+			Nickname: stripe.String(fmt.Sprintf("$%.2f per active member / month", in.PricePerMember)),
+			Metadata: map[string]string{
+				"clientroll": "platform_billing",
+			},
+		}
+		prParams.Context = ctx
+		pr, err := price.New(prParams)
+		if err != nil {
+			return PlatformProductSyncResult{}, fmt.Errorf("creating Stripe price: %w", err)
+		}
+		result.PriceID = pr.ID
+		result.CreatedPrice = true
+
+		if existingPriceID != "" && existingPriceID != pr.ID {
+			archParams := &stripe.PriceParams{Active: stripe.Bool(false)}
+			archParams.Context = ctx
+			if _, err := price.Update(existingPriceID, archParams); err != nil {
+				return result, fmt.Errorf("created price %s but failed to archive %s: %w", pr.ID, existingPriceID, err)
+			}
+			result.ArchivedPriceID = existingPriceID
+		}
+	}
+
+	return result, nil
+}
+
+// SubscriptionPriceMigrationResult summarizes bulk subscription migration after a platform price change.
+type SubscriptionPriceMigrationResult struct {
+	Total    int      `json:"total"`
+	Migrated int      `json:"migrated"`
+	Skipped  int      `json:"skipped"`
+	Failed   int      `json:"failed"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+// MigrateSubscriptionToPrice moves a subscription onto newPriceID when its line item uses fromPriceID.
+// Returns skipped=true when already on newPriceID or not on the expected old price.
+func (s *StripeBillingProvider) MigrateSubscriptionToPrice(ctx context.Context, subscriptionID, newPriceID, fromPriceID string) (skipped bool, err error) {
+	if subscriptionID == "" || newPriceID == "" {
+		return false, fmt.Errorf("subscriptionID and newPriceID are required")
+	}
+
+	stripe.Key = s.secretKey
+
+	getParams := &stripe.SubscriptionParams{}
+	getParams.Context = ctx
+	getParams.AddExpand("items.data.price")
+	sub, err := subscription.Get(subscriptionID, getParams)
+	if err != nil {
+		return false, fmt.Errorf("fetching subscription: %w", err)
+	}
+	if sub.Items == nil || len(sub.Items.Data) == 0 {
+		return false, fmt.Errorf("subscription has no items")
+	}
+
+	item := sub.Items.Data[0]
+	currentPriceID := ""
+	if item.Price != nil {
+		currentPriceID = item.Price.ID
+	}
+	if currentPriceID == newPriceID {
+		return true, nil
+	}
+	if fromPriceID != "" && currentPriceID != fromPriceID {
+		return true, nil
+	}
+
+	up := &stripe.SubscriptionParams{
+		Items: []*stripe.SubscriptionItemsParams{
+			{
+				ID:       stripe.String(item.ID),
+				Price:    stripe.String(newPriceID),
+				Quantity: stripe.Int64(item.Quantity),
+			},
+		},
+		ProrationBehavior: stripe.String("none"),
+	}
+	up.Context = ctx
+	if _, err := subscription.Update(subscriptionID, up); err != nil {
+		return false, fmt.Errorf("updating subscription price: %w", err)
+	}
+	return false, nil
 }
 
 func (s *StripeBillingProvider) CreatePortalSession(ctx context.Context, customerID string) (string, error) {

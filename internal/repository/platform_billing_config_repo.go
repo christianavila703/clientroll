@@ -89,7 +89,7 @@ func (r *PlatformBillingConfigRepo) GetOrCreate(ctx context.Context) (*PlatformB
 		),
 		ins AS (
 			INSERT INTO platform_billing_config (per_member_price_usd, currency, is_active)
-			SELECT 2.00, 'USD', false
+			SELECT 1.00, 'USD', false
 			WHERE NOT EXISTS (SELECT 1 FROM existing)
 			RETURNING id, per_member_price_usd, currency,
 			          stripe_publishable_key_encrypted, stripe_secret_key_encrypted, stripe_webhook_secret_encrypted, google_places_api_key_encrypted,

@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
+	"clientroll/internal/billing"
 	"clientroll/internal/database"
 	"clientroll/internal/models"
 	"clientroll/internal/repository"
@@ -50,6 +53,7 @@ func NewPlatformBillingHandler(
 func (h *PlatformBillingHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/billing/config", h.GetConfig)
 	r.Put("/billing/config", h.UpdateConfig)
+	r.Post("/billing/stripe-product", h.SyncStripeProduct)
 
 	r.Get("/billing/tenants", h.ListTenantBilling)
 	r.Get("/billing/tenants/{tenantID}", h.GetTenantBilling)
@@ -167,6 +171,200 @@ func (h *PlatformBillingHandler) UpdateConfig(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"config": updated.ToPublic(),
 	})
+}
+
+func (h *PlatformBillingHandler) SyncStripeProduct(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.cfgRepo.GetOrCreate(r.Context())
+	if err != nil {
+		log.Printf("platform billing: get config error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to load billing config")
+		return
+	}
+
+	var input struct {
+		PerMemberPriceUSD    *float64 `json:"per_member_price_usd,omitempty"`
+		Currency             *string  `json:"currency,omitempty"`
+		ProductName          string   `json:"product_name,omitempty"`
+		StripePublishableKey string   `json:"stripe_publishable_key,omitempty"`
+		StripeSecretKey      string   `json:"stripe_secret_key,omitempty"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	up := repository.PlatformBillingConfigUpdateInput{}
+	if input.StripePublishableKey != "" {
+		encVal, err := h.enc.Encrypt(input.StripePublishableKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Encryption error")
+			return
+		}
+		up.StripePublishableKeyEncrypted = &encVal
+		cfg.StripePublishableKeyEncrypted = &encVal
+	}
+	if input.StripeSecretKey != "" {
+		encVal, err := h.enc.Encrypt(input.StripeSecretKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Encryption error")
+			return
+		}
+		up.StripeSecretKeyEncrypted = &encVal
+		cfg.StripeSecretKeyEncrypted = &encVal
+	}
+	if up.StripePublishableKeyEncrypted != nil || up.StripeSecretKeyEncrypted != nil {
+		updated, err := h.cfgRepo.Update(r.Context(), cfg.ID, up)
+		if err != nil {
+			log.Printf("platform billing: save keys before sync error: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to save Stripe keys")
+			return
+		}
+		if updated != nil {
+			cfg = updated
+		}
+	}
+
+	if cfg.StripePublishableKeyEncrypted == nil || *cfg.StripePublishableKeyEncrypted == "" {
+		writeError(w, http.StatusBadRequest, "Stripe publishable key is required")
+		return
+	}
+	if cfg.StripeSecretKeyEncrypted == nil || *cfg.StripeSecretKeyEncrypted == "" {
+		writeError(w, http.StatusBadRequest, "Stripe secret key is required")
+		return
+	}
+
+	secretKey, err := h.enc.Decrypt(*cfg.StripeSecretKeyEncrypted)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to decrypt Stripe secret key")
+		return
+	}
+	publishableKey, err := h.enc.Decrypt(*cfg.StripePublishableKeyEncrypted)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to decrypt Stripe publishable key")
+		return
+	}
+
+	priceUSD := cfg.PerMemberPriceUSD
+	if input.PerMemberPriceUSD != nil {
+		priceUSD = *input.PerMemberPriceUSD
+	}
+	currency := cfg.Currency
+	if input.Currency != nil && strings.TrimSpace(*input.Currency) != "" {
+		currency = strings.TrimSpace(*input.Currency)
+	}
+
+	existingProductID := ""
+	if cfg.StripeProductID != nil {
+		existingProductID = *cfg.StripeProductID
+	}
+	existingPriceID := ""
+	if cfg.StripePriceID != nil {
+		existingPriceID = *cfg.StripePriceID
+	}
+
+	provider := billing.NewStripeBillingProvider(publishableKey, secretKey, "")
+	syncResult, err := provider.SyncPlatformProduct(r.Context(), billing.PlatformProductSyncInput{
+		ProductName:       input.ProductName,
+		PricePerMember:    priceUSD,
+		Currency:          currency,
+		ExistingProductID: existingProductID,
+		ExistingPriceID:   existingPriceID,
+	})
+	if err != nil {
+		log.Printf("platform billing: sync stripe product error: %v", err)
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	productID := syncResult.ProductID
+	priceID := syncResult.PriceID
+	updated, err := h.cfgRepo.Update(r.Context(), cfg.ID, repository.PlatformBillingConfigUpdateInput{
+		PerMemberPriceUSD: &priceUSD,
+		Currency:          &currency,
+		StripeProductID:   &productID,
+		StripePriceID:     &priceID,
+	})
+	if err != nil {
+		log.Printf("platform billing: save synced product ids error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Stripe product created but failed to save config")
+		return
+	}
+	if updated == nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save billing config")
+		return
+	}
+
+	var migrationResult *billing.SubscriptionPriceMigrationResult
+	if syncResult.CreatedPrice && syncResult.ArchivedPriceID != "" {
+		migrationResult = h.migrateTenantSubscriptionsToPrice(r, provider, priceID, syncResult.ArchivedPriceID, priceUSD)
+	}
+
+	resp := map[string]interface{}{
+		"config": updated.ToPublic(),
+		"sync":   syncResult,
+	}
+	if migrationResult != nil {
+		resp["migration"] = migrationResult
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *PlatformBillingHandler) migrateTenantSubscriptionsToPrice(
+	r *http.Request,
+	provider *billing.StripeBillingProvider,
+	newPriceID string,
+	fromPriceID string,
+	pricePerMember float64,
+) *billing.SubscriptionPriceMigrationResult {
+	tenants, err := h.tenantRepo.List(r.Context())
+	if err != nil {
+		log.Printf("platform billing: list tenants for price migration error: %v", err)
+		return &billing.SubscriptionPriceMigrationResult{
+			Failed: 1,
+			Errors: []string{"failed to list tenants: " + err.Error()},
+		}
+	}
+
+	result := &billing.SubscriptionPriceMigrationResult{}
+	for _, tenant := range tenants {
+		sub, err := h.subRepo.GetByTenant(r.Context(), tenant.ID)
+		if err != nil {
+			log.Printf("platform billing: migration get subscription tenant=%s: %v", tenant.ID, err)
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("tenant %s: %v", tenant.Slug, err))
+			continue
+		}
+		if sub == nil || sub.StripeSubscriptionID == nil || strings.TrimSpace(*sub.StripeSubscriptionID) == "" {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(sub.Status))
+		if status == "cancelled" || status == "canceled" {
+			continue
+		}
+
+		result.Total++
+		subscriptionID := strings.TrimSpace(*sub.StripeSubscriptionID)
+		skipped, err := provider.MigrateSubscriptionToPrice(r.Context(), subscriptionID, newPriceID, fromPriceID)
+		if err != nil {
+			log.Printf("platform billing: migrate subscription tenant=%s sub=%s: %v", tenant.ID, subscriptionID, err)
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s (%s): %v", tenant.Slug, subscriptionID, err))
+			continue
+		}
+		if skipped {
+			result.Skipped++
+			continue
+		}
+
+		result.Migrated++
+		monthly := float64(sub.ActiveMemberCount) * pricePerMember
+		if _, err := h.subRepo.UpdateByTenant(r.Context(), tenant.ID, repository.TenantSubscriptionUpdate{
+			CurrentMonthlyAmountUSD: &monthly,
+		}); err != nil {
+			log.Printf("platform billing: update local subscription amount tenant=%s: %v", tenant.ID, err)
+		}
+	}
+	return result
 }
 
 func (h *PlatformBillingHandler) ListTenantBilling(w http.ResponseWriter, r *http.Request) {

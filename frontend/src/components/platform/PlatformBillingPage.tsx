@@ -55,11 +55,12 @@ export default function PlatformBillingPage() {
   const [tenants, setTenants] = useState<TenantBillingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncingProduct, setSyncingProduct] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   const [form, setForm] = useState({
-    per_member_price_usd: 2,
+    per_member_price_usd: 1,
     currency: "USD",
     is_active: false,
     stripe_product_id: "",
@@ -77,7 +78,7 @@ export default function PlatformBillingPage() {
         const c = cfgRes as BillingConfigResponse;
         setCfg(c);
         setForm({
-          per_member_price_usd: c.config.per_member_price_usd ?? 2,
+          per_member_price_usd: c.config.per_member_price_usd ?? 1,
           currency: c.config.currency ?? "USD",
           is_active: !!c.config.is_active,
           stripe_product_id: c.config.stripe_product_id || "",
@@ -108,6 +109,12 @@ export default function PlatformBillingPage() {
     };
   }, [cfg]);
 
+  const canSyncStripeProduct = useMemo(() => {
+    const hasStoredKeys = !!(keyStatus?.publishable && keyStatus?.secret);
+    const hasFormKeys = !!(form.stripe_publishable_key.trim() && form.stripe_secret_key.trim());
+    return hasStoredKeys || hasFormKeys;
+  }, [keyStatus, form.stripe_publishable_key, form.stripe_secret_key]);
+
   const saveConfig = async () => {
     setSaving(true);
     setMessage("");
@@ -129,6 +136,56 @@ export default function PlatformBillingPage() {
       setError(e instanceof ApiError ? e.message : "Unable to save billing configuration.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const syncStripeProduct = async () => {
+    setSyncingProduct(true);
+    setMessage("");
+    setError("");
+    try {
+      const res = await api.syncPlatformBillingStripeProduct({
+        per_member_price_usd: Number(form.per_member_price_usd),
+        currency: form.currency,
+        stripe_publishable_key: form.stripe_publishable_key || "",
+        stripe_secret_key: form.stripe_secret_key || "",
+      }) as {
+        config: BillingConfig;
+        sync?: { created_product?: boolean; created_price?: boolean; product_id?: string; price_id?: string };
+        migration?: { total?: number; migrated?: number; skipped?: number; failed?: number; errors?: string[] };
+      };
+
+      const sync = res.sync;
+      const parts: string[] = [];
+      if (sync?.created_product) parts.push("product created");
+      else if (form.stripe_product_id || res.config.stripe_product_id) parts.push("product updated");
+      if (sync?.created_price) parts.push("new price created");
+      else parts.push("price unchanged");
+
+      const mig = res.migration;
+      if (mig && (mig.total ?? 0) > 0) {
+        parts.push(`${mig.migrated ?? 0} subscription(s) migrated`);
+        if ((mig.skipped ?? 0) > 0) parts.push(`${mig.skipped} skipped`);
+        if ((mig.failed ?? 0) > 0) parts.push(`${mig.failed} failed`);
+      }
+      setMessage(parts.length ? `Stripe sync complete: ${parts.join(", ")}` : "Stripe product synced");
+
+      if (mig?.errors?.length) {
+        setError(mig.errors.slice(0, 3).join(" · "));
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        stripe_product_id: res.config.stripe_product_id || "",
+        stripe_price_id: res.config.stripe_price_id || "",
+        stripe_publishable_key: "",
+        stripe_secret_key: "",
+      }));
+      fetchAll();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Unable to sync Stripe product.");
+    } finally {
+      setSyncingProduct(false);
     }
   };
 
@@ -189,15 +246,6 @@ export default function PlatformBillingPage() {
             <input className="input-field font-mono text-[13px]" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} />
           </label>
 
-          <label className="block sm:col-span-2">
-            <span className="mb-1 block text-[13px] font-medium text-gray-700">Stripe product ID</span>
-            <input className="input-field font-mono text-[13px]" value={form.stripe_product_id} onChange={(e) => setForm({ ...form, stripe_product_id: e.target.value })} placeholder="prod_..." />
-          </label>
-          <label className="block sm:col-span-2">
-            <span className="mb-1 block text-[13px] font-medium text-gray-700">Stripe price ID (per member / month)</span>
-            <input className="input-field font-mono text-[13px]" value={form.stripe_price_id} onChange={(e) => setForm({ ...form, stripe_price_id: e.target.value })} placeholder="price_..." />
-          </label>
-
           <div className="sm:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
               <p className="text-[11px] font-semibold text-gray-600">Keys status</p>
@@ -228,6 +276,37 @@ export default function PlatformBillingPage() {
             <span className="mb-1 block text-[13px] font-medium text-gray-700">Stripe webhook signing secret</span>
             <input className="input-field font-mono text-[13px]" value={form.stripe_webhook_secret} onChange={(e) => setForm({ ...form, stripe_webhook_secret: e.target.value })} placeholder={keyStatus?.webhook ? "Leave blank to keep existing" : "whsec_..."} />
           </label>
+
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[13px] font-medium text-gray-700">Stripe product ID</span>
+            <input className="input-field font-mono text-[13px]" value={form.stripe_product_id} onChange={(e) => setForm({ ...form, stripe_product_id: e.target.value })} placeholder="prod_... (filled by sync or enter manually)" />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[13px] font-medium text-gray-700">Stripe price ID (per member / month)</span>
+            <input className="input-field font-mono text-[13px]" value={form.stripe_price_id} onChange={(e) => setForm({ ...form, stripe_price_id: e.target.value })} placeholder="price_... (filled by sync or enter manually)" />
+          </label>
+
+          <div className="sm:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-3">
+            <div>
+              <p className="text-[13px] font-medium text-gray-900">Stripe product &amp; price</p>
+              <p className="text-[12px] text-gray-600 mt-0.5">
+                Enter publishable and secret keys above, then create or update the recurring per-member product in Stripe.
+                Changing the price creates a new Stripe price, archives the previous one, and migrates existing tenant subscriptions.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary shrink-0"
+              onClick={syncStripeProduct}
+              disabled={!canSyncStripeProduct || syncingProduct}
+            >
+              {syncingProduct
+                ? "Syncing..."
+                : form.stripe_product_id
+                  ? "Update Stripe product"
+                  : "Create Stripe product"}
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-3">

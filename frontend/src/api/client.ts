@@ -414,6 +414,8 @@ export const api = {
   getPlatformBillingConfig: () => request("/platform/billing/config"),
   updatePlatformBillingConfig: (data: unknown) =>
     request("/platform/billing/config", { method: "PUT", body: data }),
+  syncPlatformBillingStripeProduct: (data?: unknown) =>
+    request("/platform/billing/stripe-product", { method: "POST", body: data || {} }),
   listPlatformBillingTenants: () => request("/platform/billing/tenants"),
   getPlatformBillingTenant: (tenantId: string) =>
     request(`/platform/billing/tenants/${tenantId}`),
