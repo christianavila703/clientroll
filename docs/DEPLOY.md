@@ -146,55 +146,81 @@ git push origin vYYYY.MM.DD-1
 
 ## Platform billing cron (daily usage snapshot)
 
-Platform billing uses **daily active-member snapshots** to keep Stripe subscription quantities in sync.
+Platform billing counts each tenant's active members daily and pushes the quantity to Stripe so invoices reflect current usage.
 
-The job entrypoint is:
+**Binary:** `cmd/billing-snapshot` (deployed to `$DEPLOY_PATH/billing-snapshot`)
+
+**Required env** (same as the API):
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL |
+| `MASTER_ENCRYPTION_KEY` | Decrypt platform Stripe keys |
+
+**Each run:**
+
+1. Loads `platform_billing_config` — exits cleanly if billing is inactive
+2. Counts active memberships per active tenant → `tenant_usage_snapshots`
+3. Updates `tenant_subscriptions.active_member_count` locally
+4. For each tenant with a Stripe subscription: `subscription.Update(quantity = active members)`
+5. Stripe invoices at period end based on quantity
+
+Runs in ~30 seconds; safe to retry. Exits non-zero if any Stripe update fails (for cron alerting).
+
+### Manual run (development)
 
 ```bash
-go run ./cmd/billing-snapshot
+make billing-snapshot
+# or
+make build-billing-snapshot && DATABASE_URL=... MASTER_ENCRYPTION_KEY=... ./bin/billing-snapshot
+go run ./cmd/billing-snapshot -dry-run   # check config without writing
 ```
 
-It requires (in the same environment as the API):
+### Production install (cron)
 
-- `DATABASE_URL`
-- `MASTER_ENCRYPTION_KEY`
+After deploy (`./scripts/deploy-on-server.sh` copies `billing-snapshot` to `/var/www/clientroll/`):
 
-And platform billing must be enabled/configured in the database (`platform_billing_config`).
+```bash
+chmod +x scripts/install-billing-snapshot-cron.sh
+DEPLOY_PATH=/var/www/clientroll ./scripts/install-billing-snapshot-cron.sh
+```
 
-### Example systemd unit + timer
+Default schedule: **03:15 UTC daily**. Override with `CRON_SCHEDULE="0 4 * * *"`.
 
-Create a service (example: `/etc/systemd/system/clientroll-billing-snapshot.service`):
+Logs: `/var/log/clientroll-billing-snapshot.log`
+
+### Alternative: systemd timer
+
+If you prefer systemd over cron, create `/etc/systemd/system/clientroll-billing-snapshot.service`:
 
 ```ini
 [Unit]
 Description=ClientRoll platform billing snapshot
-After=network.target
+After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/var/www/clientroll-repo
+WorkingDirectory=/var/www/clientroll
 EnvironmentFile=/var/www/clientroll/.env
-ExecStart=/usr/bin/env bash -lc 'go run ./cmd/billing-snapshot'
+ExecStart=/var/www/clientroll/billing-snapshot
 ```
 
-Create a timer (example: `/etc/systemd/system/clientroll-billing-snapshot.timer`):
+Timer `/etc/systemd/system/clientroll-billing-snapshot.timer`:
 
 ```ini
 [Unit]
 Description=Run ClientRoll billing snapshot daily
 
 [Timer]
-OnCalendar=daily
+OnCalendar=*-*-* 03:15:00
 Persistent=true
+RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target
 ```
 
-Enable it:
-
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now clientroll-billing-snapshot.timer
-sudo systemctl list-timers | grep clientroll-billing-snapshot
 ```

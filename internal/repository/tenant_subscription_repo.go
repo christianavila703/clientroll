@@ -66,9 +66,10 @@ func (r *TenantSubscriptionRepo) GetTenantIDByStripeSubscriptionID(ctx context.C
 
 // GetByTenant returns the subscription record for a tenant.
 func (r *TenantSubscriptionRepo) GetByTenant(ctx context.Context, tenantID uuid.UUID) (*TenantSubscription, error) {
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		SELECT id, tenant_id,
 		       stripe_customer_id, stripe_subscription_id, stripe_subscription_item_id,
@@ -78,10 +79,10 @@ func (r *TenantSubscriptionRepo) GetByTenant(ctx context.Context, tenantID uuid.
 		       has_valid_payment_method, card_brand, card_last4, card_exp_month, card_exp_year,
 		       created_at, updated_at
 		FROM tenant_subscriptions
-		WHERE tenant_id = $1`
+		WHERE tenant_id = $2`
 
 	var s TenantSubscription
-	err := r.db.Pool.QueryRow(ctx, query, tenantID).Scan(
+	err := r.db.Pool.QueryRow(ctx, query, rlsID, tenantUUID).Scan(
 		&s.ID, &s.TenantID,
 		&s.StripeCustomerID, &s.StripeSubscriptionID, &s.StripeSubscriptionItemID,
 		&s.Status, &s.ActiveMemberCount, &s.CurrentMonthlyAmountUSD,
@@ -101,12 +102,13 @@ func (r *TenantSubscriptionRepo) GetByTenant(ctx context.Context, tenantID uuid.
 
 // UpsertPending ensures a subscription row exists for the tenant.
 func (r *TenantSubscriptionRepo) UpsertPending(ctx context.Context, tenantID uuid.UUID) (*TenantSubscription, error) {
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		INSERT INTO tenant_subscriptions (tenant_id, status)
-		VALUES ($1, 'pending')
+		VALUES ($2, 'pending')
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			updated_at = NOW()
 		RETURNING id, tenant_id,
@@ -118,7 +120,7 @@ func (r *TenantSubscriptionRepo) UpsertPending(ctx context.Context, tenantID uui
 		          created_at, updated_at`
 
 	var s TenantSubscription
-	err := r.db.Pool.QueryRow(ctx, query, tenantID).Scan(
+	err := r.db.Pool.QueryRow(ctx, query, rlsID, tenantUUID).Scan(
 		&s.ID, &s.TenantID,
 		&s.StripeCustomerID, &s.StripeSubscriptionID, &s.StripeSubscriptionItemID,
 		&s.Status, &s.ActiveMemberCount, &s.CurrentMonthlyAmountUSD,
@@ -157,28 +159,29 @@ type TenantSubscriptionUpdate struct {
 
 // UpdateByTenant updates the subscription row for a tenant.
 func (r *TenantSubscriptionRepo) UpdateByTenant(ctx context.Context, tenantID uuid.UUID, u TenantSubscriptionUpdate) (*TenantSubscription, error) {
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		UPDATE tenant_subscriptions SET
-			stripe_customer_id = COALESCE($2, stripe_customer_id),
-			stripe_subscription_id = COALESCE($3, stripe_subscription_id),
-			stripe_subscription_item_id = COALESCE($4, stripe_subscription_item_id),
-			status = COALESCE($5, status),
-			active_member_count = COALESCE($6, active_member_count),
-			current_monthly_amount_usd = COALESCE($7, current_monthly_amount_usd),
-			current_period_start = COALESCE($8, current_period_start),
-			current_period_end = COALESCE($9, current_period_end),
-			past_due_since = COALESCE($10, past_due_since),
-			billing_grace_until = COALESCE($11, billing_grace_until),
-			has_valid_payment_method = COALESCE($12, has_valid_payment_method),
-			card_brand = COALESCE($13, card_brand),
-			card_last4 = COALESCE($14, card_last4),
-			card_exp_month = COALESCE($15, card_exp_month),
-			card_exp_year = COALESCE($16, card_exp_year),
+			stripe_customer_id = COALESCE($3, stripe_customer_id),
+			stripe_subscription_id = COALESCE($4, stripe_subscription_id),
+			stripe_subscription_item_id = COALESCE($5, stripe_subscription_item_id),
+			status = COALESCE($6, status),
+			active_member_count = COALESCE($7, active_member_count),
+			current_monthly_amount_usd = COALESCE($8, current_monthly_amount_usd),
+			current_period_start = COALESCE($9, current_period_start),
+			current_period_end = COALESCE($10, current_period_end),
+			past_due_since = COALESCE($11, past_due_since),
+			billing_grace_until = COALESCE($12, billing_grace_until),
+			has_valid_payment_method = COALESCE($13, has_valid_payment_method),
+			card_brand = COALESCE($14, card_brand),
+			card_last4 = COALESCE($15, card_last4),
+			card_exp_month = COALESCE($16, card_exp_month),
+			card_exp_year = COALESCE($17, card_exp_year),
 			updated_at = NOW()
-		WHERE tenant_id = $1
+		WHERE tenant_id = $2
 		RETURNING id, tenant_id,
 		          stripe_customer_id, stripe_subscription_id, stripe_subscription_item_id,
 		          status, active_member_count, current_monthly_amount_usd,
@@ -189,7 +192,8 @@ func (r *TenantSubscriptionRepo) UpdateByTenant(ctx context.Context, tenantID uu
 
 	var s TenantSubscription
 	err := r.db.Pool.QueryRow(ctx, query,
-		tenantID,
+		rlsID,
+		tenantUUID,
 		u.StripeCustomerID,
 		u.StripeSubscriptionID,
 		u.StripeSubscriptionItemID,

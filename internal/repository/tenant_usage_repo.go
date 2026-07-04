@@ -32,16 +32,17 @@ func (r *TenantUsageRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, 
 	if days <= 0 {
 		days = 30
 	}
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		SELECT id, tenant_id, active_member_count, amount_usd, snapshot_date, invoiced, created_at
 		FROM tenant_usage_snapshots
-		WHERE tenant_id = $1 AND snapshot_date >= NOW() - ($2 || ' days')::INTERVAL
+		WHERE tenant_id = $2 AND snapshot_date >= NOW() - ($3 || ' days')::INTERVAL
 		ORDER BY snapshot_date DESC`
 
-	rows, err := r.db.Pool.Query(ctx, query, tenantID, fmt.Sprintf("%d", days))
+	rows, err := r.db.Pool.Query(ctx, query, rlsID, tenantUUID, fmt.Sprintf("%d", days))
 	if err != nil {
 		return nil, fmt.Errorf("listing tenant usage: %w", err)
 	}
@@ -59,13 +60,14 @@ func (r *TenantUsageRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID, 
 }
 
 func (r *TenantUsageRepo) MarkInvoicedUpTo(ctx context.Context, tenantID uuid.UUID, throughDate time.Time) error {
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	_, err := r.db.Pool.Exec(ctx, `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		UPDATE tenant_usage_snapshots
 		SET invoiced = true
-		WHERE tenant_id = $1 AND snapshot_date <= $2`, tenantID, throughDate)
+		WHERE tenant_id = $2 AND snapshot_date <= $3`, rlsID, tenantUUID, throughDate)
 	if err != nil {
 		return fmt.Errorf("marking usage invoiced: %w", err)
 	}

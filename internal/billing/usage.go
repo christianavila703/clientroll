@@ -21,9 +21,9 @@ func NewUsageTracker(db *database.Postgres) *UsageTracker {
 	return &UsageTracker{db: db}
 }
 
-// SnapshotAllTenants takes a daily snapshot of active member counts for all tenants.
-// This should be called by a daily cron job.
-func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember float64) error {
+// SnapshotAllTenants takes a daily snapshot of active member counts for all active tenants.
+// Returns a map of tenant ID → active member count written during this run.
+func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember float64) (TenantActiveCounts, error) {
 	rows, err := u.db.Pool.Query(ctx, `
 		SELECT t.id, COUNT(m.id) AS active_count
 		FROM tenants t
@@ -31,12 +31,13 @@ func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember fl
 		WHERE t.is_active = true
 		GROUP BY t.id`)
 	if err != nil {
-		return fmt.Errorf("querying tenant member counts: %w", err)
+		return nil, fmt.Errorf("querying tenant member counts: %w", err)
 	}
 	defer rows.Close()
 
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	count := 0
+	counts := make(TenantActiveCounts)
+	processed := 0
 
 	for rows.Next() {
 		var tenantID uuid.UUID
@@ -47,36 +48,45 @@ func (u *UsageTracker) SnapshotAllTenants(ctx context.Context, pricePerMember fl
 		}
 
 		amountUSD := float64(activeCount) * pricePerMember
+		counts[tenantID] = activeCount
+
+		rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 
 		_, err := u.db.Pool.Exec(ctx, `
 			WITH _ AS (
-				SELECT set_config('app.current_tenant_id', $1::text, true)
+				SELECT set_config('app.current_tenant_id', $1, true)
 			)
 			INSERT INTO tenant_usage_snapshots (tenant_id, active_member_count, amount_usd, snapshot_date)
-			VALUES ($1, $2, $3, $4)
+			VALUES ($2, $3, $4, $5)
 			ON CONFLICT (tenant_id, snapshot_date) DO UPDATE SET
-				active_member_count = $2, amount_usd = $3`,
-			tenantID, activeCount, amountUSD, today)
+				active_member_count = $3, amount_usd = $4`,
+			rlsID, tenantUUID, activeCount, amountUSD, today)
 		if err != nil {
 			log.Printf("Usage snapshot: insert error for tenant %s: %v", tenantID, err)
 			continue
 		}
 
-		// Update the subscription record
-		u.db.Pool.Exec(ctx, `
+		_, err = u.db.Pool.Exec(ctx, `
 			WITH _ AS (
-				SELECT set_config('app.current_tenant_id', $1::text, true)
+				SELECT set_config('app.current_tenant_id', $1, true)
 			)
-			UPDATE tenant_subscriptions SET active_member_count = $2,
-				current_monthly_amount_usd = $3, updated_at = NOW()
-			WHERE tenant_id = $1`,
-			tenantID, activeCount, amountUSD)
+			UPDATE tenant_subscriptions SET active_member_count = $3,
+				current_monthly_amount_usd = $4, updated_at = NOW()
+			WHERE tenant_id = $2`,
+			rlsID, tenantUUID, activeCount, amountUSD)
+		if err != nil {
+			log.Printf("Usage snapshot: subscription update error for tenant %s: %v", tenantID, err)
+			continue
+		}
 
-		count++
+		processed++
 	}
 
-	log.Printf("Usage snapshots completed: %d tenants processed", count)
-	return rows.Err()
+	log.Printf("Usage snapshots completed: %d tenants processed", processed)
+	if err := rows.Err(); err != nil {
+		return counts, err
+	}
+	return counts, nil
 }
 
 // GetTenantUsageHistory returns usage snapshots for a tenant.

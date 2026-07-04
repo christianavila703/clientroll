@@ -37,18 +37,19 @@ func (r *TenantInvoiceRepo) ListByTenant(ctx context.Context, tenantID uuid.UUID
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		SELECT id, tenant_id, stripe_invoice_id, amount_usd, member_count, period_start, period_end,
 		       status, paid_at, hosted_invoice_url, invoice_pdf_url, created_at
 		FROM tenant_invoices
-		WHERE tenant_id = $1
+		WHERE tenant_id = $2
 		ORDER BY created_at DESC
-		LIMIT $2`
+		LIMIT $3`
 
-	rows, err := r.db.Pool.Query(ctx, query, tenantID, limit)
+	rows, err := r.db.Pool.Query(ctx, query, rlsID, tenantUUID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing tenant invoices: %w", err)
 	}
@@ -81,12 +82,13 @@ type UpsertTenantInvoiceInput struct {
 }
 
 func (r *TenantInvoiceRepo) UpsertByStripeInvoiceID(ctx context.Context, tenantID uuid.UUID, in UpsertTenantInvoiceInput) (*TenantInvoice, error) {
+	rlsID, tenantUUID := database.TenantRLSScope(tenantID)
 	query := `
 		WITH _ AS (
-			SELECT set_config('app.current_tenant_id', $1::text, true)
+			SELECT set_config('app.current_tenant_id', $1, true)
 		)
 		INSERT INTO tenant_invoices (tenant_id, stripe_invoice_id, amount_usd, member_count, period_start, period_end, status, paid_at, hosted_invoice_url, invoice_pdf_url)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		VALUES ($2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (stripe_invoice_id) DO UPDATE SET
 			amount_usd = EXCLUDED.amount_usd,
 			member_count = EXCLUDED.member_count,
@@ -100,7 +102,8 @@ func (r *TenantInvoiceRepo) UpsertByStripeInvoiceID(ctx context.Context, tenantI
 
 	var inv TenantInvoice
 	err := r.db.Pool.QueryRow(ctx, query,
-		tenantID,
+		rlsID,
+		tenantUUID,
 		in.StripeInvoiceID,
 		in.AmountUSD,
 		in.MemberCount,

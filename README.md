@@ -39,6 +39,8 @@ Open http://localhost:3000.
 | `make dev` | Run API (dev DB/Redis from Makefile) |
 | `make frontend-dev` | Run frontend dev server |
 | `make build` | Build Go binary to `bin/clientroll` |
+| `make build-billing-snapshot` | Build platform billing cron binary to `bin/billing-snapshot` |
+| `make billing-snapshot` | Run billing snapshot manually (dev DB) |
 | `make frontend` | Build frontend to `web/` |
 | `make test` | Go tests |
 | `make migrate-up` / `make migrate-down` | Migrations |

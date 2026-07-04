@@ -40,6 +40,7 @@ echo "Building from git SHA: $GIT_SHA ($BUILD_TIME)"
 
 echo "Building backend binary..."
 CGO_ENABLED=0 go build -o "$BUILD_DIR/server_new" ./cmd/server/
+CGO_ENABLED=0 go build -o "$BUILD_DIR/billing-snapshot" ./cmd/billing-snapshot/
 
 echo "Building frontend assets..."
 (
@@ -78,6 +79,7 @@ rm -rf "$DEPLOY_PATH/web_new"/*
 
 echo "Copying backend binary..."
 cp -f "$BUILD_DIR/server_new" "$DEPLOY_PATH/server_new"
+cp -f "$BUILD_DIR/billing-snapshot" "$DEPLOY_PATH/billing-snapshot_new"
 
 echo "Staging frontend bundle from web/..."
 cp -a "$SOURCE_REPO/web/." "$DEPLOY_PATH/web_new/"
@@ -92,6 +94,8 @@ if sudo systemctl is-active --quiet "$SERVICE"; then
 fi
 mv -f "$DEPLOY_PATH/server_new" "$DEPLOY_PATH/server"
 chmod +x "$DEPLOY_PATH/server"
+mv -f "$DEPLOY_PATH/billing-snapshot_new" "$DEPLOY_PATH/billing-snapshot"
+chmod +x "$DEPLOY_PATH/billing-snapshot"
 rm -rf "$DEPLOY_PATH/web_old"
 [[ -d "$DEPLOY_PATH/web" ]] && mv "$DEPLOY_PATH/web" "$DEPLOY_PATH/web_old"
 mv -f "$DEPLOY_PATH/web_new" "$DEPLOY_PATH/web"
