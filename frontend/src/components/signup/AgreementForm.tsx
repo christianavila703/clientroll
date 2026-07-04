@@ -8,7 +8,7 @@ import {
   termHasExplicitFee,
 } from "../../utils/signupPricing";
 import { formatTermsContentForDisplay, substituteTermsVariables, type TermsSubstitutionContext } from "../../utils/termsContent";
-import { describeTermPricing, termDurationLabel } from "../../utils/termOptionDisplay";
+import { describeTermPricing, termOptionCardTitles, termOptionDisplayHeading } from "../../utils/termOptionDisplay";
 import type { Bonus, Tenant, MembershipType, TermOption, TermsDoc, OrgPayload } from "./SignupPage";
 
 interface Props {
@@ -466,7 +466,17 @@ export default function AgreementForm({ tenant, org, membership, termOption, ten
               {(membership.membership_level || "").trim() && (
                 <p className="text-[12px] font-medium" style={{ color: "var(--brandPrimary)" }}>{membership.membership_level}</p>
               )}
-              <p className="text-[13px] text-gray-500">{termDurationLabel(termOption)} term</p>
+              {(() => {
+                const titles = termOptionCardTitles(termOption);
+                return titles.secondary ? (
+                  <>
+                    <p className="text-[13px] font-medium text-gray-900">{titles.primary}</p>
+                    <p className="text-[12px] text-gray-500">{titles.secondary}</p>
+                  </>
+                ) : (
+                  <p className="text-[13px] text-gray-500">{titles.primary} term</p>
+                );
+              })()}
             </div>
           </div>
           <div className="text-right">
@@ -595,7 +605,7 @@ function MembershipOverview({ membership, termOption, bonuses, currencyCode }: {
       {bonuses.length > 0 && (
         <div className="mt-6 border-t border-gray-200 pt-5">
           <h4 className="text-[12px] font-semibold uppercase tracking-wide text-gray-500">
-            Bonuses ({termDurationLabel(termOption)} Term)
+            Bonuses ({termOptionDisplayHeading(termOption)})
           </h4>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {bonuses.map((bonus) => (

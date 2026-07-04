@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
 import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
-import { describeTermPricing, termDurationLabel } from "../../utils/termOptionDisplay";
+import { describeTermPricing, termOptionCardTitles, termOptionDisplayHeading } from "../../utils/termOptionDisplay";
 
 interface Props {
   membership: MembershipType;
@@ -89,7 +89,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
             )}
             {bonuses.length > 0 && (
               <p className="text-[12px] text-gray-400 mt-1">
-                Includes {currencyCode} ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm ? termDurationLabel(currentTerm) : ""} term
+                Includes {currencyCode} ${bonuses.reduce((s, b) => s + b.value, 0).toLocaleString()} in bonuses for the {currentTerm ? termOptionDisplayHeading(currentTerm) : ""}
               </p>
             )}
           </div>
@@ -128,7 +128,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
           {bonuses.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Exclusive Bonuses with {currentTerm ? termDurationLabel(currentTerm) : ""} Term
+                Exclusive Bonuses with {currentTerm ? termOptionDisplayHeading(currentTerm) : ""}
               </h2>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 {bonuses.map((bonus) => (
@@ -175,9 +175,19 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-semibold text-gray-900 text-[17px]">
-                        {termDurationLabel(term)}
-                      </span>
+                      {(() => {
+                        const titles = termOptionCardTitles(term);
+                        return (
+                          <div>
+                            <span className="font-semibold text-gray-900 text-[17px]">
+                              {titles.primary}
+                            </span>
+                            {titles.secondary && (
+                              <p className="text-[13px] text-gray-500 mt-0.5">{titles.secondary}</p>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {term.bonuses && term.bonuses.length > 0 && (
                         <span className={`badge ${
                           idx === selectedTermIdx 

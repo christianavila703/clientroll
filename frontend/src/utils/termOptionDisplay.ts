@@ -61,6 +61,36 @@ export const termDurationLabel = (term: TermOption): string => {
   return `${value} ${noun}`;
 };
 
+/** Member-facing term title — admin display label when set, otherwise duration. */
+export const termOptionDisplayLabel = (term: TermOption): string => {
+  const custom = (term.label ?? "").trim();
+  if (custom) return custom;
+  return termDurationLabel(term);
+};
+
+export const termOptionHasCustomLabel = (term: TermOption): boolean =>
+  !!(term.label ?? "").trim();
+
+/** Primary title + optional membership-term subtitle for signup cards. */
+export const termOptionCardTitles = (
+  term: TermOption,
+): { primary: string; secondary?: string } => {
+  const custom = (term.label ?? "").trim();
+  const duration = termDurationLabel(term);
+  if (custom) {
+    return { primary: custom, secondary: `${duration} term` };
+  }
+  return { primary: duration };
+};
+
+/** For headings like "Bonuses with X". */
+export const termOptionDisplayHeading = (term: TermOption): string => {
+  const custom = (term.label ?? "").trim();
+  const duration = termDurationLabel(term);
+  if (custom) return `${custom} · ${duration} term`;
+  return `${duration} Term`;
+};
+
 export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
   const s = defaultSchedule(term);
   const feeTotal = Number(term.fee_total) || 0;
