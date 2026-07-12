@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import type { MembershipType, TermOption, Bonus } from "./SignupPage";
-import { estimateStripeProcessingFeeCents } from "../../utils/paymentLabels";
 import { describeTermPricing, termOptionCardTitles, termOptionDisplayHeading } from "../../utils/termOptionDisplay";
 
 interface Props {
@@ -32,19 +31,9 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
   const supportsGoCardless = normalizedProviders.some((p) => p.includes("gocardless"));
   const pricingForTerm = (term: TermOption) => describeTermPricing(term);
   const displayAmountForTerm = (term: TermOption): number => pricingForTerm(term).amount;
-  const processingFeeForDisplay = (amount: number, method: "card" | "direct_debit") =>
-    estimateStripeProcessingFeeCents(Math.round(amount * 100), method) / 100;
   const processingFeeLabelForTerm = (term: TermOption): string | null => {
-    const amount = displayAmountForTerm(term);
-    const fees: number[] = [];
-    if (supportsStripe) {
-      fees.push(processingFeeForDisplay(amount, "card"));
-      fees.push(processingFeeForDisplay(amount, "direct_debit"));
-    }
-    const positiveFees = fees.filter((v) => v > 0.004);
-    if (positiveFees.length === 0) return null;
-    const minFee = Math.min(...positiveFees);
-    return `+ payment processing fee of ${currencyCode} $${formatMoney(minFee)}`;
+    if (!supportsStripe || displayAmountForTerm(term) <= 0) return null;
+    return "+ payment processing fee (approx. 1.75% card / 1% direct debit)";
   };
 
   useEffect(() => {
