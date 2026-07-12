@@ -33,7 +33,7 @@ export default function MembershipDetail({ membership, tenantSlug, paymentProvid
   const displayAmountForTerm = (term: TermOption): number => pricingForTerm(term).amount;
   const processingFeeLabelForTerm = (term: TermOption): string | null => {
     if (!supportsStripe || displayAmountForTerm(term) <= 0) return null;
-    return "+ payment processing fee (approx. 1.75% card / 1% direct debit)";
+    return "+ payment processing fee applies";
   };
 
   useEffect(() => {
