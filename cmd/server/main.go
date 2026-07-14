@@ -204,6 +204,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 	inboundWebhookHandler := handlers.NewInboundWebhookHandler(clientRepo, inboundWebhookKeyRepo, inboundWebhookEventRepo, enc)
 	activeMembershipsHandler := handlers.NewActiveMembershipsHandler(db, tenantRepo, memberRepo, mtRepo, clientRepo, paymentRepo, credRepo, enc, agreementRepo, settingsRepo, termsRepo, xeroSyncService)
 	serviceHandler := handlers.NewServiceHandler(serviceRepo, clientRepo, memberRepo, mtRepo, paymentRepo, credRepo, enc, xeroSyncService)
+	paymentReceiptHandler := handlers.NewPaymentReceiptHandler(paymentRepo, serviceRepo, clientRepo, memberRepo, mtRepo, settingsRepo, tenantRepo, tenantEmailTemplateRepo, emailSvc)
 	fileStore := storage.NewFileStore("./uploads")
 	fileHandler := handlers.NewFileHandler(fileStore, db)
 	dispatcher := events.NewDispatcher(db, rdb, enc)
@@ -362,6 +363,7 @@ func setupRouter(cfg *config.Config, db *database.Postgres, rdb *database.Redis,
 
 				// Payments + Reports (Phase 6)
 				paymentHandler.RegisterRoutes(r)
+				paymentReceiptHandler.RegisterRoutes(r)
 				reportsHandler.RegisterRoutes(r)
 
 				// Active memberships view

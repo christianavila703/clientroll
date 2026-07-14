@@ -16,6 +16,7 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [stripeDetail, setStripeDetail] = useState<AdminPaymentRecord | null>(null);
+  const [emailingReceiptId, setEmailingReceiptId] = useState<string | null>(null);
 
   useEffect(() => { loadPayments(); }, [filter]);
 
@@ -31,6 +32,59 @@ export default function PaymentsPage() {
       setPayments(data.payments || []);
     } catch { /* handle */ }
     finally { setLoading(false); }
+  };
+
+  const receiptSource = (p: AdminPaymentRecord) => (p.payment_source === "service" ? "service" : "membership");
+
+  const downloadReceipt = async (p: AdminPaymentRecord) => {
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`/api/tenant/payments/${p.payment_id}/receipt.pdf?source=${receiptSource(p)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert(body?.error || "Unable to generate the receipt PDF.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Receipt-${p.payment_id.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Unable to download the receipt PDF right now.");
+    }
+  };
+
+  const emailReceipt = async (p: AdminPaymentRecord) => {
+    if (!p.client_email) {
+      alert("This client has no email address on file.");
+      return;
+    }
+    if (!window.confirm(`Email a PDF receipt to ${p.client_email}?`)) return;
+    setEmailingReceiptId(p.payment_id);
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`/api/tenant/payments/${p.payment_id}/send-receipt?source=${receiptSource(p)}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(body?.error || "Unable to send the receipt.");
+        return;
+      }
+      alert(`Receipt ${body?.receipt_number || ""} sent to ${body?.sent_to || p.client_email}`.replace("  ", " "));
+    } catch {
+      alert("Unable to send the receipt right now.");
+    } finally {
+      setEmailingReceiptId(null);
+    }
   };
 
   const filtered = payments.filter(p =>
@@ -229,6 +283,7 @@ export default function PaymentsPage() {
                     <th className="min-w-[12rem]">Contract Paid</th>
                     <th className="min-w-[10rem]">Contract Ends</th>
                     <th className="w-[1%] whitespace-nowrap">Stripe</th>
+                    <th className="w-[1%] whitespace-nowrap">Receipt</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -314,6 +369,31 @@ export default function PaymentsPage() {
                             <span className="text-[11px] text-gray-300">—</span>
                           )}
                         </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {p.status === "succeeded" ? (
+                            <div className="flex items-center gap-2 whitespace-nowrap">
+                              <button
+                                type="button"
+                                className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800"
+                                title="Download receipt PDF"
+                                onClick={() => downloadReceipt(p)}
+                              >
+                                PDF
+                              </button>
+                              <button
+                                type="button"
+                                className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800 disabled:text-gray-300"
+                                title={p.client_email ? `Email receipt to ${p.client_email}` : "Client has no email on file"}
+                                disabled={!p.client_email || emailingReceiptId === p.payment_id}
+                                onClick={() => emailReceipt(p)}
+                              >
+                                {emailingReceiptId === p.payment_id ? "Sending…" : "Email"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-gray-300">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -354,6 +434,25 @@ export default function PaymentsPage() {
                         >
                           Stripe details
                         </button>
+                      )}
+                      {p.status === "succeeded" && (
+                        <div className="mt-2 flex justify-end gap-3" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="text-[12px] font-medium text-indigo-600"
+                            onClick={() => downloadReceipt(p)}
+                          >
+                            Receipt PDF
+                          </button>
+                          <button
+                            type="button"
+                            className="text-[12px] font-medium text-indigo-600 disabled:text-gray-300"
+                            disabled={!p.client_email || emailingReceiptId === p.payment_id}
+                            onClick={() => emailReceipt(p)}
+                          >
+                            {emailingReceiptId === p.payment_id ? "Sending…" : "Email receipt"}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
