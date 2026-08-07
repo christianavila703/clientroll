@@ -100,6 +100,20 @@ type PaymentSchedule struct {
 	ArchivedAt    *time.Time `json:"archived_at"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	// Instalments holds explicit dated lines for kind='instalments' plans
+	// whose amounts are uneven (e.g. $5,000 now + $8,500 at day 14). Empty
+	// for interval-based schedules.
+	Instalments []InstalmentLine `json:"instalments,omitempty"`
+}
+
+// InstalmentLine is one dated payment in a split-payment plan. OffsetDays is
+// relative to the membership start date; the first line of a plan is 0.
+type InstalmentLine struct {
+	ID         uuid.UUID `json:"id"`
+	ScheduleID uuid.UUID `json:"schedule_id"`
+	Amount     float64   `json:"amount"`
+	OffsetDays int       `json:"offset_days"`
+	SortOrder  int       `json:"sort_order"`
 }
 
 // AttachedTerms is the projection of a term_option_terms row into the

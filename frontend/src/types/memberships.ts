@@ -21,6 +21,17 @@ export interface PaymentSchedule {
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
+  /** Dated lines for uneven split-payment plans (kind "instalments" only). */
+  instalments?: PaymentScheduleInstalment[];
+}
+
+export interface PaymentScheduleInstalment {
+  id: string;
+  schedule_id: string;
+  amount: number;
+  /** Days after the membership start date this instalment is charged. */
+  offset_days: number;
+  sort_order: number;
 }
 
 export interface AttachedTerms {

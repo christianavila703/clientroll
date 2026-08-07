@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { PaymentSchedule } from "../types/memberships";
 import {
+  effectiveTotalPrice,
+  emptySimplePricingForm,
   emptyTermOptionForm,
   formFromPayload,
   payloadFromForm,
+  payloadFromSimple,
+  simpleFromPayload,
 } from "./termOptionAdapter";
 
 const makeSchedule = (overrides: Partial<PaymentSchedule>): PaymentSchedule => ({
@@ -229,5 +233,74 @@ describe("round-trip fidelity", () => {
     expect(round.custom_plans[0].num_payments).toBe("10");
     expect(round.custom_plans[0].label).toBe("10 weekly payments");
     expect(round.default_schedule_key.startsWith("custom:")).toBe(true);
+  });
+});
+
+describe("split payment plans (simple form)", () => {
+  it("emits a single dated-instalments row with derived totals", () => {
+    const form = emptySimplePricingForm();
+    form.duration_value = "3";
+    form.duration_unit = "month";
+    form.payment_method = "split";
+    form.split_label = "2 payments";
+    form.split_lines = [
+      { uid: "a", amount: "5000", offset_days: "0" },
+      { uid: "b", amount: "8500", offset_days: "14" },
+    ];
+
+    expect(effectiveTotalPrice(form)).toBe(13500);
+
+    const payload = payloadFromSimple(form);
+    expect(payload).toHaveLength(1);
+    expect(payload[0]).toMatchObject({
+      kind: "instalments",
+      label: "2 payments",
+      amount: 13500,
+      interval_unit: null,
+      interval_count: null,
+      num_payments: 2,
+      is_default: true,
+      instalments: [
+        { amount: 5000, offset_days: 0 },
+        { amount: 8500, offset_days: 14 },
+      ],
+    });
+  });
+
+  it("rejects non-increasing dates and missing amounts", () => {
+    const form = emptySimplePricingForm();
+    form.payment_method = "split";
+    form.split_lines = [
+      { uid: "a", amount: "5000", offset_days: "0" },
+      { uid: "b", amount: "8500", offset_days: "0" },
+    ];
+    expect(payloadFromSimple(form)).toHaveLength(0);
+
+    form.split_lines = [
+      { uid: "a", amount: "5000", offset_days: "0" },
+      { uid: "b", amount: "", offset_days: "14" },
+    ];
+    expect(payloadFromSimple(form)).toHaveLength(0);
+    expect(effectiveTotalPrice(form)).toBe(0);
+  });
+
+  it("hydrates back into the split form from schedule rows", () => {
+    const sched = makeSchedule({
+      kind: "instalments",
+      label: "2 payments",
+      amount: 13500,
+      num_payments: 2,
+      is_default: true,
+    });
+    sched.instalments = [
+      { id: "l1", schedule_id: sched.id, amount: 5000, offset_days: 0, sort_order: 0 },
+      { id: "l2", schedule_id: sched.id, amount: 8500, offset_days: 14, sort_order: 1 },
+    ];
+    const { form } = simpleFromPayload([sched], 3, "month", null, 13500);
+    expect(form.payment_method).toBe("split");
+    expect(form.split_label).toBe("2 payments");
+    expect(form.split_lines.map(l => l.amount)).toEqual(["5000", "8500"]);
+    expect(form.split_lines.map(l => l.offset_days)).toEqual(["0", "14"]);
+    expect(form.total_price).toBe("13500.00");
   });
 });

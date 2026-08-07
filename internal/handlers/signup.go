@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -784,6 +785,13 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 	input.PaymentIntervalUnit = canonical.IntervalUnit
 	input.PaymentIntervalCount = canonical.IntervalCount
 	input.NumPayments = canonical.NumPayments
+	// datedSched is set when the chosen plan is an uneven split-payment plan
+	// (explicit dated instalment lines). Those charge line 1 at signup and
+	// schedule the remaining lines with the provider.
+	var datedSched *models.PaymentSchedule
+	if resolvedSchedule != nil && len(resolvedSchedule.Instalments) > 1 {
+		datedSched = resolvedSchedule
+	}
 	applySalesTax := true
 	applySalesTax = mtForCreate.ApplySalesTax
 	membershipCurrency := "AUD"
@@ -866,7 +874,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		pmID := strings.TrimSpace(input.PaymentMethodID)
 		// Invite + reuse saved card + recurring: create subscription off-session (no Checkout).
 		// Checkout often fails for saved PMs missing billing fields Stripe requires for the hosted page.
-		if invite != nil && inviteStrategy == "use_existing" && pmID != "" && input.PaymentFrequency != "upfront" {
+		if invite != nil && inviteStrategy == "use_existing" && pmID != "" && input.PaymentFrequency != "upfront" && datedSched == nil {
 			if err := h.signupStripeCardSubscriptionWithSavedPM(r.Context(), tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, pmID); err != nil {
 				log.Printf("signup saved-card stripe subscription tenant=%s membership=%s err=%v", tenant.ID, membership.ID, err)
 				writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
@@ -888,7 +896,7 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 		if invite != nil {
 			signupInviteID = &invite.ID
 		}
-		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, input.PaymentMethodID, signupInviteID)
+		checkoutURL, err := h.createStripeCheckoutSession(r, tenant, client, membership, membershipCurrency, input.PaymentFrequency, input.PaymentIntervalUnit, input.PaymentIntervalCount, input.PaymentAmount, applySalesTax, termForCreate.ContinueAfterTerm, stripeTermEndTime, membership.StartDate, input.PaymentMethodID, signupInviteID, datedSched)
 		if err != nil {
 			log.Printf("Error creating Stripe checkout session during signup: %v", err)
 			writeError(w, http.StatusBadGateway, stripeProviderErrorMessage(err, "Card payment setup failed"))
@@ -933,7 +941,16 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			if continueAfterTerm {
 				numPay = nil
 			}
-			if _, gcErr := createGoCardlessSubscription(
+			if datedSched != nil {
+				if _, gcErr := createGoCardlessInstalmentSchedule(
+					r.Context(), prov, h.memberRepo,
+					input.GoCardlessMandateID, membership, tenant.ID,
+					datedSched.Instalments, subName, membershipCurrency, membership.StartDate,
+				); gcErr != nil {
+					writeError(w, http.StatusBadGateway, "Direct debit instalment setup failed")
+					return
+				}
+			} else if _, gcErr := createGoCardlessSubscription(
 				r.Context(),
 				prov,
 				h.memberRepo,
@@ -965,6 +982,12 @@ func (h *SignupHandler) SubmitSignup(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		} else {
+			if datedSched != nil {
+				// Stripe bank debit settles asynchronously, so the split-payment
+				// tail cannot be safely anchored to it yet. Card handles this today.
+				writeError(w, http.StatusBadRequest, "This payment plan is not available with bank debit yet. Please pay by card.")
+				return
+			}
 			var signupInviteID *uuid.UUID
 			if invite != nil {
 				signupInviteID = &invite.ID
@@ -2054,9 +2077,19 @@ func (h *SignupHandler) googlePlacesAPIKey(ctx context.Context) string {
 	return key
 }
 
-func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string, signupInviteID *uuid.UUID) (string, error) {
+// instalmentSched, when non-nil, switches the session to a split-payment plan:
+// mode=payment charging the plan's first dated line now (card saved for
+// off-session use); the webhook schedules the remaining lines via a Stripe
+// subscription schedule (see createStripeInstalmentTailSchedule).
+func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *models.Tenant, client *models.Client, membership *models.Membership, currencyCode string, frequency string, intervalUnit *string, intervalCount int, amount float64, applySalesTax bool, continueAfterTerm bool, termEndTime time.Time, membershipStart time.Time, paymentMethodID string, signupInviteID *uuid.UUID, instalmentSched *models.PaymentSchedule) (string, error) {
 	if h.credRepo == nil || h.encryptor == nil {
 		return "", errors.New("stripe integration unavailable")
+	}
+	isInstalmentPlan := instalmentSched != nil && len(instalmentSched.Instalments) > 1
+	if isInstalmentPlan {
+		// The session charges only the first dated line; the tail is scheduled
+		// after payment succeeds.
+		amount = instalmentSched.Instalments[0].Amount
 	}
 	creds, err := h.credRepo.GetByProvider(r.Context(), tenant.ID, "stripe")
 	if err != nil || creds == nil || creds.APIKeyEncrypted == "" {
@@ -2081,6 +2114,9 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	mode := stripe.CheckoutSessionModePayment
 	if frequency != "upfront" {
 		mode = stripe.CheckoutSessionModeSubscription
+	}
+	if isInstalmentPlan {
+		mode = stripe.CheckoutSessionModePayment
 	}
 
 	params := &stripe.CheckoutSessionParams{
@@ -2273,12 +2309,79 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 		params.LineItems = []*stripe.CheckoutSessionLineItemParams{lineItem, feeItem}
 	}
 
+	if isInstalmentPlan {
+		// Save the card for the off-session tail charges and hand the webhook
+		// everything it needs to build the subscription schedule.
+		params.PaymentIntentData = &stripe.CheckoutSessionPaymentIntentDataParams{
+			SetupFutureUsage: stripe.String("off_session"),
+		}
+		params.Metadata["instalment_plan"] = "true"
+		params.Metadata["payment_schedule_id"] = instalmentSched.ID.String()
+		anchor := time.Now().UTC()
+		if !membershipStart.IsZero() {
+			if s := tenantDateStartUTC(membershipStart, tenant.Timezone); s.After(anchor) {
+				anchor = s
+			}
+		}
+		params.Metadata["instalment_anchor"] = anchor.Format(time.RFC3339)
+		tailJSON, tailErr := marshalInstalmentTailMeta(instalmentSched.Instalments[1:], tenant, applySalesTax)
+		if tailErr != nil {
+			return "", tailErr
+		}
+		for i, chunk := range chunkMetadataValue(tailJSON, 450) {
+			params.Metadata[fmt.Sprintf("instalment_tail_%d", i)] = chunk
+		}
+	}
+
 	sanitizeCheckoutCustomerParams(params)
 	sess, err := checkoutsession.New(params)
 	if err != nil {
 		return "", err
 	}
 	return sess.URL, nil
+}
+
+// instalmentTailMetaLine is one remaining line of a split-payment plan as
+// serialized into checkout session metadata for the webhook. Amounts are the
+// membership amount (excl. processing fee); fee/base/tax are precomputed at
+// signup so the webhook doesn't re-derive tenant tax settings.
+type instalmentTailMetaLine struct {
+	Amount     float64 `json:"a"`
+	FeeCents   int64   `json:"f"`
+	BaseAmount float64 `json:"b"`
+	TaxAmount  float64 `json:"t"`
+	OffsetDays int     `json:"d"`
+}
+
+func marshalInstalmentTailMeta(lines []models.InstalmentLine, tenant *models.Tenant, applySalesTax bool) (string, error) {
+	out := make([]instalmentTailMetaLine, 0, len(lines))
+	for _, l := range lines {
+		cents := int64(math.Round(l.Amount * 100))
+		base, tax := splitAmountByTaxMode(l.Amount, tenantSalesTaxPercent(tenant), applySalesTax)
+		out = append(out, instalmentTailMetaLine{
+			Amount:     l.Amount,
+			FeeCents:   stripeProcessingFee(cents, "card"),
+			BaseAmount: base,
+			TaxAmount:  tax,
+			OffsetDays: l.OffsetDays,
+		})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("marshal instalment tail: %w", err)
+	}
+	return string(b), nil
+}
+
+// chunkMetadataValue splits a string into pieces below Stripe's 500-char
+// metadata value limit.
+func chunkMetadataValue(s string, size int) []string {
+	var out []string
+	for len(s) > size {
+		out = append(out, s[:size])
+		s = s[size:]
+	}
+	return append(out, s)
 }
 
 // createStripeBECSCheckoutSession creates a Stripe Checkout session for Stripe direct debit.

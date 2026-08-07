@@ -145,6 +145,16 @@ func derivePricingFromSchedule(s *models.PaymentSchedule) (*canonicalMembershipP
 			result.Frequency = "custom_schedule"
 		}
 	case "instalments":
+		if len(s.Instalments) > 0 {
+			// Dated-lines plan: no interval; amount is the plan total and
+			// num_payments is the line count (both derived at save time).
+			// The provider-side schedule is built from the lines directly.
+			result.Frequency = "custom_schedule"
+			n := len(s.Instalments)
+			result.NumPayments = &n
+			result.IntervalCount = 1
+			break
+		}
 		if s.IntervalUnit == nil || s.IntervalCount == nil {
 			return nil, fmt.Errorf("instalments schedule missing interval")
 		}

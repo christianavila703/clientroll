@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import api from "../../api/client";
 import {
+  effectiveTotalPrice,
   emptySimplePricingForm,
   payloadFromSimple,
   type SimplePricingForm,
@@ -31,13 +32,17 @@ export default function TermOptionAddForm({ mtId, currencyCode, onCancel, onCrea
       setError(`Term length must be a whole number of ${form.duration_unit === "week" ? "weeks" : "months"}.`);
       return;
     }
-    const total = Number(form.total_price);
+    const total = effectiveTotalPrice(form);
     if (!Number.isFinite(total) || total <= 0) {
-      setError("Enter the total price for this membership.");
+      setError(form.payment_method === "split"
+        ? "Enter an amount for every payment in the split plan."
+        : "Enter the total price for this membership.");
       return;
     }
     if (schedules.length === 0) {
-      setError("Choose how this term option is paid.");
+      setError(form.payment_method === "split"
+        ? "Split plans need at least two payments with increasing dates."
+        : "Choose how this term option is paid.");
       return;
     }
 

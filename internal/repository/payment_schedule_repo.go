@@ -34,6 +34,16 @@ type PaymentScheduleInput struct {
 	NumPayments   *int     `json:"num_payments"`
 	IsDefault     bool     `json:"is_default"`
 	SortOrder     int      `json:"sort_order"`
+	// Instalments: explicit dated lines for an uneven split-payment plan.
+	// Only valid with kind='instalments' and no interval. When present, the
+	// row's Amount/NumPayments are derived server-side (sum / count).
+	Instalments []InstalmentLineInput `json:"instalments,omitempty"`
+}
+
+// InstalmentLineInput is one dated line of a split-payment plan.
+type InstalmentLineInput struct {
+	Amount     float64 `json:"amount"`
+	OffsetDays int     `json:"offset_days"`
 }
 
 // ListForTermOption returns every active (non-archived) schedule row for a term option.
@@ -43,7 +53,14 @@ func (r *PaymentScheduleRepo) ListForTermOption(ctx context.Context, termOptionI
 		return nil, fmt.Errorf("listing payment schedules: %w", err)
 	}
 	defer rows.Close()
-	return scanSchedules(rows)
+	out, err := scanSchedules(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.attachInstalmentLines(ctx, tenantID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ListForTenant returns every schedule row for a tenant, grouped by term_option_id.
@@ -62,7 +79,57 @@ func (r *PaymentScheduleRepo) ListForTenant(ctx context.Context, tenantID uuid.U
 		}
 		out[s.TermOptionID] = append(out[s.TermOptionID], s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for k, scheds := range out {
+		if err := r.attachInstalmentLines(ctx, tenantID, scheds); err != nil {
+			return nil, err
+		}
+		out[k] = scheds
+	}
+	return out, nil
+}
+
+// attachInstalmentLines populates Instalments on any kind='instalments'
+// schedule in the slice (in place).
+func (r *PaymentScheduleRepo) attachInstalmentLines(ctx context.Context, tenantID uuid.UUID, scheds []models.PaymentSchedule) error {
+	ids := make([]uuid.UUID, 0, len(scheds))
+	for i := range scheds {
+		if scheds[i].Kind == "instalments" {
+			ids = append(ids, scheds[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT id, schedule_id, amount, offset_days, sort_order
+		FROM term_option_schedule_instalments
+		WHERE tenant_id = $1 AND schedule_id = ANY($2)
+		ORDER BY schedule_id, sort_order, offset_days`, tenantID, ids)
+	if err != nil {
+		return fmt.Errorf("listing instalment lines: %w", err)
+	}
+	defer rows.Close()
+	bySchedule := make(map[uuid.UUID][]models.InstalmentLine)
+	for rows.Next() {
+		var l models.InstalmentLine
+		if err := rows.Scan(&l.ID, &l.ScheduleID, &l.Amount, &l.OffsetDays, &l.SortOrder); err != nil {
+			return err
+		}
+		bySchedule[l.ScheduleID] = append(bySchedule[l.ScheduleID], l)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range scheds {
+		if lines, ok := bySchedule[scheds[i].ID]; ok {
+			scheds[i].Instalments = lines
+		}
+	}
+	return nil
 }
 
 // ReplaceForTermOption atomically deletes existing rows for the term option
@@ -130,16 +197,46 @@ func (r *PaymentScheduleRepo) replaceWithinTx(
 			(tenant_id, term_option_id, kind, label, amount,
 			 interval_unit, interval_count, num_payments,
 			 is_default, sort_order)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		RETURNING id`
 	for _, in := range inputs {
-		if _, err := tx.Exec(ctx, insertSQL,
+		normalizeDatedInstalmentInput(&in)
+		var scheduleID uuid.UUID
+		if err := tx.QueryRow(ctx, insertSQL,
 			tenantID, termOptionID, in.Kind, in.Label, in.Amount,
 			in.IntervalUnit, in.IntervalCount, in.NumPayments,
-			in.IsDefault, in.SortOrder); err != nil {
+			in.IsDefault, in.SortOrder).Scan(&scheduleID); err != nil {
 			return fmt.Errorf("insert schedule %s: %w", in.Kind, err)
+		}
+		for j, line := range in.Instalments {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO term_option_schedule_instalments
+					(tenant_id, schedule_id, amount, offset_days, sort_order)
+				VALUES ($1,$2,$3,$4,$5)`,
+				tenantID, scheduleID, line.Amount, line.OffsetDays, j); err != nil {
+				return fmt.Errorf("insert instalment line %d: %w", j, err)
+			}
 		}
 	}
 	return nil
+}
+
+// normalizeDatedInstalmentInput derives the server-managed fields of a
+// dated-lines plan: amount = sum of lines, num_payments = line count, no
+// interval. No-op for other shapes.
+func normalizeDatedInstalmentInput(in *PaymentScheduleInput) {
+	if in.Kind != "instalments" || len(in.Instalments) == 0 {
+		return
+	}
+	total := 0.0
+	for _, l := range in.Instalments {
+		total += l.Amount
+	}
+	in.Amount = math.Round(total*100) / 100
+	n := len(in.Instalments)
+	in.NumPayments = &n
+	in.IntervalUnit = nil
+	in.IntervalCount = nil
 }
 
 // ValidateScheduleInputs checks the basic shape constraints the DB also
@@ -153,7 +250,36 @@ func ValidateScheduleInputs(inputs []PaymentScheduleInput) error {
 			if in.IntervalUnit != nil || in.IntervalCount != nil {
 				return fmt.Errorf("schedule[%d]: upfront kind must not carry an interval", i)
 			}
+			if len(in.Instalments) > 0 {
+				return fmt.Errorf("schedule[%d]: instalment lines are only valid with kind 'instalments'", i)
+			}
 		case "recurring", "instalments":
+			if in.Kind == "instalments" && len(in.Instalments) > 0 {
+				// Dated-lines plan: cadence comes from the lines, not an interval.
+				if in.IntervalUnit != nil || in.IntervalCount != nil {
+					return fmt.Errorf("schedule[%d]: dated instalments must not carry an interval", i)
+				}
+				if len(in.Instalments) > 24 {
+					return fmt.Errorf("schedule[%d]: at most 24 instalment lines are supported", i)
+				}
+				if in.Instalments[0].OffsetDays != 0 {
+					return fmt.Errorf("schedule[%d]: the first instalment must be on day 0 (charged at signup)", i)
+				}
+				prev := -1
+				for j, line := range in.Instalments {
+					if line.Amount <= 0 {
+						return fmt.Errorf("schedule[%d]: instalment %d amount must be > 0", i, j+1)
+					}
+					if line.OffsetDays <= prev && j > 0 {
+						return fmt.Errorf("schedule[%d]: instalment days must be strictly increasing", i)
+					}
+					prev = line.OffsetDays
+				}
+				break
+			}
+			if len(in.Instalments) > 0 {
+				return fmt.Errorf("schedule[%d]: instalment lines are only valid with kind 'instalments'", i)
+			}
 			if in.IntervalUnit == nil || (*in.IntervalUnit != "week" && *in.IntervalUnit != "month") {
 				return fmt.Errorf("schedule[%d]: interval_unit must be 'week' or 'month'", i)
 			}

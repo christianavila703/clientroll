@@ -57,6 +57,8 @@ export interface PaymentScheduleInput {
   num_payments: number | null;
   is_default: boolean;
   sort_order: number;
+  /** Dated lines for uneven split-payment plans (kind "instalments" only). */
+  instalments?: { amount: number; offset_days: number }[];
 }
 
 export const STANDARD_KEYS = [
@@ -191,7 +193,15 @@ export const payloadFromForm = (form: TermOptionForm): PaymentScheduleInput[] =>
 // `payloadFromSimple` and `simpleFromPayload` are the canonical converters.
 // =============================================================================
 
-export type SimplePaymentMethod = "upfront" | "weekly" | "fortnightly" | "monthly" | "custom";
+export type SimplePaymentMethod = "upfront" | "weekly" | "fortnightly" | "monthly" | "custom" | "split";
+
+/** One dated line of a split-payment plan while it's being edited. */
+export interface SplitLineForm {
+  uid: string;
+  amount: string;
+  /** Days after the membership start date; the first line is always "0". */
+  offset_days: string;
+}
 
 export interface SimplePricingForm {
   duration_value: string;
@@ -205,6 +215,9 @@ export interface SimplePricingForm {
   custom_interval_count: string;
   custom_interval_unit: IntervalUnit;
   custom_num_payments: string;
+  // Only used when payment_method === "split":
+  split_label: string;
+  split_lines: SplitLineForm[];
 }
 
 export const emptySimplePricingForm = (): SimplePricingForm => ({
@@ -218,7 +231,28 @@ export const emptySimplePricingForm = (): SimplePricingForm => ({
   custom_interval_count: "1",
   custom_interval_unit: "week",
   custom_num_payments: "",
+  split_label: "",
+  split_lines: [
+    { uid: "split-0", amount: "", offset_days: "0" },
+    { uid: "split-1", amount: "", offset_days: "14" },
+  ],
 });
+
+/** Sum of the valid split lines (0 when any line is missing an amount). */
+export const splitLinesTotal = (lines: SplitLineForm[]): number => {
+  let total = 0;
+  for (const l of lines) {
+    const n = num(l.amount);
+    if (n <= 0) return 0;
+    total += n;
+  }
+  return round2(total);
+};
+
+/** The plan total the save flows should validate: split plans derive it from
+ * their lines; every other method uses the typed total price. */
+export const effectiveTotalPrice = (form: SimplePricingForm): number =>
+  form.payment_method === "split" ? splitLinesTotal(form.split_lines) : num(form.total_price);
 
 /** Convert a duration into weeks / months for amount derivation. */
 const durationParts = (value: number, unit: IntervalUnit) => {
@@ -332,6 +366,29 @@ export const payloadFromSimple = (form: SimplePricingForm): PaymentScheduleInput
         sort_order: 0,
       }];
     }
+    case "split": {
+      const total = splitLinesTotal(form.split_lines);
+      if (total <= 0 || form.split_lines.length < 2) return [];
+      const lines = form.split_lines.map((l, i) => ({
+        amount: round2(num(l.amount)),
+        offset_days: i === 0 ? 0 : Math.max(0, Math.round(num(l.offset_days))),
+      }));
+      // Offsets must be strictly increasing for the server to accept the plan.
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].offset_days <= lines[i - 1].offset_days) return [];
+      }
+      return [{
+        kind: "instalments",
+        label: form.split_label.trim() || null,
+        amount: total,
+        interval_unit: null,
+        interval_count: null,
+        num_payments: lines.length,
+        is_default: true,
+        sort_order: 0,
+        instalments: lines,
+      }];
+    }
   }
 };
 
@@ -343,6 +400,7 @@ export interface SimpleHydrateResult {
 
 const classifySchedule = (s: PaymentSchedule): SimplePaymentMethod => {
   if (s.kind === "upfront") return "upfront";
+  if (s.kind === "instalments" && (s.instalments?.length ?? 0) > 0) return "split";
   if (s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 1 && s.num_payments == null) return "weekly";
   if (s.kind === "recurring" && s.interval_unit === "week" && s.interval_count === 2 && s.num_payments == null) return "fortnightly";
   if (s.kind === "recurring" && s.interval_unit === "month" && s.interval_count === 1 && s.num_payments == null) return "monthly";
@@ -390,6 +448,17 @@ export const simpleFromPayload = (
     f.custom_interval_unit = (chosen.interval_unit as IntervalUnit) ?? "month";
     f.custom_interval_count = String(chosen.interval_count ?? 1);
     f.custom_num_payments = chosen.num_payments != null ? String(chosen.num_payments) : "";
+  }
+
+  if (method === "split") {
+    f.split_label = chosen.label ?? "";
+    f.split_lines = (chosen.instalments ?? []).map((l, i) => ({
+      uid: `existing-split-${i}`,
+      amount: String(l.amount),
+      offset_days: String(l.offset_days),
+    }));
+    f.total_price = splitLinesTotal(f.split_lines) > 0 ? splitLinesTotal(f.split_lines).toFixed(2) : "";
+    return { form: f, extraScheduleCount: Math.max(0, active.length - 1) };
   }
 
   // Prefer the term option's stored fee_total (what the admin typed). Fall

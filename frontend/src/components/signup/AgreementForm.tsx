@@ -886,6 +886,15 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
         if (s.kind === "upfront") {
           return { value: "upfront", label: "Pay in full", desc: "Single payment in advance", icon: "💳", enabled: true, amount: s.amount, scheduleId: s.id };
         }
+        if (s.kind === "instalments" && (s.instalments?.length ?? 0) > 1) {
+          // Uneven split-payment plan: describe each dated line.
+          const lines = s.instalments!;
+          const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+          const desc = lines
+            .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `${money(l.amount)} ${l.offset_days} days after start`))
+            .join(" · ");
+          return { value: "custom_schedule", label: s.label || `${lines.length} payments`, desc, icon: "📆", enabled: true, amount: s.amount, scheduleId: s.id, splitLines: lines };
+        }
         if (s.num_payments && s.num_payments > 0) {
           const noun = s.num_payments === 1 ? "payment" : "payments";
           return { value: "custom_schedule", label: `${s.num_payments} ${noun} of $${s.amount.toLocaleString()}`, desc: `${s.num_payments} ${noun} every ${unitWord}`, icon: "📆", enabled: true, amount: s.amount, scheduleId: s.id };
@@ -918,6 +927,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
   })();
 
   const selectedFrequency = frequencies.find((f) => f.value === data.payment_frequency);
+  const selectedSplitLines = (selectedFrequency as { splitLines?: { amount: number; offset_days: number }[] } | undefined)?.splitLines;
   const selectedAmount = selectedFrequency?.amount || 0;
   const computeFee = (amount: number): number => {
     if (!amount) return 0;
@@ -1009,7 +1019,32 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
             ))}
           </div>
         </div>
-        {selectedAmount > 0 && (
+        {selectedAmount > 0 && selectedSplitLines && selectedSplitLines.length > 1 ? (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-[13px] font-semibold text-gray-800">Payment plan</p>
+            <div className="mt-2 space-y-1.5 text-[12px]">
+              {selectedSplitLines.map((l, i) => {
+                const lineFee = computeFee(l.amount);
+                const lineTotal = l.amount + lineFee;
+                return (
+                  <div key={i} className="flex justify-between gap-3">
+                    <span className="text-gray-600">
+                      {i === 0 ? "Charged today" : `Charged ${l.offset_days} days after start`}
+                    </span>
+                    <span className="font-medium text-gray-900 tabular-nums">
+                      {currencyCode} ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {lineFee > 0 ? " incl. fee" : " + processing fee"}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="flex justify-between gap-3 border-t border-gray-200 pt-1.5">
+                <span className="text-gray-700 font-semibold">Plan total (membership)</span>
+                <span className="font-semibold text-gray-900 tabular-nums">{currencyCode} ${selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+        ) : selectedAmount > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
             <p className="text-[13px] font-semibold text-gray-800">Estimated charge</p>
             <div className="mt-2 space-y-1.5 text-[12px]">

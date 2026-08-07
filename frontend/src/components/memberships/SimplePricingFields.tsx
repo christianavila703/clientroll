@@ -9,8 +9,10 @@
 
 import {
   derivedSimpleAmounts,
+  splitLinesTotal,
   type SimplePaymentMethod,
   type SimplePricingForm,
+  type SplitLineForm,
 } from "../../utils/termOptionAdapter";
 
 interface Props {
@@ -84,26 +86,36 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
         </div>
       </div>
 
-      {/* Total price */}
-      <div>
-        <label className="block text-[12px] font-medium text-gray-700 mb-1">Total price *</label>
-        <div className="flex items-center gap-2">
-          <span className="text-gray-500 text-[13px]">{currencyCode} $</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.total_price}
-            onChange={e => update("total_price", e.target.value)}
-            required
-            className="input-field py-1.5 px-2 text-[14px] w-40 font-medium"
-            placeholder="0.00"
-          />
-          <span className="text-[12px] text-gray-500">
-            total for the entire {form.duration_value || "?"} {form.duration_unit}{Number(form.duration_value) === 1 ? "" : "s"}.
-          </span>
+      {/* Total price (derived from the lines for split plans) */}
+      {form.payment_method === "split" ? (
+        <div>
+          <label className="block text-[12px] font-medium text-gray-700 mb-1">Total price</label>
+          <div className="text-[14px] font-medium text-gray-900 tabular-nums">
+            {fmtMoney(splitLinesTotal(form.split_lines), currencyCode)}
+            <span className="ml-2 text-[12px] font-normal text-gray-500">(sum of the payments below)</span>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div>
+          <label className="block text-[12px] font-medium text-gray-700 mb-1">Total price *</label>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 text-[13px]">{currencyCode} $</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.total_price}
+              onChange={e => update("total_price", e.target.value)}
+              required
+              className="input-field py-1.5 px-2 text-[14px] w-40 font-medium"
+              placeholder="0.00"
+            />
+            <span className="text-[12px] text-gray-500">
+              total for the entire {form.duration_value || "?"} {form.duration_unit}{Number(form.duration_value) === 1 ? "" : "s"}.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Payment method radio */}
       <div>
@@ -152,6 +164,22 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
               <span className="text-[13px] text-gray-800">Custom plan</span>
             </div>
             <span className="text-[11px] text-gray-500">e.g. "10 weekly payments", "every 6 months"</span>
+          </label>
+          <label
+            className={`flex items-center justify-between gap-3 px-3 py-2 rounded-md border cursor-pointer ${
+              form.payment_method === "split" ? "border-indigo-300 bg-indigo-50/50" : "border-gray-200 bg-white"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <input
+                type="radio"
+                name="payment_method"
+                checked={form.payment_method === "split"}
+                onChange={() => selectMethod("split")}
+              />
+              <span className="text-[13px] text-gray-800">Split payments</span>
+            </div>
+            <span className="text-[11px] text-gray-500">uneven amounts on set dates, e.g. "$5,000 now + $8,500 in 14 days"</span>
           </label>
         </div>
       </div>
@@ -203,6 +231,80 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
           <div className="text-[12px] text-gray-600 pt-1">
             Each payment: <span className="font-semibold text-gray-900 tabular-nums">{fmtMoney(amounts.custom, currencyCode)}</span>
             <span className="text-gray-400"> (auto-calculated from total &divide; payments)</span>
+          </div>
+        </div>
+      )}
+
+      {/* Split payment lines — only when "split" is selected */}
+      {form.payment_method === "split" && (
+        <div className="rounded-md border border-gray-200 bg-gray-50/40 p-3 space-y-2">
+          <input
+            type="text"
+            value={form.split_label}
+            onChange={e => update("split_label", e.target.value)}
+            placeholder='Plan label (shown to the member, e.g. "2 payments")'
+            className="input-field py-1.5 px-2 text-[13px] w-full"
+          />
+          {form.split_lines.map((line, i) => {
+            const setLine = (patch: Partial<SplitLineForm>) =>
+              update("split_lines", form.split_lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+            return (
+              <div key={line.uid} className="flex items-center gap-2">
+                <span className="text-[12px] text-gray-500 w-20 shrink-0">Payment {i + 1}</span>
+                <span className="text-gray-500 text-[13px]">{currencyCode} $</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={line.amount}
+                  onChange={e => setLine({ amount: e.target.value })}
+                  className="input-field py-1 px-2 text-[13px] w-32"
+                  placeholder="0.00"
+                />
+                {i === 0 ? (
+                  <span className="text-[12px] text-gray-600">charged at signup</span>
+                ) : (
+                  <>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={line.offset_days}
+                      onChange={e => setLine({ offset_days: e.target.value })}
+                      className="input-field py-1 px-2 text-[13px] w-20"
+                    />
+                    <span className="text-[12px] text-gray-600">days after start</span>
+                  </>
+                )}
+                {form.split_lines.length > 2 && i > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => update("split_lines", form.split_lines.filter((_, j) => j !== i))}
+                    className="ml-auto text-[12px] text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              const last = form.split_lines[form.split_lines.length - 1];
+              const nextOffset = Math.max(1, Math.round(Number(last?.offset_days) || 0) + 14);
+              update("split_lines", [
+                ...form.split_lines,
+                { uid: `split-${Date.now()}`, amount: "", offset_days: String(nextOffset) },
+              ]);
+            }}
+            className="text-[12px] text-indigo-600 hover:text-indigo-800"
+          >
+            + Add payment
+          </button>
+          <div className="text-[12px] text-gray-600 pt-1 border-t border-gray-200">
+            The member pays the first amount when they sign up; the rest are charged automatically on their dates.
+            Payment dates must be in increasing order.
           </div>
         </div>
       )}

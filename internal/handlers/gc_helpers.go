@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
+	"clientroll/internal/models"
 	"clientroll/internal/payment"
 	"clientroll/internal/repository"
 
@@ -78,6 +80,13 @@ func createGoCardlessSubscription(
 	if paymentFrequency == "upfront" || paymentFrequency == "" {
 		return "", nil // No subscription needed for upfront payments
 	}
+	if paymentFrequency == "custom_schedule" && (paymentIntervalUnit == nil || *paymentIntervalUnit == "") {
+		// A custom_schedule membership without an interval is a dated
+		// split-payment plan; falling through would bill the plan TOTAL on the
+		// default monthly cadence. Callers must use
+		// createGoCardlessInstalmentSchedule for these.
+		return "", fmt.Errorf("membership %s uses a dated instalment plan; refusing to create a recurring subscription", membership.GetID())
+	}
 
 	interval := ""
 	intervalCount := paymentIntervalCount
@@ -115,4 +124,57 @@ func createGoCardlessSubscription(
 	}
 	log.Printf("GoCardless subscription %s created for membership %s (mandate %s)", subID, membershipID, mandateID)
 	return subID, nil
+}
+
+// createGoCardlessInstalmentSchedule creates a native GoCardless instalment
+// schedule from a dated split-payment plan (all lines, including day 0 —
+// GoCardless charges it on the next available collection date).
+func createGoCardlessInstalmentSchedule(
+	ctx context.Context,
+	prov payment.GoCardlessExtended,
+	memberRepo *repository.MembershipRepo,
+	mandateID string,
+	membership interface{ GetID() uuid.UUID },
+	tenantID uuid.UUID,
+	lines []models.InstalmentLine,
+	name string,
+	currencyCode string,
+	membershipStart time.Time,
+) (string, error) {
+	if len(lines) == 0 {
+		return "", fmt.Errorf("instalment plan has no lines")
+	}
+	anchor := membershipStart
+	now := time.Now().UTC()
+	if anchor.IsZero() || anchor.Before(now) {
+		anchor = now
+	}
+	total := int64(0)
+	instalments := make([]payment.InstalmentDate, 0, len(lines))
+	for _, l := range lines {
+		amountMinor := int64(l.Amount * 100)
+		if amountMinor <= 0 {
+			return "", fmt.Errorf("instalment line amount must be positive")
+		}
+		total += amountMinor
+		chargeDate := anchor.AddDate(0, 0, l.OffsetDays)
+		if chargeDate.Before(now) {
+			chargeDate = now
+		}
+		instalments = append(instalments, payment.InstalmentDate{
+			ChargeDate: chargeDate.Format("2006-01-02"),
+			Amount:     amountMinor,
+		})
+	}
+	if currencyCode == "" {
+		currencyCode = "AUD"
+	}
+	membershipID := membership.GetID()
+	scheduleID, err := prov.CreateInstalmentSchedule(ctx, mandateID, total, currencyCode, instalments, name, membershipID.String())
+	if err != nil {
+		log.Printf("GoCardless CreateInstalmentSchedule for membership %s: %v", membershipID, err)
+		return "", err
+	}
+	log.Printf("GoCardless instalment schedule %s created for membership %s (mandate %s, %d instalments)", scheduleID, membershipID, mandateID, len(instalments))
+	return scheduleID, nil
 }

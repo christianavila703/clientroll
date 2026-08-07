@@ -23,7 +23,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v82"
 	stripeevent "github.com/stripe/stripe-go/v82/event"
+	"github.com/stripe/stripe-go/v82/paymentintent"
+	"github.com/stripe/stripe-go/v82/product"
 	"github.com/stripe/stripe-go/v82/subscription"
+	"github.com/stripe/stripe-go/v82/subscriptionschedule"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 
@@ -763,7 +766,169 @@ func (h *StripeWebhookHandler) handleCheckoutCompleted(ctx context.Context, tena
 			"source":        "stripe_webhook",
 		}))
 	}
+	// Split-payment plan: the session charged the first dated instalment; put
+	// the remaining lines on a subscription schedule so Stripe bills them on
+	// their dates with the saved card.
+	if metadata["instalment_plan"] == "true" {
+		if err := h.createStripeInstalmentTailSchedule(ctx, tenantID, &sess, metadata); err != nil {
+			// Money risk if silently lost: the first instalment settled but the
+			// tail never got scheduled. Log loudly; the webhook is retried by
+			// Stripe on non-2xx, so return the error.
+			log.Printf("stripe instalment tail schedule FAILED tenant=%s membership=%s err=%v", tenantID, membershipID, err)
+			return fmt.Errorf("create instalment tail schedule: %w", err)
+		}
+	}
 	return nil
+}
+
+// createStripeInstalmentTailSchedule creates a Stripe subscription schedule
+// billing the remaining lines of a split-payment plan on their dates. Called
+// from checkout.session.completed after the first line settled. Idempotent
+// via Stripe idempotency keys derived from the membership id.
+func (h *StripeWebhookHandler) createStripeInstalmentTailSchedule(ctx context.Context, tenantID uuid.UUID, sess *stripe.CheckoutSession, metadata map[string]string) error {
+	membershipID := strings.TrimSpace(metadata["membership_id"])
+	tail, err := parseInstalmentTailMeta(metadata)
+	if err != nil {
+		return err
+	}
+	if len(tail) == 0 {
+		return nil
+	}
+	anchor, err := time.Parse(time.RFC3339, strings.TrimSpace(metadata["instalment_anchor"]))
+	if err != nil {
+		return fmt.Errorf("parse instalment_anchor: %w", err)
+	}
+	if sess.Customer == nil || strings.TrimSpace(sess.Customer.ID) == "" {
+		return fmt.Errorf("checkout session has no customer")
+	}
+	customerID := sess.Customer.ID
+
+	// Resolve the saved payment method from the first instalment's intent.
+	if sess.PaymentIntent == nil || strings.TrimSpace(sess.PaymentIntent.ID) == "" {
+		return fmt.Errorf("checkout session has no payment intent")
+	}
+	pi, err := paymentintent.Get(sess.PaymentIntent.ID, nil)
+	if err != nil {
+		return fmt.Errorf("get payment intent: %w", err)
+	}
+	if pi.PaymentMethod == nil || strings.TrimSpace(pi.PaymentMethod.ID) == "" {
+		return fmt.Errorf("payment intent has no payment method")
+	}
+	pmID := pi.PaymentMethod.ID
+
+	cur := strings.ToLower(strings.TrimSpace(metadata["currency_code"]))
+	if cur == "" {
+		cur = "aud"
+	}
+
+	prodParams := &stripe.ProductParams{
+		Name: stripe.String("Membership instalment plan"),
+	}
+	prodParams.SetIdempotencyKey("instal-prod-" + membershipID)
+	prod, err := product.New(prodParams)
+	if err != nil {
+		return fmt.Errorf("create instalment product: %w", err)
+	}
+
+	now := time.Now().UTC()
+	chargeAt := func(offsetDays int) time.Time {
+		t := anchor.AddDate(0, 0, offsetDays)
+		if !t.After(now) {
+			// Late signup or same-day tail line: bill as soon as possible.
+			t = now.Add(5 * time.Minute)
+		}
+		return t
+	}
+
+	phaseMeta := map[string]string{
+		"tenant_id":       metadata["tenant_id"],
+		"tenant_slug":     metadata["tenant_slug"],
+		"client_id":       metadata["client_id"],
+		"membership_id":   membershipID,
+		"currency_code":   metadata["currency_code"],
+		"payment_freq":    "custom_schedule",
+		"instalment_plan": "true",
+	}
+
+	phases := make([]*stripe.SubscriptionSchedulePhaseParams, 0, len(tail))
+	for i, line := range tail {
+		start := chargeAt(line.OffsetDays)
+		var phaseDays int
+		if i+1 < len(tail) {
+			phaseDays = int(chargeAt(tail[i+1].OffsetDays).Sub(start).Hours() / 24)
+		}
+		if phaseDays < 1 {
+			phaseDays = 1
+		}
+		if phaseDays > 365 {
+			phaseDays = 365
+		}
+		meta := make(map[string]string, len(phaseMeta)+3)
+		for k, v := range phaseMeta {
+			meta[k] = v
+		}
+		lineTotal := line.Amount + float64(line.FeeCents)/100
+		meta["payment_amount"] = strconv.FormatFloat(lineTotal, 'f', 2, 64)
+		meta["base_amount"] = strconv.FormatFloat(line.BaseAmount, 'f', 2, 64)
+		meta["tax_amount"] = strconv.FormatFloat(line.TaxAmount, 'f', 2, 64)
+		meta["processing_fee_amount"] = strconv.FormatFloat(float64(line.FeeCents)/100, 'f', 2, 64)
+		phases = append(phases, &stripe.SubscriptionSchedulePhaseParams{
+			EndDate:           stripe.Int64(start.AddDate(0, 0, phaseDays).Unix()),
+			ProrationBehavior: stripe.String("none"),
+			Metadata:          meta,
+			Items: []*stripe.SubscriptionSchedulePhaseItemParams{{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.SubscriptionItemPriceDataParams{
+					Currency:   stripe.String(cur),
+					Product:    stripe.String(prod.ID),
+					UnitAmount: stripe.Int64(int64(math.Round(lineTotal * 100))),
+					Recurring: &stripe.SubscriptionItemPriceDataRecurringParams{
+						Interval:      stripe.String("day"),
+						IntervalCount: stripe.Int64(int64(phaseDays)),
+					},
+				},
+			}},
+		})
+	}
+
+	schedParams := &stripe.SubscriptionScheduleParams{
+		Customer:    stripe.String(customerID),
+		StartDate:   stripe.Int64(chargeAt(tail[0].OffsetDays).Unix()),
+		EndBehavior: stripe.String("cancel"),
+		DefaultSettings: &stripe.SubscriptionScheduleDefaultSettingsParams{
+			DefaultPaymentMethod: stripe.String(pmID),
+			CollectionMethod:     stripe.String("charge_automatically"),
+		},
+		Phases: phases,
+	}
+	schedParams.SetIdempotencyKey("instal-sched-" + membershipID)
+	sched, err := subscriptionschedule.New(schedParams)
+	if err != nil {
+		return fmt.Errorf("create subscription schedule: %w", err)
+	}
+	log.Printf("stripe instalment tail schedule %s created tenant=%s membership=%s lines=%d", sched.ID, tenantID, membershipID, len(tail))
+	return nil
+}
+
+// parseInstalmentTailMeta reassembles the chunked instalment_tail_N metadata
+// values written at checkout creation.
+func parseInstalmentTailMeta(metadata map[string]string) ([]instalmentTailMetaLine, error) {
+	var raw strings.Builder
+	for i := 0; ; i++ {
+		chunk, ok := metadata[fmt.Sprintf("instalment_tail_%d", i)]
+		if !ok {
+			break
+		}
+		raw.WriteString(chunk)
+	}
+	if raw.Len() == 0 {
+		return nil, nil
+	}
+	var out []instalmentTailMetaLine
+	if err := json.Unmarshal([]byte(raw.String()), &out); err != nil {
+		return nil, fmt.Errorf("parse instalment tail metadata: %w", err)
+	}
+	return out, nil
 }
 
 func (h *StripeWebhookHandler) recordPendingFromSubscriptionCheckout(
@@ -1241,6 +1406,12 @@ func (h *StripeWebhookHandler) handleSubscriptionDeleted(ctx context.Context, te
 	membershipID, err := uuid.Parse(sub.Metadata["membership_id"])
 	if err != nil {
 		log.Printf("stripe webhook subscription.deleted missing membership metadata subscription=%s", sub.ID)
+		return nil
+	}
+	// Split-payment tail schedules cancel their subscription once the final
+	// instalment is billed — that is plan completion, not a cancellation.
+	if sub.Metadata["instalment_plan"] == "true" {
+		log.Printf("stripe webhook subscription.deleted for completed instalment plan membership=%s subscription=%s (no-op)", membershipID, sub.ID)
 		return nil
 	}
 	m, err := h.memberRepo.FindByID(ctx, membershipID, tenantID)
