@@ -273,7 +273,7 @@ export default function SimplePricingFields({ form, setForm, currencyCode }: Pro
                       onChange={e => setLine({ offset_days: e.target.value })}
                       className="input-field py-1 px-2 text-[13px] w-20"
                     />
-                    <span className="text-[12px] text-gray-600">days after start</span>
+                    <span className="text-[12px] text-gray-600">days after membership start</span>
                   </>
                 )}
                 {form.split_lines.length > 2 && i > 0 && (
