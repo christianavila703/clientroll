@@ -91,7 +91,7 @@ func (h *PaymentHandler) List(w http.ResponseWriter, r *http.Request) {
 				p.retry_count AS retry_count,
 				p.provider_reference AS provider_reference,
 				m.payment_method AS payment_method,
-				COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.membership_id = m.id AND p2.status = 'succeeded'), 0) AS total_paid,
+				COALESCE((SELECT SUM(p2.amount - COALESCE(p2.processing_fee_amount, 0)) FROM payments p2 WHERE p2.membership_id = m.id AND p2.status = 'succeeded'), 0) AS total_paid,
 				membership_expected_total(
 					COALESCE(m.payment_amount, 0),
 					m.num_payments,

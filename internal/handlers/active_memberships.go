@@ -995,7 +995,7 @@ func (h *ActiveMembershipsHandler) List(w http.ResponseWriter, r *http.Request) 
 			(SELECT TO_CHAR(p.paid_date, 'YYYY-MM-DD') FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded' ORDER BY p.paid_date DESC LIMIT 1),
 			(SELECT p.amount FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded' ORDER BY p.paid_date DESC LIMIT 1),
 			(SELECT p.status FROM payments p WHERE p.membership_id = m.id ORDER BY p.created_at DESC LIMIT 1),
-			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
+			COALESCE((SELECT SUM(p.amount - COALESCE(p.processing_fee_amount, 0)) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
 			membership_expected_total(
 				COALESCE(m.payment_amount, 0),
 				m.num_payments,

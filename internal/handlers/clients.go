@@ -490,7 +490,7 @@ func (h *ClientHandler) GetMemberships(w http.ResponseWriter, r *http.Request) {
 				SELECT 1 FROM membership_agreement_snapshots mas
 				WHERE mas.membership_id = m.id AND mas.tenant_id = m.tenant_id
 			),
-			COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
+			COALESCE((SELECT SUM(p.amount - COALESCE(p.processing_fee_amount, 0)) FROM payments p WHERE p.membership_id = m.id AND p.status = 'succeeded'), 0),
 			membership_expected_total(
 				COALESCE(m.payment_amount, 0),
 				m.num_payments,
