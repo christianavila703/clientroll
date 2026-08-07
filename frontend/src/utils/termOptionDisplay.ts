@@ -104,7 +104,7 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
       // per-payment amounts are uneven — describe the lines instead of a cadence.
       const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
       const suffix = s.instalments!
-        .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `then ${money(l.amount)} ${l.offset_days} days after your membership starts`))
+        .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `then ${money(l.amount)} in ${l.offset_days} days`))
         .join(", ");
       return { amount: s.amount, suffix };
     }

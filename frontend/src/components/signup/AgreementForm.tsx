@@ -891,7 +891,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
           const lines = s.instalments!;
           const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
           const desc = lines
-            .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `${money(l.amount)} ${l.offset_days} days after your membership starts`))
+            .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `${money(l.amount)} in ${l.offset_days} days`))
             .join(" · ");
           return { value: "custom_schedule", label: s.label || `${lines.length} payments`, desc, icon: "📆", enabled: true, amount: s.amount, scheduleId: s.id, splitLines: lines };
         }
@@ -1029,7 +1029,7 @@ function PaymentSection({ data, onChange, termOption, paymentProviders, currency
                 return (
                   <div key={i} className="flex justify-between gap-3">
                     <span className="text-gray-600">
-                      {i === 0 ? "Charged today" : `Charged ${l.offset_days} days after your membership starts`}
+                      {i === 0 ? "Charged today" : `Charged in ${l.offset_days} days`}
                     </span>
                     <span className="font-medium text-gray-900 tabular-nums">
                       {currencyCode} ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
