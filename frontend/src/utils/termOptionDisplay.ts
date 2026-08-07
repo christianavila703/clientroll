@@ -99,6 +99,15 @@ export const describeTermPricing = (term: TermOption): TermPricingDisplay => {
     if (s.kind === "upfront") {
       return { amount: s.amount, suffix: "Pay in full" };
     }
+    if (s.kind === "instalments" && (s.instalments?.length ?? 0) > 0) {
+      // Dated split-payment plan: s.amount is already the plan TOTAL, and the
+      // per-payment amounts are uneven — describe the lines instead of a cadence.
+      const money = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      const suffix = s.instalments!
+        .map((l, i) => (i === 0 ? `${money(l.amount)} at signup` : `then ${money(l.amount)} ${l.offset_days} days after start`))
+        .join(", ");
+      return { amount: s.amount, suffix };
+    }
     const unit = s.interval_unit ?? null;
     const count = s.interval_count ?? null;
     if (s.num_payments && s.num_payments > 0) {

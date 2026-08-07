@@ -12,6 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// AgreementInstalmentLine is one dated payment of a split-payment plan as it
+// appears in the agreement's payment schedule table.
+type AgreementInstalmentLine struct {
+	Amount     float64
+	OffsetDays int
+}
+
 type AgreementSnapshot struct {
 	ID           uuid.UUID `json:"id"`
 	TenantID     uuid.UUID `json:"tenant_id"`
@@ -62,6 +69,10 @@ type AgreementSnapshot struct {
 	CustomScheduleIntervalUnit  *string  `json:"custom_schedule_interval_unit"`
 	CustomScheduleIntervalCount *int     `json:"custom_schedule_interval_count"`
 	CustomScheduleNumPayments   *int     `json:"custom_schedule_num_payments"`
+
+	// Dated split-payment plan lines (amount + days after start). Render-time
+	// only: the generated agreement HTML embeds them; not a stored column.
+	InstalmentLines []AgreementInstalmentLine `json:"-"`
 
 	// Organisation details
 	OrgCompanyName  *string `json:"org_company_name"`

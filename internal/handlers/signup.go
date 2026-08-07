@@ -2854,6 +2854,26 @@ func (h *SignupHandler) createAgreementSnapshot(r *http.Request, tenant *models.
 		}
 	}
 
+	// Dated split-payment plan: embed the real lines so the agreement's
+	// payment schedule table shows the actual amounts and dates.
+	if h.scheduleRepo != nil && strings.TrimSpace(input.PaymentScheduleID) != "" {
+		if schedID, err := uuid.Parse(input.PaymentScheduleID); err == nil {
+			if scheds, err := h.scheduleRepo.ListForTermOption(r.Context(), toID, tenant.ID); err == nil {
+				for i := range scheds {
+					if scheds[i].ID == schedID && len(scheds[i].Instalments) > 0 {
+						for _, l := range scheds[i].Instalments {
+							snap.InstalmentLines = append(snap.InstalmentLines, repository.AgreementInstalmentLine{
+								Amount:     l.Amount,
+								OffsetDays: l.OffsetDays,
+							})
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Organisation details
 	if agreementSettings != nil {
 		snap.OrgCompanyName = agreementSettings.CompanyName
@@ -3081,7 +3101,24 @@ func renderAgreementHTML(snap *repository.AgreementSnapshot, terms []repository.
 
 	// ─── 4. Payment Schedule ───
 	b.WriteString(`<h2>4. Payment Schedule</h2>`)
-	if snap.PaymentAmount != nil && *snap.PaymentAmount > 0 {
+	if len(snap.InstalmentLines) > 0 {
+		// Dated split-payment plan: the schedule is the explicit lines, not a
+		// cadence — render exactly what will be charged and when.
+		startDate, _ := time.Parse("2006-01-02", snap.StartDate)
+		if startDate.IsZero() {
+			startDate = time.Now()
+		}
+		b.WriteString(`<table class="sched"><thead><tr><th>#</th><th>Due Date</th><th>Amount</th><th>Running Total</th></tr></thead><tbody>`)
+		runningTotal := 0.0
+		for i, l := range snap.InstalmentLines {
+			dueDate := startDate.AddDate(0, 0, l.OffsetDays)
+			runningTotal += l.Amount
+			b.WriteString(fmt.Sprintf(`<tr><td>%d</td><td>%s</td><td>$%.2f</td><td>$%.2f</td></tr>`,
+				i+1, dueDate.Format("02 Jan 2006"), l.Amount, runningTotal))
+		}
+		b.WriteString(`</tbody></table>`)
+		b.WriteString(fmt.Sprintf(`<p style="font-size:11px;color:#6b7280;margin:4px 0 0;">Total scheduled: <strong>$%.2f</strong> across <strong>%d</strong> payments</p>`, runningTotal, len(snap.InstalmentLines)))
+	} else if snap.PaymentAmount != nil && *snap.PaymentAmount > 0 {
 		startDate, _ := time.Parse("2006-01-02", snap.StartDate)
 		if startDate.IsZero() {
 			startDate = time.Now()
