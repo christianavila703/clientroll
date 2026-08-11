@@ -183,7 +183,7 @@ Staff can pre-fill a membership for an existing client and send them a link to c
 
 ### Signup Link Security
 
-Signup links can be HMAC-signed with expiry (`?exp=TIMESTAMP&sig=HMAC_HEX`). The signing secret is `SIGNUP_LINK_SIGNING_SECRET` (falls back to `MASTER_ENCRYPTION_KEY`). Enforcement is optional via `SIGNUP_LINKS_REQUIRE_SIGNATURE` config flag.
+Signup links are HMAC-signed (`?exp=TIMESTAMP&sig=HMAC_HEX`). The signing secret is `SIGNUP_LINK_SIGNING_SECRET` (falls back to `MASTER_ENCRYPTION_KEY`). Enforcement is optional via `SIGNUP_LINKS_REQUIRE_SIGNATURE` config flag. Links **do not expire**: the `exp` value is kept in the URL so the HMAC payload stays stable (and so previously issued links remain valid), but the server no longer rejects links based on `exp`. Newly generated links use `exp=0` as a "never expires" sentinel.
 
 ### Pricing Resolution
 
@@ -522,7 +522,7 @@ These are all working — listed here so you understand the full system:
 | `PORT` | No | HTTP port (default varies) |
 | `SIGNUP_LINK_SIGNING_SECRET` | No | HMAC secret for signup links (falls back to master key) |
 | `SIGNUP_LINKS_REQUIRE_SIGNATURE` | No | If true, all signup links must be signed |
-| `SIGNUP_LINK_TTL_MINUTES` | No | Signup link expiry (default: 7 days / 10080 min) |
+| `SIGNUP_LINK_TTL_MINUTES` | No | Deprecated — signup links no longer expire; value is ignored for expiry enforcement |
 
 The billing snapshot cron (`cmd/billing-snapshot`) needs `DATABASE_URL` and `MASTER_ENCRYPTION_KEY`.
 

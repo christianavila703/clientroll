@@ -1100,8 +1100,10 @@ func (h *SignupHandler) GetSignupLinks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to load signup links")
 		return
 	}
-	expiresAt := time.Now().UTC().Add(h.signupLinkTTL())
-	exp := strconv.FormatInt(expiresAt.Unix(), 10)
+	// Signup links are permanent. We keep an `exp` param in the URL so the HMAC
+	// payload stays stable and existing signed links remain valid, but we use a
+	// sentinel of "0" (never expires) for newly generated links.
+	exp := "0"
 	browseSig := h.signSignupPayload(tenant.Slug, "", exp)
 	browsePath := fmt.Sprintf("/join/%s?exp=%s&sig=%s", tenant.Slug, exp, browseSig)
 
@@ -1129,7 +1131,7 @@ func (h *SignupHandler) GetSignupLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tenant_slug": tenant.Slug,
-		"expires_at":  expiresAt.Format(time.RFC3339),
+		"expires_at":  "",
 		"browse_path": browsePath,
 		"links":       links,
 	})
@@ -1591,13 +1593,12 @@ func (h *SignupHandler) verifySignupAccess(r *http.Request, tenantSlug, pathMemb
 		if !requireSig {
 			return nil
 		}
-		return errors.New("Signup link is invalid or expired")
+		return errors.New("Signup link is invalid")
 	}
 
-	expUnix, err := strconv.ParseInt(exp, 10, 64)
-	if err != nil || expUnix <= 0 || time.Now().UTC().Unix() > expUnix {
-		return errors.New("Signup link is invalid or expired")
-	}
+	// Signup links do not expire. We intentionally do not reject based on the
+	// `exp` timestamp; it is retained only so the HMAC payload stays stable and
+	// previously issued signed links remain valid.
 
 	candidates := []string{strings.TrimSpace(pathMembershipSlug), queryMembership}
 	if allowTenantWideFallback {
