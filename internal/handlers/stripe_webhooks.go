@@ -101,7 +101,7 @@ func (h *StripeWebhookHandler) notifySignupCompleted(ctx context.Context, tenant
 	}
 	appURL := h.appURL
 	if appURL == "" {
-		appURL = "https://app.clientroll.com"
+		appURL = "https://app.example.com"
 	}
 	h.signupWebhookSvc.NotifyCompleted(ctx, tenantID, membershipID, appURL)
 }

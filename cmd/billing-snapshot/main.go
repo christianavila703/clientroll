@@ -17,7 +17,7 @@ import (
 // - snapshots active member counts for all tenants
 // - updates Stripe subscription quantities (licensed billing: $/active-member/month)
 //
-// Schedule via scripts/install-billing-snapshot-cron.sh or systemd timer.
+// Schedule via scripts/install-cron.sh.
 // Requires DATABASE_URL and MASTER_ENCRYPTION_KEY.
 func main() {
 	dryRun := flag.Bool("dry-run", false, "load config and log whether the job would run, without writing")

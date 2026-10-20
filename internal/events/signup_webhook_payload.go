@@ -23,7 +23,7 @@ func BuildSignupWebhookPayload(
 ) map[string]interface{} {
 	appBaseURL = strings.TrimSuffix(strings.TrimSpace(appBaseURL), "/")
 	if appBaseURL == "" {
-		appBaseURL = "https://app.clientroll.com"
+		appBaseURL = "https://app.example.com"
 	}
 
 	membershipTitle := mt.Title
@@ -168,7 +168,7 @@ func BuildSignupWebhookPayload(
 func BuildSignupWebhookTestPayload(tenant *models.Tenant, appBaseURL string) map[string]interface{} {
 	appBaseURL = strings.TrimSuffix(strings.TrimSpace(appBaseURL), "/")
 	if appBaseURL == "" {
-		appBaseURL = "https://app.clientroll.com"
+		appBaseURL = "https://app.example.com"
 	}
 	membershipID := uuid.New()
 	clientID := uuid.New()

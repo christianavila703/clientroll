@@ -539,7 +539,7 @@ func (h *ServiceHandler) ChargeStripe(w http.ResponseWriter, r *http.Request) {
 
 	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
 	if origin == "" {
-		origin = "https://app.clientroll.com"
+		origin = "https://app.example.com"
 	}
 
 	feeMethod := "card"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_URL="${APP_URL:-https://app.clientroll.com}"
+APP_URL="${APP_URL:-https://app.example.com}"
 DEPLOY_HOST="${DEPLOY_HOST:-}"
 TENANT_SLUG="${TENANT_SLUG:-}"
 

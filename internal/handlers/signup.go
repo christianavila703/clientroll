@@ -80,7 +80,7 @@ func (h *SignupHandler) notifySignupCompleted(ctx context.Context, tenantID, mem
 	if h.signupWebhookSvc == nil {
 		return
 	}
-	appURL := "https://app.clientroll.com"
+	appURL := "https://app.example.com"
 	if h.cfg != nil && strings.TrimSpace(h.cfg.AppURL) != "" {
 		appURL = strings.TrimSpace(h.cfg.AppURL)
 	}
@@ -1551,7 +1551,7 @@ func (h *SignupHandler) appBaseURL(r *http.Request) string {
 	if origin != "" {
 		return origin
 	}
-	return "https://app.clientroll.com"
+	return "https://app.example.com"
 }
 
 func (h *SignupHandler) signupSigningSecret() string {
@@ -2104,7 +2104,7 @@ func (h *SignupHandler) createStripeCheckoutSession(r *http.Request, tenant *mod
 	stripe.Key = secretKey
 	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
 	if origin == "" {
-		origin = "https://app.clientroll.com"
+		origin = "https://app.example.com"
 	}
 
 	unitAmount := int64(math.Round(amount * 100))
@@ -2403,7 +2403,7 @@ func (h *SignupHandler) createStripeBECSCheckoutSession(r *http.Request, tenant 
 	stripe.Key = secretKey
 	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
 	if origin == "" {
-		origin = "https://app.clientroll.com"
+		origin = "https://app.example.com"
 	}
 
 	cur := strings.ToLower(strings.TrimSpace(currencyCode))

@@ -118,7 +118,7 @@ export default function RegisterPage() {
                 <div>
                   <label className="mb-1 block text-[13px] font-medium text-gray-700">URL</label>
                   <div className="flex items-center gap-0">
-                    <span className="rounded-l-md border border-r-0 border-gray-300 bg-gray-50 px-3 py-[7px] text-[13px] text-gray-500">clientroll.com/</span>
+                    <span className="rounded-l-md border border-r-0 border-gray-300 bg-gray-50 px-3 py-[7px] text-[13px] text-gray-500">{window.location.host}/</span>
                     <input
                       value={company.slug}
                       onChange={(e) => { setCompany(prev => ({ ...prev, slug: e.target.value.toLowerCase() })); checkSlug(e.target.value); }}

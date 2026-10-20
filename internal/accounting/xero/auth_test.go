@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildAuthorizeURL(t *testing.T) {
-	u := BuildAuthorizeURL("client-id", "https://app.clientroll.com/api/xero/oauth/callback", "state123", []string{
+	u := BuildAuthorizeURL("client-id", "https://app.example.com/api/xero/oauth/callback", "state123", []string{
 		"openid", "accounting.contacts", "offline_access",
 	})
 	parsed, err := url.Parse(u)

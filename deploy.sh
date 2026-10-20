@@ -1,86 +1,82 @@
 #!/usr/bin/env bash
-# Deploy ClientRoll to app.clientroll.com (or DEPLOY_HOST).
-# Requires: DEPLOY_HOST (e.g. user@server), DEPLOY_PATH (e.g. /var/www/clientroll)
-# Optional: DEPLOY_SSH_KEY (path to private key), DEPLOY_SERVICE (systemd unit, default clientroll)
-
+#
+# Build locally and deploy to a remote server over SSH.
+# Use this when the server has no Go/Node toolchain; otherwise prefer
+# scripts/deploy-on-server.sh.
+#
+# Required env:
+#   DEPLOY_HOST     e.g. user@your-server
+#   DEPLOY_PATH     e.g. /var/www/clientroll (must contain .env with DATABASE_URL)
+# Optional env:
+#   DEPLOY_SSH_KEY  path to SSH private key
+#   DEPLOY_SERVICE  systemd unit (default: clientroll)
+#   SKIP_MIGRATIONS=1  skip migrations (emergency binary-only rollback)
+#
 set -euo pipefail
 cd "$(dirname "$0")"
 
+DEPLOY_HOST="${DEPLOY_HOST:-}"
+DEPLOY_PATH="${DEPLOY_PATH:-}"
+SERVICE="${DEPLOY_SERVICE:-clientroll}"
+
 if [[ -z "$DEPLOY_HOST" || -z "$DEPLOY_PATH" ]]; then
   echo "Usage: DEPLOY_HOST=user@host DEPLOY_PATH=/var/www/clientroll [DEPLOY_SSH_KEY=path] ./deploy.sh"
-  echo "Example: DEPLOY_HOST=root@YOUR_SERVER_IP DEPLOY_PATH=/var/www/clientroll ./deploy.sh"
   exit 1
 fi
 
-SERVICE="${DEPLOY_SERVICE:-clientroll}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 [[ -n "${DEPLOY_SSH_KEY:-}" ]] && SSH_OPTS+=(-i "$DEPLOY_SSH_KEY")
+remote() { ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "$@"; }
 
-echo "Building Linux binary..."
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server_linux_amd64 ./cmd/server/
+BUILD_DIR="$(mktemp -d)"
+trap 'rm -rf "$BUILD_DIR"' EXIT
 
-echo "Building frontend..."
-cd frontend && npm run build && cd ..
+GIT_SHA="$(git rev-parse --short HEAD)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "Building $GIT_SHA ($BUILD_TIME)..."
 
-echo "Uploading binary..."
-scp "${SSH_OPTS[@]}" server_linux_amd64 "$DEPLOY_HOST:$DEPLOY_PATH/server_new"
-
-echo "Preparing remote dirs..."
-ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "mkdir -p $DEPLOY_PATH/web_new"
-echo "Uploading frontend (web/)..."
-scp "${SSH_OPTS[@]}" -r web/* "$DEPLOY_HOST:$DEPLOY_PATH/web_new/"
-
-echo "Resolving DATABASE_URL from server env..."
-REMOTE_DATABASE_URL="$(
-  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH'" << 'REMOTE_DB'
-set -euo pipefail
-DEPLOY_PATH="$1"
-cd "$DEPLOY_PATH" || exit 1
-[[ -f .env ]] && set -a && source .env && set +a
-[[ -z "${DATABASE_URL:-}" && -f .env.production ]] && set -a && source .env.production && set +a
-printf '%s' "${DATABASE_URL:-}"
-REMOTE_DB
-)"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$BUILD_DIR/server_new" ./cmd/server/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$BUILD_DIR/billing-snapshot_new" ./cmd/billing-snapshot/
+(cd frontend && APP_BUILD_SHA="$GIT_SHA" APP_BUILD_TIME="$BUILD_TIME" npm run build)
+echo "$GIT_SHA $BUILD_TIME" > web/build.txt
 
 if [[ "${SKIP_MIGRATIONS:-0}" == "1" ]]; then
-  echo "Skipping migrations because SKIP_MIGRATIONS=1."
+  echo "Skipping migrations (SKIP_MIGRATIONS=1)."
 else
-  if [[ -z "${REMOTE_DATABASE_URL:-}" ]]; then
-    echo "DATABASE_URL is required to run migrations."
+  echo "Running migrations against the server's DATABASE_URL..."
+  REMOTE_DATABASE_URL="$(remote "set -a; . '$DEPLOY_PATH/.env'; printf '%s' \"\${DATABASE_URL:-}\"")"
+  if [[ -z "$REMOTE_DATABASE_URL" ]]; then
+    echo "DATABASE_URL not found in $DEPLOY_PATH/.env on $DEPLOY_HOST."
     exit 1
   fi
-  echo "Running migrations locally against production DB..."
   DATABASE_URL="$REMOTE_DATABASE_URL" go run ./cmd/migrate up
 fi
 
-echo "Switching binary + frontend on server..."
-ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH' '$SERVICE'" << 'REMOTE'
-  set -euo pipefail
-  DEPLOY_PATH="$1"
-  SERVICE="$2"
-  cd "$DEPLOY_PATH" || exit 1
-  # Stop service before replacing binary (avoid "Text file busy")
-  if sudo systemctl is-active --quiet "$SERVICE"; then
-    sudo systemctl stop "$SERVICE"
-  fi
-  mv -f server_new server
-  chmod +x server
-  # Also copy to bin/clientroll if that's what systemd uses
-  if [[ -d "$DEPLOY_PATH/bin" ]]; then
-    cp -f server "$DEPLOY_PATH/bin/clientroll"
-    chmod +x "$DEPLOY_PATH/bin/clientroll"
-  fi
-  rm -rf web_old
-  [[ -d web ]] && mv web web_old
-  mv -f web_new web
-  echo "Starting $SERVICE..."
-  sudo systemctl start "$SERVICE"
-  if ! sudo systemctl is-active --quiet "$SERVICE"; then
-    echo "Service $SERVICE failed to start."
-    sudo systemctl status "$SERVICE" --no-pager -l || true
-    exit 1
-  fi
-  echo "Deploy done."
+echo "Uploading..."
+remote "rm -rf '$DEPLOY_PATH/web_new' && mkdir -p '$DEPLOY_PATH/web_new'"
+scp "${SSH_OPTS[@]}" "$BUILD_DIR/server_new" "$BUILD_DIR/billing-snapshot_new" "$DEPLOY_HOST:$DEPLOY_PATH/"
+scp "${SSH_OPTS[@]}" -r web/. "$DEPLOY_HOST:$DEPLOY_PATH/web_new/"
+
+echo "Switching release and restarting $SERVICE..."
+remote "bash -s -- '$DEPLOY_PATH' '$SERVICE' '$GIT_SHA $BUILD_TIME'" << 'REMOTE'
+set -euo pipefail
+DEPLOY_PATH="$1"; SERVICE="$2"; BUILD="$3"
+cd "$DEPLOY_PATH"
+sudo systemctl stop "$SERVICE" || true
+mv -f server_new server && chmod +x server
+mv -f billing-snapshot_new billing-snapshot && chmod +x billing-snapshot
+# Keep bin/clientroll in sync if the systemd unit runs it from there.
+[[ -d bin ]] && cp -f server bin/clientroll
+rm -rf web_old
+[[ -d web ]] && mv web web_old
+mv web_new web
+echo "$BUILD" > BUILD_SHA
+sudo systemctl start "$SERVICE"
+if ! sudo systemctl is-active --quiet "$SERVICE"; then
+  sudo systemctl status "$SERVICE" --no-pager -l || true
+  echo "Service $SERVICE failed to start."
+  exit 1
+fi
 REMOTE
 
-echo "Deploy complete."
+echo "Deploy complete: $GIT_SHA"

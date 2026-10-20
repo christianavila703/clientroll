@@ -11,7 +11,7 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 
-const BASE = process.env.BASE_URL || "https://app.clientroll.com";
+const BASE = process.env.BASE_URL || "https://app.example.com";
 const EMAIL = process.env.CR_EMAIL;
 const PASSWORD = process.env.CR_PASSWORD;
 const HEADED = !!process.env.HEADED;

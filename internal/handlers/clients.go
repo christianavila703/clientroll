@@ -747,7 +747,7 @@ func (h *ClientHandler) CreateStripeSetupSession(w http.ResponseWriter, r *http.
 
 	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
 	if origin == "" {
-		origin = "https://app.clientroll.com"
+		origin = "https://app.example.com"
 	}
 	successURL := origin + "/clients/" + clientID.String() + "?stripe_setup=success"
 	cancelURL := origin + "/clients/" + clientID.String() + "?stripe_setup=cancelled"
@@ -807,7 +807,7 @@ func (h *ClientHandler) SendMandateLink(w http.ResponseWriter, r *http.Request) 
 	if input.RedirectURI == "" {
 		input.RedirectURI = r.Header.Get("Origin")
 		if input.RedirectURI == "" {
-			input.RedirectURI = "https://app.clientroll.com"
+			input.RedirectURI = "https://app.example.com"
 		}
 		input.RedirectURI += "/clients/" + clientID.String()
 	}

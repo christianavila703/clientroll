@@ -624,7 +624,7 @@ func (h *SettingsHandler) TestSignupWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	appURL := "https://app.clientroll.com"
+	appURL := "https://app.example.com"
 	if h.cfg != nil && strings.TrimSpace(h.cfg.AppURL) != "" {
 		appURL = strings.TrimSpace(h.cfg.AppURL)
 	}

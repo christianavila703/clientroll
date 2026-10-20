@@ -21,7 +21,7 @@ type Config struct {
 	JWTRefreshDuration  int    // days
 	MailerSendAPIKey    string
 	MailerSendFromEmail string
-	AppURL              string // e.g. https://app.clientroll.com
+	AppURL              string // e.g. https://app.example.com
 
 	// GoCardless Connect (partner app) — optional; empty disables GoCardless
 	GoCardlessSandboxClientID     string
@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 		JWTRefreshDuration:            getEnvInt("JWT_REFRESH_DURATION_DAYS", 7),
 		MailerSendAPIKey:              getEnv("MAILERSEND_API_KEY", ""),
 		MailerSendFromEmail:           getEnv("MAILERSEND_FROM_EMAIL", "noreply@example.com"),
-		AppURL:                        getEnv("APP_URL", "https://app.clientroll.com"),
+		AppURL:                        getEnv("APP_URL", "https://app.example.com"),
 		GoCardlessSandboxClientID:     getEnv("GOCARDLESS_SANDBOX_CLIENT_ID", ""),
 		GoCardlessSandboxClientSecret: getEnv("GOCARDLESS_SANDBOX_CLIENT_SECRET", ""),
 		GoCardlessLiveClientID:        getEnv("GOCARDLESS_LIVE_CLIENT_ID", ""),
