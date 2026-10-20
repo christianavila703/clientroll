@@ -1,6 +1,6 @@
 # ClientRoll Makefile
 
-.PHONY: help dev dev-db dev-stop build run test migrate frontend frontend-dev clean docker-build docker-up docker-down
+.PHONY: help dev dev-db dev-stop build run test migrate frontend frontend-dev clean
 
 # Default target
 help: ## Show this help
@@ -49,19 +49,6 @@ frontend-dev: ## Start frontend dev server
 
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm install
-
-# Docker (production)
-docker-build: ## Build production Docker image
-	docker compose build
-
-docker-up: ## Start production containers
-	docker compose up -d
-
-docker-down: ## Stop production containers
-	docker compose down
-
-docker-logs: ## View container logs
-	docker compose logs -f api
 
 # Clean
 clean: ## Clean build artifacts
