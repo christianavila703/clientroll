@@ -2,6 +2,16 @@
 
 .PHONY: help dev dev-db dev-stop build run test migrate frontend frontend-dev clean
 
+# Load .env when present; the dev values below fill in anything left empty.
+-include .env
+export
+
+DATABASE_URL          := $(or $(DATABASE_URL),postgresql://clientroll_user:clientroll_dev_password@localhost:5432/clientroll_db?sslmode=disable)
+REDIS_URL             := $(or $(REDIS_URL),redis://localhost:6379/2)
+MASTER_ENCRYPTION_KEY := $(or $(MASTER_ENCRYPTION_KEY),dev-only-key-must-be-32-chars-long!!)
+DEV_CORS_ORIGINS      := http://localhost:3000,http://localhost:8080
+CORS_ALLOWED_ORIGINS  := $(or $(CORS_ALLOWED_ORIGINS),$(DEV_CORS_ORIGINS))
+
 # Default target
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -14,12 +24,7 @@ dev-db-stop: ## Stop dev PostgreSQL + Redis
 	docker compose -f docker-compose-dev.yml down
 
 dev: ## Run Go server in development mode
-	DATABASE_URL="postgresql://clientroll_user:clientroll_dev_password@localhost:5432/clientroll_db?sslmode=disable" \
-	REDIS_URL="redis://localhost:6379/2" \
-	MASTER_ENCRYPTION_KEY="dev-only-key-must-be-32-chars-long!!" \
-	ENVIRONMENT="development" \
-	CORS_ALLOWED_ORIGINS="http://localhost:3000,http://localhost:8080" \
-	go run ./cmd/server
+	ENVIRONMENT=development go run ./cmd/server
 
 # Build
 build: ## Build Go binary
@@ -32,12 +37,10 @@ test: ## Run all tests
 # Database migrations
 migrate-up: ## Run all migrations
 	@echo "Running migrations..."
-	DATABASE_URL="postgresql://clientroll_user:clientroll_dev_password@localhost:5432/clientroll_db?sslmode=disable" \
 	go run ./cmd/migrate up
 
 migrate-down: ## Rollback last migration
 	@echo "Rolling back migration..."
-	DATABASE_URL="postgresql://clientroll_user:clientroll_dev_password@localhost:5432/clientroll_db?sslmode=disable" \
 	go run ./cmd/migrate down
 
 # Frontend
