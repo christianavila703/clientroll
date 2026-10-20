@@ -107,7 +107,6 @@ GoCardless and Xero are disabled when their variables are empty. Tenants enter t
 | `make test` | Run Go tests |
 | `make build` | Build API binary to `bin/clientroll` |
 | `make frontend` | Build frontend to `web/` |
-| `make docker-build` / `docker-up` / `docker-down` | Production Docker image and containers |
 | `make clean` | Remove build artifacts |
 
 ## Deployment
