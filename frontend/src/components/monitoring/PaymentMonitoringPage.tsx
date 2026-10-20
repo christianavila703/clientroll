@@ -661,7 +661,7 @@ function AlertSettingsTab({
             value={config.alert_email}
             onChange={(e) => update("alert_email", e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            placeholder="ben@businessnet.com.au"
+            placeholder="alerts@example.com"
           />
           <p className="text-xs text-gray-500 mt-1">Immediate alerts and daily digests will be sent to this address.</p>
         </div>

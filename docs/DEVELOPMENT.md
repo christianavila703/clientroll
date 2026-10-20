@@ -102,7 +102,7 @@ Configuration is loaded from environment variables in `internal/config/config.go
 | `JWT_ACCESS_DURATION_MINUTES` | `15` | Access token TTL |
 | `JWT_REFRESH_DURATION_DAYS` | `7` | Refresh token TTL |
 | `MAILERSEND_API_KEY` | (empty) | MailerSend API key |
-| `MAILERSEND_FROM_EMAIL` | `clientroll@app.businessnet.com` | From address |
+| `MAILERSEND_FROM_EMAIL` | `noreply@example.com` | From address |
 | `APP_URL` | `https://app.clientroll.com` | App origin (OAuth, emails) |
 | `GOCARDLESS_SANDBOX_CLIENT_ID` / `_SECRET` | (empty) | GoCardless sandbox Connect |
 | `GOCARDLESS_LIVE_CLIENT_ID` / `_SECRET` | (empty) | GoCardless live Connect |

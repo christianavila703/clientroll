@@ -1,17 +1,17 @@
--- One-off: Update user email ben@businessnet.com.au → ben+sf@businessnet.com.au
--- Tenant slug (cnektp) stays unchanged.
+-- One-off: Update user email owner@example.com → owner+alt@example.com
+-- Tenant slug (sample-tenant) stays unchanged.
 
 UPDATE users
-SET email = 'ben+sf@businessnet.com.au'
-WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'cnektp')
-  AND email = 'ben@businessnet.com.au';
+SET email = 'owner+alt@example.com'
+WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'sample-tenant')
+  AND email = 'owner@example.com';
 
 UPDATE staff_invitations
-SET email = 'ben+sf@businessnet.com.au'
-WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'cnektp')
-  AND email = 'ben@businessnet.com.au';
+SET email = 'owner+alt@example.com'
+WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'sample-tenant')
+  AND email = 'owner@example.com';
 
 UPDATE user_email_verifications
-SET email = 'ben+sf@businessnet.com.au'
-WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'cnektp')
-  AND email = 'ben@businessnet.com.au';
+SET email = 'owner+alt@example.com'
+WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'sample-tenant')
+  AND email = 'owner@example.com';

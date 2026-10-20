@@ -62,7 +62,7 @@ The script will:
 You can trigger a pull and deploy from your machine:
 
 ```bash
-ssh root@203.29.242.238 'cd /var/www/clientroll && git pull origin main && ./scripts/deploy-on-server.sh'
+ssh root@YOUR_SERVER_IP 'cd /var/www/clientroll && git pull origin main && ./scripts/deploy-on-server.sh'
 ```
 
 ## Alternative: build locally and upload (existing `deploy.sh`)
@@ -70,7 +70,7 @@ ssh root@203.29.242.238 'cd /var/www/clientroll && git pull origin main && ./scr
 If you prefer to build on your machine and upload the binary and frontend:
 
 ```bash
-DEPLOY_HOST=root@203.29.242.238 DEPLOY_PATH=/var/www/clientroll ./deploy.sh
+DEPLOY_HOST=root@YOUR_SERVER_IP DEPLOY_PATH=/var/www/clientroll ./deploy.sh
 ```
 
 This builds locally, SCPs the binary and `frontend/dist` to the server, runs migrations on the server (if the repo is present there), swaps files, and restarts the service. The server does **not** need to pull from GitHub for this flow.
@@ -80,7 +80,7 @@ This builds locally, SCPs the binary and `frontend/dist` to the server, runs mig
 If you must skip migrations for an emergency binary-only rollback:
 
 ```bash
-SKIP_MIGRATIONS=1 DEPLOY_HOST=root@203.29.242.238 DEPLOY_PATH=/var/www/clientroll ./deploy.sh
+SKIP_MIGRATIONS=1 DEPLOY_HOST=root@YOUR_SERVER_IP DEPLOY_PATH=/var/www/clientroll ./deploy.sh
 ```
 
 ## Production smoke checks
@@ -94,7 +94,7 @@ APP_URL=https://app.clientroll.com ./scripts/smoke-prod.sh
 To also verify signed signup URL enforcement:
 
 ```bash
-APP_URL=https://app.clientroll.com DEPLOY_HOST=root@203.29.242.238 TENANT_SLUG=your-tenant ./scripts/smoke-prod.sh
+APP_URL=https://app.clientroll.com DEPLOY_HOST=root@YOUR_SERVER_IP TENANT_SLUG=your-tenant ./scripts/smoke-prod.sh
 ```
 
 This checks:

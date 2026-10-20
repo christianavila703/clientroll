@@ -20,7 +20,7 @@ Single source of truth for behaviour is `internal/config/config.go`. This file i
 | `JWT_ACCESS_DURATION_MINUTES` | `15` | Access token lifetime |
 | `JWT_REFRESH_DURATION_DAYS` | `7` | Refresh token lifetime |
 | `MAILERSEND_API_KEY` | (empty) | If empty, email sending may be no-op or fail |
-| `MAILERSEND_FROM_EMAIL` | `clientroll@app.businessnet.com` | From address for transactional email |
+| `MAILERSEND_FROM_EMAIL` | `noreply@example.com` | From address for transactional email |
 | `APP_URL` | `https://app.clientroll.com` | Used in OAuth redirects and email links |
 | `ALERTS_WEBHOOK_URL` | (empty) | If set, critical internal alerts are POSTed as JSON to this URL for paging/notification routing |
 | `GOCARDLESS_SANDBOX_CLIENT_ID` | (empty) | GoCardless Connect sandbox |

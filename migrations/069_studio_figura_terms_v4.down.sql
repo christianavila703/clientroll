@@ -1,4 +1,4 @@
--- Rollback: Remove the Studio Figura v4 terms document and its links.
+-- Rollback: Remove the Sample Studio v4 terms document and its links.
 -- Does NOT restore previously detached T&C links (those must be re-attached manually).
 
 DO $$
@@ -8,8 +8,8 @@ DECLARE
 BEGIN
     SELECT id INTO v_tenant_id
     FROM tenants
-    WHERE slug = 'studio-figura'
-       OR name ILIKE '%studio figura%'
+    WHERE slug = 'sample-studio'
+       OR name ILIKE '%sample studio%'
     LIMIT 1;
 
     IF v_tenant_id IS NULL THEN

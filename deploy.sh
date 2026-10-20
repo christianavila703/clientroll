@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 
 if [[ -z "$DEPLOY_HOST" || -z "$DEPLOY_PATH" ]]; then
   echo "Usage: DEPLOY_HOST=user@host DEPLOY_PATH=/var/www/clientroll [DEPLOY_SSH_KEY=path] ./deploy.sh"
-  echo "Example: DEPLOY_HOST=root@203.29.242.238 DEPLOY_PATH=/var/www/clientroll ./deploy.sh"
+  echo "Example: DEPLOY_HOST=root@YOUR_SERVER_IP DEPLOY_PATH=/var/www/clientroll ./deploy.sh"
   exit 1
 fi
 
