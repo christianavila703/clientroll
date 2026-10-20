@@ -8,8 +8,8 @@ import (
 )
 
 // Config holds all application configuration.
-// The master encryption key is the ONLY secret loaded from env.
-// All other credentials are stored encrypted in the database.
+// Platform-level secrets (master key, MailerSend, GoCardless Connect, Xero)
+// come from env; per-tenant credentials are stored encrypted in the database.
 type Config struct {
 	Port                int
 	DatabaseURL         string

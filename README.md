@@ -59,7 +59,7 @@ make dev                # API on http://localhost:8080
 make frontend-dev       # Frontend on http://localhost:3000 (separate terminal)
 ```
 
-Open http://localhost:3000. The frontend dev server proxies `/api` to the backend. `make dev` supplies local database, Redis and encryption-key values, so no `.env` is needed for development.
+Open http://localhost:3000. The frontend dev server proxies `/api` to the backend. `make dev` supplies local database, Redis and encryption-key values, so no `.env` is needed for development. When a `.env` exists, the Makefile loads it and its non-empty values take precedence (`make dev` always runs with `ENVIRONMENT=development`).
 
 ## Configuration
 
@@ -79,7 +79,7 @@ Copy `.env.example` to `.env` and fill in the values. All settings are read in `
 |----------|---------|-------------|
 | `PORT` | `8080` | HTTP port |
 | `ENVIRONMENT` | `development` | `development`, `staging` or `production` |
-| `APP_URL` | `http://localhost:3000` | Public origin, used for OAuth redirects and email links |
+| `APP_URL` | `https://app.example.com` | Public origin, used for OAuth redirects and email links |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated list |
 | `JWT_ACCESS_DURATION_MINUTES` | `15` | Access token lifetime |
 | `JWT_REFRESH_DURATION_DAYS` | `7` | Refresh token lifetime |
